@@ -6,10 +6,8 @@ import cats.effect.Sync
 import cats.implicits.{toFlatMapOps, toFunctorOps}
 
 import org.tessellation.currency.dataApplication.DataUpdate
-import org.tessellation.currency.dataApplication.dataApplication.DataApplicationBlock
 import org.tessellation.currency.schema.currency.CurrencyIncrementalSnapshot
 import org.tessellation.schema.ID.Id
-import org.tessellation.security.signature.Signed
 
 import io.circe.jawn.JawnParser
 import io.circe.syntax.EncoderOps
@@ -46,19 +44,6 @@ object JsonBinaryCodec {
     jsonBytes    <- Sync[F].delay(Base64.decode(base64String))
     result       <- simpleJsonDeserialization(jsonBytes)
   } yield result
-
-  implicit def dataBlockBinaryCodec[F[_]: Sync](implicit
-    updEnc: Encoder[DataUpdate],
-    updDec: Decoder[DataUpdate]
-  ): JsonBinaryCodec[F, Signed[DataApplicationBlock]] =
-    new JsonBinaryCodec[F, Signed[DataApplicationBlock]] {
-
-      override def serialize(obj: Signed[DataApplicationBlock]): F[Array[Byte]] =
-        simpleJsonSerialization(obj)
-
-      override def deserialize(bytes: Array[Byte]): F[Either[Throwable, Signed[DataApplicationBlock]]] =
-        simpleJsonDeserialization(bytes)
-    }
 
   implicit def currencyIncrementalSnapshotCodec[F[_]: Sync]: JsonBinaryCodec[F, CurrencyIncrementalSnapshot] =
     new JsonBinaryCodec[F, CurrencyIncrementalSnapshot] {

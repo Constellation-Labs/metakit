@@ -1,4 +1,4 @@
-package io.constellationnetwork.metagraph_sdk.std
+package io.constellationnetwork.metagraph_sdk.lifecycle
 
 import cats.effect.Async
 import cats.effect.std.AtomicCell
@@ -6,6 +6,8 @@ import cats.syntax.applicative._
 import cats.syntax.applicativeError._
 import cats.syntax.flatMap._
 import cats.syntax.functor._
+
+import io.constellationnetwork.metagraph_sdk.std.Checkpoint
 
 import org.typelevel.log4cats.SelfAwareStructuredLogger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
