@@ -16,14 +16,14 @@ import org.http4s.circe.CirceEntityCodec.circeEntityDecoder
 
 abstract class MetagraphCommonService[F[_], TX <: DataUpdate, PUB <: DataOnChainState, PRV <: DataCalculatedState](
   implicit
-  txEncoder:   Encoder[TX],
-  txDecoder:   Decoder[TX],
-  prvEncoder:  Encoder[PRV],
-  prvDecoder:  Decoder[PRV],
-  txBinCodec:  JsonBinaryCodec[F, TX],
-  pubBinCodec: JsonBinaryCodec[F, PUB],
-  prvBinCodec: JsonBinaryCodec[F, PRV],
-  async:       Async[F]
+  txEncoder:       Encoder[TX],
+  txDecoder:       Decoder[TX],
+  prvEncoder:      Encoder[PRV],
+  prvDecoder:      Decoder[PRV],
+  val txBinCodec:  JsonBinaryCodec[F, TX],
+  val pubBinCodec: JsonBinaryCodec[F, PUB],
+  val prvBinCodec: JsonBinaryCodec[F, PRV],
+  async:           Async[F]
 ) {
 
   val signedDataEntityDecoder: EntityDecoder[F, Signed[TX]] = circeEntityDecoder
