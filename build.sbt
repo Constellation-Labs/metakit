@@ -2,8 +2,13 @@ import Dependencies.*
 import sbt.*
 import sbt.Keys.*
 
-ThisBuild / version := "0.1.0"
 ThisBuild / organization := "io.constellationnetwork"
+ThisBuild / homepage := Some(url("https://github.com/Constellation-Labs/metakit"))
+ThisBuild / licenses := List("Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0"))
+
+ThisBuild / sonatypeCredentialHost := "s01.oss.sonatype.org"
+sonatypeRepository := "https://s01.oss.sonatype.org/service/local"
+
 ThisBuild / scalaVersion := "2.13.15"
 ThisBuild / evictionErrorLevel := Level.Warn
 ThisBuild / scalafixDependencies += Libraries.organizeImports
