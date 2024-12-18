@@ -1,0 +1,39 @@
+name: Release
+on:
+  push:
+    tags: ["*"]
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Metakit repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout Tessellation repo
+        uses: actions/checkout@v4
+        with:
+          repository: Constellation-Labs/tessellation
+          ref: v2.12.0
+          path: tessellation
+
+      - name: Setup Java, Scala, and SBT
+        uses: olafurpg/setup-scala@v14
+        with:
+          java-version: openjdk@1.11
+
+      - name: Build and publish Tessellation artifacts locally
+        working-directory: tessellation
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: sbt publishLocal
+
+      - name: Build and publish Metakit artifacts to Maven
+        run: sbt ci-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+          PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}
+          PGP_SECRET: ${{ secrets.PGP_SECRET }}
+          SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
+          SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}

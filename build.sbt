@@ -2,17 +2,25 @@ import Dependencies.*
 import sbt.*
 import sbt.Keys.*
 
-ThisBuild / version := "0.1.0"
-ThisBuild / organization := "io.constellationnetwork"
 ThisBuild / scalaVersion := "2.13.15"
+ThisBuild / organization := "io.constellationnetwork"
+ThisBuild / homepage := Some(url("https://github.com/Constellation-Labs/metakit"))
+ThisBuild / licenses := List("Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0"))
+ThisBuild / sonatypeCredentialHost := "central.sonatype.com"
+ThisBuild / versionScheme := Some("early-semver")
+
+ThisBuild / developers := List(
+  Developer("scasplte2", "James Aman", "james@constellationnetwork.io", url("https://github.com/scasplte2"))
+)
+
 ThisBuild / evictionErrorLevel := Level.Warn
 ThisBuild / scalafixDependencies += Libraries.organizeImports
 
 ThisBuild / assemblyMergeStrategy := {
-  case "logback.xml" => MergeStrategy.first
-  case x if x.contains("io.netty.versions.properties") => MergeStrategy.discard
+  case "logback.xml"                                                => MergeStrategy.first
+  case x if x.contains("io.netty.versions.properties")              => MergeStrategy.discard
   case PathList("io", "constellationnetwork", "buildinfo", xs @ _*) => MergeStrategy.first
-  case PathList(xs@_*) if xs.last == "module-info.class" => MergeStrategy.first
+  case PathList(xs @ _*) if xs.last == "module-info.class"          => MergeStrategy.first
   case x =>
     val oldStrategy = (assembly / assemblyMergeStrategy).value
     oldStrategy(x)
@@ -58,5 +66,5 @@ lazy val root = (project in file("."))
   .settings(
     commonSettings,
     commonTestSettings,
-    name := "metakit",
+    name := "metakit"
   )
