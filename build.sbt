@@ -10,7 +10,12 @@ ThisBuild / sonatypeCredentialHost := "central.sonatype.com"
 ThisBuild / versionScheme := Some("early-semver")
 
 ThisBuild / developers := List(
-  Developer("scasplte2", "James Aman", "james@constellationnetwork.io", url("https://github.com/scasplte2"))
+  Developer(
+    "constellation-contributors",
+    "Constellation Contributors",
+    "contact@constellationnetwork.io",
+    url("https://github.com/Constellation-Labs/metakit/graphs/contributors")
+  )
 )
 
 ThisBuild / evictionErrorLevel := Level.Warn
