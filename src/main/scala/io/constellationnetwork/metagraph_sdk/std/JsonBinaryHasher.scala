@@ -1,18 +1,27 @@
 package io.constellationnetwork.metagraph_sdk.std
 
-import cats.Functor
-import cats.implicits.toFunctorOps
+import cats.MonadThrow
+import cats.syntax.functor._
 
 import org.tessellation.security.hash.Hash
 
 trait JsonBinaryHasher[F[_]] {
-  def hash[A](data: A): F[Hash]
+  def hash[A](data: A)(implicit codec: JsonBinaryCodec[F, A]): F[Hash]
 }
 
 object JsonBinaryHasher {
   def apply[F[_]](implicit ev: JsonBinaryHasher[F]): JsonBinaryHasher[F] = ev
 
-  implicit class FromJsonBinaryCodec[F[_]: Functor, A](obj: A)(implicit bin: JsonBinaryCodec[F, A]) {
-    def hash: F[Hash] = bin.serialize(obj).map(Hash.fromBytes)
+  implicit def deriveFromCodec[F[_]: MonadThrow]: JsonBinaryHasher[F] =
+    new JsonBinaryHasher[F] {
+
+      def hash[A](data: A)(implicit codec: JsonBinaryCodec[F, A]): F[Hash] =
+        codec.serialize(data).map(Hash.fromBytes)
+    }
+
+  implicit class HasherOps[F[_], A](private val _v: A) extends AnyVal {
+
+    def hash(implicit mt: MonadThrow[F], codec: JsonBinaryCodec[F, A]): F[Hash] =
+      JsonBinaryHasher[F].hash(_v)
   }
 }

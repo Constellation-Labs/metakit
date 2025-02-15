@@ -2,66 +2,75 @@ package io.constellationnetwork.metagraph_sdk.std
 
 import java.nio.charset.StandardCharsets
 
-import cats.effect.Sync
-import cats.implicits.{toFlatMapOps, toFunctorOps}
+import cats.MonadThrow
+import cats.syntax.all._
 
 import org.tessellation.currency.dataApplication.DataUpdate
-import org.tessellation.currency.schema.currency.CurrencyIncrementalSnapshot
-import org.tessellation.schema.ID.Id
+
+import io.constellationnetwork.metagraph_sdk.std.JsonCanonicalizer.JsonPrinterEncodeOps
 
 import io.circe.jawn.JawnParser
-import io.circe.syntax.EncoderOps
-import io.circe.{Decoder, Encoder, Printer}
+import io.circe.{Decoder, Encoder}
 import org.bouncycastle.util.encoders.Base64
 
 trait JsonBinaryCodec[F[_], A] {
-  def serialize(content:   A): F[Array[Byte]]
-  def deserialize(content: Array[Byte]): F[Either[Throwable, A]]
+  def serialize(content: A): F[Array[Byte]]
+  def deserialize(bytes: Array[Byte]): F[Either[Throwable, A]]
 }
 
 object JsonBinaryCodec {
-
-  private val printer = Printer(dropNullValues = true, indent = "", sortKeys = true)
-
   def apply[F[_], A](implicit ev: JsonBinaryCodec[F, A]): JsonBinaryCodec[F, A] = ev
 
-  def simpleJsonSerialization[F[_]: Sync, A: Encoder](content: A): F[Array[Byte]] =
-    Sync[F].delay(content.asJson.printWith(printer).getBytes("UTF-8"))
+  def fromBinary[F[_], A](bytes: Array[Byte])(implicit codec: JsonBinaryCodec[F, A]): F[Either[Throwable, A]] =
+    codec.deserialize(bytes)
 
-  def simpleJsonDeserialization[F[_]: Sync, A: Decoder](content: Array[Byte]): F[Either[Throwable, A]] =
-    Sync[F].delay(JawnParser(false).decodeByteArray[A](content))
+  implicit def derive[F[_]: MonadThrow, A: Encoder: Decoder]: JsonBinaryCodec[F, A] =
+    new JsonBinaryCodec[F, A] {
 
-  def serializeDataUpdate[F[_]: Sync, U <: DataUpdate: Encoder](content: U): F[Array[Byte]] = for {
-    jsonBytes    <- simpleJsonSerialization(content)
-    base64String <- Sync[F].delay(Base64.toBase64String(jsonBytes))
-    prefixedString = s"\u0019Constellation Signed Data:\n${base64String.length}\n$base64String"
-  } yield prefixedString.getBytes("UTF-8")
+      def serialize(content: A): F[Array[Byte]] =
+        for {
+          str   <- content.toCanonical
+          bytes <- str.getBytes("UTF-8").pure[F]
+        } yield bytes
 
-  def deserializeDataUpdate[F[_]: Sync, U <: DataUpdate: Decoder](
-    bytes: Array[Byte]
-  ): F[Either[Throwable, DataUpdate]] = for {
-    base64String <- Sync[F].pure(new String(bytes, StandardCharsets.UTF_8).split("\n").drop(2).mkString)
-    jsonBytes    <- Sync[F].delay(Base64.decode(base64String))
-    result       <- simpleJsonDeserialization(jsonBytes)
-  } yield result
-
-  implicit def currencyIncrementalSnapshotCodec[F[_]: Sync]: JsonBinaryCodec[F, CurrencyIncrementalSnapshot] =
-    new JsonBinaryCodec[F, CurrencyIncrementalSnapshot] {
-
-      override def serialize(obj: CurrencyIncrementalSnapshot): F[Array[Byte]] =
-        simpleJsonSerialization(obj)
-
-      override def deserialize(bytes: Array[Byte]): F[Either[Throwable, CurrencyIncrementalSnapshot]] =
-        simpleJsonDeserialization(bytes)
+      def deserialize(bytes: Array[Byte]): F[Either[Throwable, A]] =
+        for {
+          str    <- new String(bytes, "UTF-8").pure[F]
+          result <- JawnParser(false).decode[A](str).pure[F]
+        } yield result
     }
 
-  implicit def idCodec[F[_]: Sync]: JsonBinaryCodec[F, Id] =
-    new JsonBinaryCodec[F, Id] {
+  implicit def deriveDataUpdate[F[_]: MonadThrow, U <: DataUpdate: Encoder: Decoder]: JsonBinaryCodec[F, U] =
+    new JsonBinaryCodec[F, U] {
 
-      override def serialize(obj: Id): F[Array[Byte]] =
-        simpleJsonSerialization(obj)
+      def serialize(content: U): F[Array[Byte]] =
+        for {
+          str          <- content.toCanonical
+          bytes        <- str.getBytes("UTF-8").pure[F]
+          base64String <- Base64.toBase64String(bytes).pure[F]
+          prefixedString = s"\u0019Constellation Signed Data:\n${base64String.length}\n$base64String"
+          result <- prefixedString.getBytes("UTF-8").pure[F]
+        } yield result
 
-      override def deserialize(bytes: Array[Byte]): F[Either[Throwable, Id]] =
-        simpleJsonDeserialization(bytes)
+      def deserialize(bytes: Array[Byte]): F[Either[Throwable, U]] =
+        for {
+          str          <- new String(bytes, StandardCharsets.UTF_8).pure[F]
+          base64String <- str.split("\n").drop(2).mkString.pure[F]
+          bytes        <- Base64.decode(base64String).pure[F]
+          jsonStr      <- new String(bytes, "UTF-8").pure[F]
+          result       <- JawnParser(false).decode[U](jsonStr).pure[F]
+        } yield result
     }
+
+  implicit class JsonBinaryEncodeOps[F[_], A](private val _v: A) extends AnyVal {
+
+    def toBinary(implicit codec: JsonBinaryCodec[F, A]): F[Array[Byte]] =
+      codec.serialize(_v)
+  }
+
+  implicit class JsonBinaryDecodeOps[F[_]](private val _v: Array[Byte]) extends AnyVal {
+
+    def fromBinary[A](implicit codec: JsonBinaryCodec[F, A]): F[Either[Throwable, A]] =
+      codec.deserialize(_v)
+  }
 }
