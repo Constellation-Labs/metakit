@@ -6,7 +6,7 @@ import cats.effect.IO
 import io.constellationnetwork.metagraph_sdk.storage.Collection
 import io.constellationnetwork.metagraph_sdk.storage.impl.RefMapCollection
 
-import generators.kvListGenUniqueKeys
+import shared.Generators._
 import weaver._
 import weaver.scalacheck.Checkers
 
