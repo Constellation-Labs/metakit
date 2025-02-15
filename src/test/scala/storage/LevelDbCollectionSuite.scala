@@ -10,16 +10,14 @@ import cats.effect.{IO, Resource}
 import io.constellationnetwork.metagraph_sdk.storage.Collection
 import io.constellationnetwork.metagraph_sdk.storage.impl.LevelDbCollection
 
-import generators.kvListGenUniqueKeys
+import shared.Generators._
 import weaver.IOSuite
 import weaver.scalacheck.Checkers
 
 object LevelDbCollectionSuite extends IOSuite with Checkers {
 
-  // ensure tests are run serially
   override def maxParallelism = 1
 
-  // tests share the same mutable resource
   override type Res = Collection[IO, Int, String]
 
   override def sharedResource: Resource[IO, Res] =
@@ -106,12 +104,14 @@ object LevelDbCollectionSuite extends IOSuite with Checkers {
     } yield expect(actual == expected)
   }
 
-  test("deleteBatch removes a batch of keys and confirms they no longer exist") { store =>
+  test("removeBatch removes a batch of keys and confirms they no longer exist") { store =>
     for {
       kvPairs <- IO.fromOption(kvListGenUniqueKeys(999, 2000).sample.map(NonEmptyList.fromListUnsafe))(
         new RuntimeException("Failed to generate key-value list")
       )
       (keys, _) = kvPairs.toList.unzip
+      _      <- store.putBatch(kvPairs.toList)
+      _      <- store.removeBatch(keys)
       actual <- store.getBatch(keys).map(_.flatMap { case (i, maybeStr) => maybeStr.map(str => (i, str)) })
     } yield expect(actual.isEmpty)
   }
