@@ -4,9 +4,9 @@ import java.nio.file.{Files, Path}
 
 import cats.data.EitherT
 import cats.effect.{Resource, Sync}
-import cats.implicits._
+import cats.syntax.all._
 
-import io.constellationnetwork.metagraph_sdk.std.JsonBinaryCodec
+import io.constellationnetwork.metagraph_sdk.std.JsonBinaryCodec._
 import io.constellationnetwork.metagraph_sdk.storage.Collection
 
 import io.circe.{Decoder, Encoder}
@@ -14,14 +14,6 @@ import org.iq80.leveldb._
 import org.iq80.leveldb.impl.Iq80DBFactory
 
 object LevelDbCollection {
-
-  implicit private class localEncoderOps[F[_]: Sync, T: Encoder](t: T) {
-    def toJsonBytes: F[Array[Byte]] = JsonBinaryCodec.simpleJsonSerialization(t)
-  }
-
-  implicit private class localDecoderOps[F[_]: Sync](bytes: Array[Byte]) {
-    def fromJsonBytes[T: Decoder]: F[Either[Throwable, T]] = JsonBinaryCodec.simpleJsonDeserialization(bytes)
-  }
 
   def make[F[_]: Sync, Key: Encoder: Decoder, Value: Encoder: Decoder](
     path: Path
@@ -31,23 +23,23 @@ object LevelDbCollection {
   } yield new Collection[F, Key, Value] {
 
     def put(id: Key, t: Value): F[Unit] = for {
-      idB <- id.toJsonBytes
-      tB  <- t.toJsonBytes
+      idB <- id.toBinary
+      tB  <- t.toBinary
       _   <- Sync[F].blocking(db.put(idB, tB))
     } yield ()
 
     def remove(id: Key): F[Unit] =
-      id.toJsonBytes.flatMap { idB =>
+      id.toBinary.flatMap { idB =>
         Sync[F].blocking(db.delete(idB))
       }
 
     def get(id: Key): F[Option[Value]] =
-      id.toJsonBytes
+      id.toBinary
         .flatMap(idB => Sync[F].blocking(Option(db.get(idB))))
-        .flatMap(_.flatTraverse(_.fromJsonBytes[Value].map(_.toOption)))
+        .flatMap(_.flatTraverse(_.fromBinary[Value].map(_.toOption)))
 
     def contains(id: Key): F[Boolean] =
-      id.toJsonBytes.flatMap { idB =>
+      id.toBinary.flatMap { idB =>
         Sync[F].blocking(db.get(idB)).map(_ != null)
       }
 
@@ -55,7 +47,7 @@ object LevelDbCollection {
       createWriteResource.use { case (batch, wo) =>
         for {
           _ <- updates.traverse_ { case (id, t) =>
-            (id.toJsonBytes, t.toJsonBytes).tupled.map { case (idB, tB) => batch.put(idB, tB) }
+            (id.toBinary, t.toBinary).tupled.map { case (idB, tB) => batch.put(idB, tB) }
           }
           _ <- Sync[F].blocking(db.write(batch, wo.sync(true)))
         } yield ()
@@ -65,7 +57,7 @@ object LevelDbCollection {
       createWriteResource.use { case (batch, wo) =>
         for {
           _ <- deletions.traverse_ { id =>
-            id.toJsonBytes.map(idB => batch.delete(idB))
+            id.toBinary.map(idB => batch.delete(idB))
           }
           _ <- Sync[F].blocking(db.write(batch, wo.sync(true)))
         } yield ()
@@ -74,9 +66,9 @@ object LevelDbCollection {
     def getBatch(keys: List[Key]): F[List[(Key, Option[Value])]] =
       createReadResource.use { readOptions =>
         keys.traverse { id =>
-          id.toJsonBytes
+          id.toBinary
             .flatMap(idB => Sync[F].blocking(Option(db.get(idB, readOptions))))
-            .flatMap(_.flatTraverse(_.fromJsonBytes[Value].map(_.toOption)))
+            .flatMap(_.flatTraverse(_.fromBinary[Value].map(_.toOption)))
             .map((id, _))
         }
       }
@@ -99,8 +91,8 @@ object LevelDbCollection {
           else {
             (for {
               entry <- EitherT(Sync[F].delay(_iter.next()).attempt)
-              key   <- EitherT(entry.getKey.fromJsonBytes[Key])
-              value <- EitherT(entry.getValue.fromJsonBytes[Value])
+              key   <- EitherT[F, Throwable, Key](entry.getKey.fromBinary[Key])
+              value <- EitherT[F, Throwable, Value](entry.getValue.fromBinary[Value])
             } yield (key, value)).value.flatMap {
               case Left(_) => Sync[F].pure(Right(_buf))
               case Right((key, value)) =>

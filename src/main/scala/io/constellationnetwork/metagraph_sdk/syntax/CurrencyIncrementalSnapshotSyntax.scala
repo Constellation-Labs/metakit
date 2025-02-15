@@ -12,12 +12,15 @@ import org.tessellation.currency.dataApplication.dataApplication.DataApplication
 import org.tessellation.currency.schema.currency.{CurrencyIncrementalSnapshot, DataApplicationPart}
 import org.tessellation.security.signature.Signed
 
-import io.constellationnetwork.metagraph_sdk.std.JsonBinaryCodec
+import io.constellationnetwork.metagraph_sdk.std.JsonBinaryCodec.JsonBinaryDecodeOps
+
+import io.circe.{Decoder, Encoder}
 
 trait CurrencyIncrementalSnapshotSyntax {
 
   implicit class CurrencyIncrementalSnapshotOps[F[_]: Sync](cis: CurrencyIncrementalSnapshot)(implicit
-    json2bin: JsonBinaryCodec[F, Signed[DataApplicationBlock]]
+    ue: Encoder[DataUpdate],
+    ud: Decoder[DataUpdate]
   ) {
 
     def countUpdates: F[Long] = getBlocks.map(_.map(_.updates.size.toLong).sum)
@@ -25,7 +28,7 @@ trait CurrencyIncrementalSnapshotSyntax {
     def getBlocks: F[List[Signed[DataApplicationBlock]]] =
       getPart.flatMap {
         _.blocks.traverse { bytes =>
-          json2bin.deserialize(bytes).flatMap(Sync[F].fromEither)
+          bytes.fromBinary[Signed[DataApplicationBlock]].flatMap(Sync[F].fromEither)
         }
       }
 
