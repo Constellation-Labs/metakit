@@ -4,7 +4,8 @@ import java.nio.charset.StandardCharsets
 import cats.MonadThrow
 import cats.data.EitherT
 import cats.syntax.all._
-import org.tessellation.currency.dataApplication.DataUpdate
+
+import io.constellationnetwork.currency.dataApplication.DataUpdate
 import io.constellationnetwork.metagraph_sdk.std.JsonCanonicalizer.JsonPrinterEncodeOps
 import io.circe.jawn.JawnParser
 import io.circe.{Decoder, Encoder}

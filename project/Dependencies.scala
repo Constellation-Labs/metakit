@@ -3,7 +3,7 @@ import sbt._
 object Dependencies {
 
   object V {
-    val tessellation = "2.12.0"
+    val tessellation = "99.99.99"
     val cats = "2.9.0"
     val catsEffect = "3.4.2"
     val weaver = "0.8.1"
@@ -15,7 +15,7 @@ object Dependencies {
   }
 
   object Libraries {
-    val tessellationSdk = "org.constellation" %% s"tessellation-sdk" % V.tessellation
+    val tessellationSdk = "io.constellationnetwork" %% s"tessellation-sdk" % V.tessellation
     val cats = "org.typelevel" %% "cats-core" % V.cats
     val catsEffect = "org.typelevel" %% "cats-effect" % V.catsEffect
     val catsEffectTestkit = "org.typelevel" %% "cats-effect-testkit" % V.catsEffect

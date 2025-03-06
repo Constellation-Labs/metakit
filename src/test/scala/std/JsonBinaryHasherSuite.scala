@@ -6,10 +6,9 @@ import cats.effect.{Clock, IO}
 
 import scala.concurrent.duration.DurationInt
 
-import org.tessellation.security.hash.Hash
-
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher.HasherOps
 import io.constellationnetwork.metagraph_sdk.std.{JsonBinaryCodec, JsonBinaryHasher}
+import io.constellationnetwork.security.hash.Hash
 
 import io.circe.{Decoder, Encoder, Json, parser}
 import shared.Generators._

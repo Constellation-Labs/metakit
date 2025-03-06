@@ -3,10 +3,9 @@ package io.constellationnetwork.metagraph_sdk
 import cats.effect.Concurrent
 import cats.implicits.{toBifunctorOps, toFlatMapOps, toFunctorOps}
 
-import org.tessellation.currency.dataApplication.DataApplicationValidationError
-import org.tessellation.routes.internal.{InternalUrlPrefix, PublicRoutes}
-
+import io.constellationnetwork.currency.dataApplication.DataApplicationValidationError
 import io.constellationnetwork.metagraph_sdk.MetagraphPublicRoutes.{DataApp404, StringError}
+import io.constellationnetwork.routes.internal.{InternalUrlPrefix, PublicRoutes}
 
 import derevo.circe.magnolia.{decoder, encoder}
 import derevo.derive
