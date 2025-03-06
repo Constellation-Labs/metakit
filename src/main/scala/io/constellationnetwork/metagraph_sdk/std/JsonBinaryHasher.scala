@@ -3,7 +3,7 @@ package io.constellationnetwork.metagraph_sdk.std
 import cats.MonadThrow
 import cats.syntax.functor._
 
-import org.tessellation.security.hash.Hash
+import io.constellationnetwork.security.hash.Hash
 
 trait JsonBinaryHasher[F[_]] {
   def computeDigest[A](data: A)(implicit codec: JsonBinaryCodec[F, A]): F[Hash]

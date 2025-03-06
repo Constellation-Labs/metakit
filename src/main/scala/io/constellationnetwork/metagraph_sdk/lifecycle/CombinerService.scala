@@ -3,8 +3,8 @@ package io.constellationnetwork.metagraph_sdk.lifecycle
 import cats.Monad
 import cats.syntax.foldable._
 
-import org.tessellation.currency.dataApplication._
-import org.tessellation.security.signature.Signed
+import io.constellationnetwork.currency.dataApplication._
+import io.constellationnetwork.security.signature.Signed
 
 abstract class CombinerService[F[_]: Monad, TX <: DataUpdate, PUB <: DataOnChainState, PRV <: DataCalculatedState] {
 

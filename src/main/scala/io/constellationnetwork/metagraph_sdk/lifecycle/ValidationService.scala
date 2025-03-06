@@ -5,9 +5,9 @@ import cats.syntax.functor._
 import cats.syntax.parallel._
 import cats.{Monad, Parallel}
 
-import org.tessellation.currency.dataApplication._
-import org.tessellation.currency.dataApplication.dataApplication.DataApplicationValidationErrorOr
-import org.tessellation.security.signature.Signed
+import io.constellationnetwork.currency.dataApplication._
+import io.constellationnetwork.currency.dataApplication.dataApplication.DataApplicationValidationErrorOr
+import io.constellationnetwork.security.signature.Signed
 
 abstract class ValidationService[
   F[_]: Monad: Parallel,
