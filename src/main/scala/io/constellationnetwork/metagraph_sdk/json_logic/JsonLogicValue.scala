@@ -1,0 +1,186 @@
+package io.constellationnetwork.metagraph_sdk.json_logic
+
+import cats.syntax.either._
+import cats.syntax.traverse._
+
+import scala.annotation.tailrec
+
+import io.circe.syntax.EncoderOps
+import io.circe.{Decoder, DecodingFailure, Encoder, Json}
+
+sealed trait JsonLogicValue {
+  val tag: String
+}
+
+sealed abstract class JsonLogicPrimitive(val tag: String) extends JsonLogicValue
+sealed abstract class JsonLogicCollection(val tag: String) extends JsonLogicValue
+
+case object NullValue extends JsonLogicValue { val tag = "null" }
+final case class FunctionValue(expr: JsonLogicExpression) extends JsonLogicValue { val tag = "function" }
+final case class BoolValue(value: Boolean) extends JsonLogicPrimitive("bool")
+final case class IntValue(value: BigInt) extends JsonLogicPrimitive("int")
+final case class FloatValue(value: BigDecimal) extends JsonLogicPrimitive("float")
+final case class StrValue(value: String) extends JsonLogicPrimitive("string")
+final case class ArrayValue(value: List[JsonLogicValue]) extends JsonLogicCollection("array")
+final case class MapValue(value: Map[String, JsonLogicValue]) extends JsonLogicCollection("map")
+
+sealed trait CoercedValue
+case object CoercedNull extends CoercedValue
+final case class CoercedBool(value: Boolean) extends CoercedValue
+final case class CoercedInt(value: BigInt) extends CoercedValue
+final case class CoercedFloat(value: BigDecimal) extends CoercedValue
+final case class CoercedString(value: String) extends CoercedValue
+
+object JsonLogicValue {
+
+  implicit class lookupDefaultOps(value: JsonLogicValue) {
+
+    def getDefault: JsonLogicValue = value match {
+      case NullValue        => NullValue
+      case _: FunctionValue => FunctionValue(ApplyExpression(JsonLogicOp.NoOp, List.empty))
+      case _: BoolValue     => BoolValue(false)
+      case _: IntValue      => IntValue(0)
+      case _: FloatValue    => FloatValue(0.0)
+      case _: StrValue      => StrValue("")
+      case _: ArrayValue    => ArrayValue(List.empty)
+      case _: MapValue      => MapValue.empty
+    }
+
+    val isTruthy: Boolean = value match {
+      case NullValue        => false
+      case BoolValue(v)     => v
+      case IntValue(i)      => i != 0
+      case FloatValue(d)    => d != 0.0
+      case StrValue(s)      => s.nonEmpty
+      case ArrayValue(v)    => v.nonEmpty
+      case MapValue(v)      => v.nonEmpty
+      case FunctionValue(_) => false
+    }
+
+    def contains(key: String): Boolean = value match {
+      case NullValue        => false
+      case FunctionValue(_) => false
+      case BoolValue(v)     => key.toBooleanOption.contains(v)
+      case IntValue(v)      => Option(BigInt(key)).contains(v)
+      case FloatValue(v)    => Option(BigDecimal(key)).contains(v)
+      case StrValue(v)      => key.contains(v)
+      case ArrayValue(list) => key.toIntOption.exists(_ <= list.length)
+      case MapValue(map)    => map.contains(key)
+    }
+  }
+
+  implicit val encodeNullValue: Encoder[NullValue.type] = Encoder.encodeString.contramap(_ => "null")
+
+  implicit val decodeNullValue: Decoder[NullValue.type] = Decoder.decodeString.emap {
+    case "null" => Right(NullValue)
+    case other  => Left(s"Expected 'null', got '$other'")
+  }
+
+  implicit val encodeJsonLogicValue: Encoder[JsonLogicValue] = Encoder.instance {
+    case NullValue        => NullValue.asJson
+    case bv: BoolValue    => bv.value.asJson
+    case iv: IntValue     => iv.value.asJson
+    case dv: FloatValue   => dv.value.asJson
+    case sv: StrValue     => sv.value.asJson
+    case av: ArrayValue   => Json.fromValues(av.value.map(encodeJsonLogicValue(_)))
+    case mv: MapValue     => Json.obj(mv.value.map { case (k, v) => k -> v.asJson(encodeJsonLogicValue) }.toSeq: _*)
+    case _: FunctionValue => Json.Null
+  }
+
+  implicit val decodeJsonLogicValue: Decoder[JsonLogicValue] = Decoder.instance { cursor =>
+    cursor.value.fold(
+      jsonNull = Right(NullValue),
+      jsonBoolean = bool => Right(BoolValue(bool)),
+      jsonNumber = num =>
+        num.toBigDecimal match {
+          case Some(num) =>
+            num.toBigIntExact match {
+              case Some(bigInt) => Right(IntValue(bigInt))
+              case None         => Right(FloatValue(num))
+            }
+
+          case None => Left(DecodingFailure(s"Failed to decode number: $num", cursor.history))
+        },
+      jsonString = str => Right(StrValue(str)),
+      jsonArray = arr =>
+        arr.toList
+          .traverse(_.as[JsonLogicValue](decodeJsonLogicValue))
+          .map(ArrayValue(_)),
+      jsonObject = obj =>
+        obj.toMap
+          .map { case (k, v) => v.as[JsonLogicValue](decodeJsonLogicValue).map(k -> _) }
+          .toList
+          .sequence
+          .map(pair => MapValue(pair.toMap))
+    )
+  }
+}
+
+object JsonLogicCollection {
+
+  implicit val encodeJsonLogicCollection: Encoder[JsonLogicCollection] = Encoder.instance {
+    JsonLogicValue.encodeJsonLogicValue(_)
+  }
+
+  implicit val decodeJsonLogicCollection: Decoder[JsonLogicCollection] =
+    Decoder.instance[JsonLogicCollection] { c =>
+      c.as[JsonLogicValue].flatMap {
+        case coll: JsonLogicCollection => Right(coll)
+        case other => Left(DecodingFailure(s"Expected a collection (map or array), but got $other", c.history))
+      }
+    }
+}
+
+object MapValue {
+  val empty: MapValue = new MapValue(Map.empty)
+}
+
+object IntValue {
+
+  implicit class IntValueOps(iv: IntValue) {
+    def asFloatValue: FloatValue = FloatValue(BigDecimal(iv.value))
+  }
+}
+
+object CoercedValue {
+
+  @tailrec
+  def coerceToPrimitive(value: JsonLogicValue): Either[JsonLogicException, CoercedValue] =
+    value match {
+      case NullValue           => CoercedNull.asRight
+      case BoolValue(b)        => CoercedBool(b).asRight
+      case IntValue(i)         => CoercedInt(i).asRight
+      case FloatValue(d)       => CoercedFloat(d).asRight
+      case StrValue(s)         => s.toIntOption.fold[CoercedValue](CoercedString(s))(i => CoercedInt(i)).asRight
+      case FunctionValue(expr) => JsonLogicException(s"Cannot coerce FunctionValue($expr) to a primitive").asLeft
+      case ArrayValue(elems) =>
+        elems match {
+          case Nil           => Right(CoercedInt(0))
+          case single :: Nil => coerceToPrimitive(single)
+          case _ => JsonLogicException(s"Cannot coerce multi-element array $elems to a single primitive").asLeft
+        }
+      case MapValue(m) =>
+        m.size match {
+          case 0 => Right(CoercedInt(0))
+          case 1 => coerceToPrimitive(m.values.head)
+          case _ => JsonLogicException(s"Cannot coerce multi-key object $m to a single primitive").asLeft
+        }
+    }
+
+  def compareCoercedValues(l: CoercedValue, r: CoercedValue): Either[JsonLogicException, Boolean] =
+    (l, r) match {
+      case (CoercedNull, CoercedNull)             => true.asRight
+      case (CoercedNull, _)                       => false.asRight
+      case (_, CoercedNull)                       => false.asRight
+      case (CoercedBool(lb), CoercedBool(rb))     => (lb == rb).asRight
+      case (CoercedBool(lb), CoercedInt(ri))      => (if (lb) ri == 1 else ri == 0).asRight
+      case (CoercedInt(li), CoercedBool(rb))      => (if (rb) li == 1 else li == 0).asRight
+      case (CoercedInt(li), CoercedInt(ri))       => (li == ri).asRight
+      case (CoercedInt(li), CoercedString(rs))    => (Option(BigInt(rs)).contains(li)).asRight
+      case (CoercedString(ls), CoercedInt(ri))    => (Option(BigInt(ls)).contains(ri)).asRight
+      case (CoercedFloat(li), CoercedString(rs))  => (Option(BigDecimal(rs)).contains(li)).asRight
+      case (CoercedString(ls), CoercedFloat(ri))  => (Option(BigDecimal(ls)).contains(ri)).asRight
+      case (CoercedString(ls), CoercedString(rs)) => (ls == rs).asRight
+      case _ => JsonLogicException(s"Cannot compare coerced values $l and $r").asLeft
+    }
+}
