@@ -27,7 +27,7 @@ object JsonCanonicalizerSuite extends SimpleIOSuite with Checkers {
     for {
       inputJson         <- readFile(s"$InputDir/$filename")
       expectedJson      <- readFile(s"$OutputDir/$filename")
-      actualCanonical   <- inputJson.toCanonical
+      actualCanonical   <- inputJson.toCanonical.map(_.value)
       expectedCanonical <- expectedJson.noSpaces.pure[F]
     } yield expect.same(expectedCanonical, actualCanonical)
 
@@ -57,7 +57,7 @@ object JsonCanonicalizerSuite extends SimpleIOSuite with Checkers {
     for {
       inputJson     <- readFile(s"$InputDir/weird.json")
       expectedBytes <- readHexFile(s"$OutputDir/weird.hex").map(Hex.fromBytes(_))
-      actualBytes   <- inputJson.toCanonical.map(_.getBytes(StandardCharsets.UTF_8)).map(Hex.fromBytes(_))
+      actualBytes   <- inputJson.toCanonical.map(_.value.getBytes(StandardCharsets.UTF_8)).map(Hex.fromBytes(_))
     } yield expect.same(expectedBytes, actualBytes)
   }
 
@@ -65,7 +65,7 @@ object JsonCanonicalizerSuite extends SimpleIOSuite with Checkers {
     forall(complexJsonGen) { json =>
       for {
         firstPass        <- json.toCanonical
-        intermediateJson <- IO.fromEither(parser.parse(firstPass))
+        intermediateJson <- IO.fromEither(parser.parse(firstPass.value))
         secondPass       <- intermediateJson.toCanonical
       } yield expect.same(firstPass, secondPass)
     }
@@ -75,7 +75,7 @@ object JsonCanonicalizerSuite extends SimpleIOSuite with Checkers {
     forall(complexJsonGen) { json =>
       for {
         canonicalized <- json.toCanonical
-        actualJson    <- IO.fromEither(parser.parse(canonicalized))
+        actualJson    <- IO.fromEither(parser.parse(canonicalized.value))
       } yield expect.same(json, actualJson)
     }
   }

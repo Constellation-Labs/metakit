@@ -13,18 +13,17 @@
 package io.constellationnetwork.metagraph_sdk.std
 
 import java.io.IOException
-
 import cats.MonadThrow
 import cats.syntax.all._
 
 import scala.annotation.tailrec
 import scala.collection.immutable.SortedMap
-
 import io.circe._
 import io.circe.syntax.EncoderOps
+import io.constellationnetwork.metagraph_sdk.models.CanonicalJson
 
 trait JsonCanonicalizer[F[_]] {
-  def canonicalize[A: Encoder](content: A): F[String]
+  def canonicalize[A: Encoder](content: A): F[CanonicalJson]
 }
 
 object JsonCanonicalizer {
@@ -89,14 +88,21 @@ object JsonCanonicalizer {
       loop(json)
     }
 
-    def canonicalize[A: Encoder](content: A): F[String] =
-      encode(content.asJson)
+    def canonicalize[A: Encoder](content: A): F[CanonicalJson] =
+      encode(content.asJson).map(CanonicalJson(_))
   }
 
-  implicit class JsonPrinterEncodeOps[F[_], A](private val _v: A) extends AnyVal {
+  def canonicalizeJson[F[_]: MonadThrow](json: Json): F[CanonicalJson] =
+    make[F].canonicalize(json)
 
-    def toCanonical(implicit mt: MonadThrow[F], enc: Encoder[A]): F[String] =
+  implicit class JsonPrinterEncodeOps[F[_], A](private val _v: A) extends AnyVal {
+    def toCanonical(implicit mt: MonadThrow[F], enc: Encoder[A]): F[CanonicalJson] =
       make[F].canonicalize(_v)
+  }
+
+  implicit class JsonPrinterStringEncodeOps[F[_], A](private val _v: A) extends AnyVal {
+    def toCanonicalString(implicit mt: MonadThrow[F], enc: Encoder[A]): F[String] =
+      make[F].canonicalize(_v).map(_.value)
   }
 }
 

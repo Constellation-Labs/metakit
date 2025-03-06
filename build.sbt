@@ -40,7 +40,6 @@ lazy val commonSettings = Seq(
     CompilerPlugin.betterMonadicFor,
     CompilerPlugin.semanticDB,
     Libraries.tessellationSdk,
-    Libraries.declineCore,
     Libraries.cats,
     Libraries.catsEffect,
     Libraries.levelDb
