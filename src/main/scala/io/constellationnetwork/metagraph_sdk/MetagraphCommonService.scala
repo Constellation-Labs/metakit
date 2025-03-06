@@ -5,18 +5,18 @@ import cats.syntax.functor._
 
 import io.constellationnetwork.currency.dataApplication._
 import io.constellationnetwork.currency.dataApplication.dataApplication.DataApplicationBlock
-import org.tessellation.security.signature.Signed
-
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryCodec._
 import io.constellationnetwork.routes.internal.ExternalUrlPrefix
 import io.constellationnetwork.security.signature.Signed
 
+import eu.timepit.refined.auto._
 import io.circe.{Decoder, Encoder}
 import org.http4s.EntityDecoder
 import org.http4s.circe.CirceEntityCodec.circeEntityDecoder
 
-abstract class MetagraphCommonService[F[_], TX <: DataUpdate, PUB <: DataOnChainState, PRV <: DataCalculatedState](
-  implicit
+abstract class MetagraphCommonService[F[
+  _
+], TX <: DataUpdate, PUB <: DataOnChainState, PRV <: DataCalculatedState, Context](implicit
   txEncoder:  Encoder[TX],
   pubEncoder: Encoder[PUB],
   prvEncoder: Encoder[PRV],
@@ -24,7 +24,7 @@ abstract class MetagraphCommonService[F[_], TX <: DataUpdate, PUB <: DataOnChain
   pubDecoder: Decoder[PUB],
   prvDecoder: Decoder[PRV],
   async:      Async[F]
-) {
+) extends DataApplicationSharedContextualOps[F, TX, PUB, PRV, Context] {
 
   implicit def dataUpdateEncoder: Encoder[DataUpdate] = txEncoder.contramap(_.asInstanceOf[TX])
 
@@ -63,4 +63,6 @@ abstract class MetagraphCommonService[F[_], TX <: DataUpdate, PUB <: DataOnChain
   def calculatedStateEncoder: Encoder[PRV] = prvEncoder
 
   def calculatedStateDecoder: Decoder[PRV] = prvDecoder
+
+  override def routesPrefix: ExternalUrlPrefix = "v1"
 }
