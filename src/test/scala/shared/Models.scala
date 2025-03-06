@@ -1,6 +1,6 @@
 package shared
 
-import org.tessellation.currency.dataApplication.DataUpdate
+import io.constellationnetwork.currency.dataApplication.DataUpdate
 
 import derevo.cats.show
 import derevo.circe.magnolia.{decoder, encoder}

@@ -7,12 +7,11 @@ import cats.syntax.traverse._
 
 import scala.reflect.ClassTag
 
-import org.tessellation.currency.dataApplication.DataUpdate
-import org.tessellation.currency.dataApplication.dataApplication.DataApplicationBlock
-import org.tessellation.currency.schema.currency.{CurrencyIncrementalSnapshot, DataApplicationPart}
-import org.tessellation.security.signature.Signed
-
+import io.constellationnetwork.currency.dataApplication.DataUpdate
+import io.constellationnetwork.currency.dataApplication.dataApplication.DataApplicationBlock
+import io.constellationnetwork.currency.schema.currency.{CurrencyIncrementalSnapshot, DataApplicationPart}
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryCodec.JsonBinaryDecodeOps
+import io.constellationnetwork.security.signature.Signed
 
 import io.circe.{Decoder, Encoder}
 
@@ -23,7 +22,7 @@ trait CurrencyIncrementalSnapshotSyntax {
     ud: Decoder[DataUpdate]
   ) {
 
-    def countUpdates: F[Long] = getBlocks.map(_.map(_.updates.size.toLong).sum)
+    def countUpdates: F[Long] = getBlocks.map(_.map(_.dataTransactions.size.toLong).sum)
 
     def getBlocks: F[List[Signed[DataApplicationBlock]]] =
       getPart.flatMap {
@@ -38,8 +37,10 @@ trait CurrencyIncrementalSnapshotSyntax {
     def getSignedUpdates[U <: DataUpdate: ClassTag]: F[List[Signed[U]]] =
       getBlocks
         .map {
-          _.flatMap {
-            _.updates.toList.collect { case Signed(u: U, p) => Signed(u, p) }
+          _.flatMap { signDataBlock =>
+            DataUpdate.getDataUpdates(signDataBlock.dataTransactions.toList).collect { case Signed(u: U, p) =>
+              Signed(u, p)
+            }
           }
         }
   }

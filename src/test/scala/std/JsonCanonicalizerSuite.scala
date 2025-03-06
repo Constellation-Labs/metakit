@@ -6,9 +6,8 @@ import java.nio.file.{Files, Paths}
 import cats.effect.IO
 import cats.implicits.catsSyntaxApplicativeId
 
-import org.tessellation.security.hex.Hex
-
 import io.constellationnetwork.metagraph_sdk.std.JsonCanonicalizer.JsonPrinterEncodeOps
+import io.constellationnetwork.security.hex.Hex
 
 import io.circe.{Json, parser}
 import shared.Generators._

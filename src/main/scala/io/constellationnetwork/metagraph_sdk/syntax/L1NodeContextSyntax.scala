@@ -4,12 +4,11 @@ import cats.data.EitherT
 import cats.effect.Sync
 import cats.syntax.all._
 
-import org.tessellation.currency.dataApplication.{DataApplicationValidationError, DataOnChainState, L1NodeContext}
-import org.tessellation.currency.schema.currency.CurrencyIncrementalSnapshot
-import org.tessellation.schema.GlobalIncrementalSnapshot
-import org.tessellation.security.Hashed
-
+import io.constellationnetwork.currency.dataApplication._
+import io.constellationnetwork.currency.schema.currency.CurrencyIncrementalSnapshot
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryCodec.JsonBinaryDecodeOps
+import io.constellationnetwork.schema.GlobalIncrementalSnapshot
+import io.constellationnetwork.security.Hashed
 
 import derevo.circe.magnolia.{decoder, encoder}
 import derevo.derive
