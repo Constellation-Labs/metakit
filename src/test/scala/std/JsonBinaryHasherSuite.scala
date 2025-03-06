@@ -27,7 +27,7 @@ object JsonBinaryHasherSuite extends SimpleIOSuite with Checkers {
   private def runTest(filename: String, expected: String): IO[Expectations] =
     for {
       input      <- readFile(s"$InputDir/$filename")
-      hashActual <- input.hash
+      hashActual <- input.computeDigest
       hashExpected = Hash(expected)
     } yield expect.same(hashExpected, hashActual)
 
@@ -53,8 +53,8 @@ object JsonBinaryHasherSuite extends SimpleIOSuite with Checkers {
 
   def hashTwice[A: Encoder: Decoder](data: A): IO[(Hash, Hash)] =
     for {
-      hash1 <- JsonBinaryHasher[IO].hash(data)
-      hash2 <- JsonBinaryHasher[IO].hash(data)
+      hash1 <- JsonBinaryHasher[IO].computeDigest(data)
+      hash2 <- JsonBinaryHasher[IO].computeDigest(data)
     } yield (hash1, hash2)
 
   test("hashing should be deterministic") {
@@ -76,8 +76,8 @@ object JsonBinaryHasherSuite extends SimpleIOSuite with Checkers {
   test("different data should produce different hashes") {
     forall { (data1: TestData, data2: TestData) =>
       (for {
-        hash1 <- data1.hash
-        hash2 <- data2.hash
+        hash1 <- data1.computeDigest
+        hash2 <- data2.computeDigest
       } yield (hash1, hash2)).map { case (hash1, hash2) =>
         expect(data1 == data2 || hash1 != hash2)
       }
@@ -87,7 +87,7 @@ object JsonBinaryHasherSuite extends SimpleIOSuite with Checkers {
   test("hash should be consistent with binary serialization") {
     forall { (testData: TestData) =>
       for {
-        directHash <- testData.hash
+        directHash <- testData.computeDigest
         serialized <- JsonBinaryCodec[IO, TestData].serialize(testData)
         binaryHash = Hash.fromBytes(serialized)
       } yield expect.same(directHash, binaryHash)
@@ -112,7 +112,7 @@ object JsonBinaryHasherSuite extends SimpleIOSuite with Checkers {
 
   test("hash should have fixed length") {
     forall { (testData: TestData) =>
-      testData.hash.map { hash =>
+      testData.computeDigest.map { hash =>
         expect(hash.value.length == 64)
       }
     }
@@ -120,7 +120,7 @@ object JsonBinaryHasherSuite extends SimpleIOSuite with Checkers {
 
   test("hash should be hexadecimal") {
     forall { (testData: TestData) =>
-      testData.hash.map { hash =>
+      testData.computeDigest.map { hash =>
         expect(hash.toString.matches("[0-9a-fA-F]+"))
       }
     }
@@ -141,12 +141,12 @@ object JsonBinaryHasherSuite extends SimpleIOSuite with Checkers {
 
       for {
         // Identity law
-        normalHash <- testData.hash
-        mappedHash <- testData.hash.map(identity)
+        normalHash <- testData.computeDigest
+        mappedHash <- testData.computeDigest.map(identity)
 
         // Composition law
-        composedHash     <- testData.hash.map(f).map(g)
-        composedOnceHash <- testData.hash.map(f andThen g)
+        composedHash     <- testData.computeDigest.map(f).map(g)
+        composedOnceHash <- testData.computeDigest.map(f andThen g)
       } yield expect(normalHash == mappedHash) &&
       expect(composedHash == composedOnceHash)
     }
@@ -154,7 +154,7 @@ object JsonBinaryHasherSuite extends SimpleIOSuite with Checkers {
 
   test("hash computation should complete within reasonable time") {
     forall { (testData: TestDataComplex) =>
-      Clock[IO].timed(testData.hash).map { case (duration, _) =>
+      Clock[IO].timed(testData.computeDigest).map { case (duration, _) =>
         expect(duration < 1.second)
       }
     }
@@ -162,7 +162,7 @@ object JsonBinaryHasherSuite extends SimpleIOSuite with Checkers {
 
   test("hash computation should not throw exceptions") {
     forall { (testData: TestDataComplex) =>
-      testData.hash.attempt.map(result => expect(result.isRight))
+      testData.computeDigest.attempt.map(result => expect(result.isRight))
     }
   }
 }

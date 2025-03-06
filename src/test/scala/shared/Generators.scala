@@ -28,6 +28,8 @@ object Generators {
     } yield TestDataUpdate(id, value)
   )
 
+  val genTestDataUpdate: Gen[TestDataUpdate] = arbTestDataUpdate.arbitrary
+
   val jsonValueGen: Gen[Json] = Gen.oneOf(
     Gen.alphaStr.suchThat(_.nonEmpty).map(Json.fromString),
     Gen.chooseNum(-100, 100).map(Json.fromInt),
