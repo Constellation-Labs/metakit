@@ -63,6 +63,4 @@ abstract class MetagraphCommonService[F[
   def calculatedStateEncoder: Encoder[PRV] = prvEncoder
 
   def calculatedStateDecoder: Decoder[PRV] = prvDecoder
-
-  override def routesPrefix: ExternalUrlPrefix = "v1"
 }
