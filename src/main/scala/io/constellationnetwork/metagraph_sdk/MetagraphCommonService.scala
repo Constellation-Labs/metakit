@@ -6,10 +6,8 @@ import cats.syntax.functor._
 import io.constellationnetwork.currency.dataApplication._
 import io.constellationnetwork.currency.dataApplication.dataApplication.DataApplicationBlock
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryCodec._
-import io.constellationnetwork.routes.internal.ExternalUrlPrefix
 import io.constellationnetwork.security.signature.Signed
 
-import eu.timepit.refined.auto._
 import io.circe.{Decoder, Encoder}
 import org.http4s.EntityDecoder
 import org.http4s.circe.CirceEntityCodec.circeEntityDecoder

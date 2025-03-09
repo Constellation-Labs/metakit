@@ -1,20 +1,24 @@
 package std
 
 import cats.MonadThrow
-import cats.data.NonEmptyList
-import cats.effect.{IO, Resource}
+import cats.data.{NonEmptyList, NonEmptySet}
+import cats.effect.{IO, Resource, Sync}
+import cats.effect.std.Random
 import cats.implicits._
-
-import org.tessellation.security.{KeyPairGenerator, SecurityProvider}
-
+import io.circe.{Decoder, Encoder}
 import io.constellationnetwork.metagraph_sdk.crypto.SignatureProtocol
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryCodec
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher.HasherOps
-
+import io.constellationnetwork.security.{KeyPairGenerator, SecurityProvider}
+import io.constellationnetwork.security.hash.Hash
+import io.constellationnetwork.security.signature.Signed
+import org.scalacheck.Gen
 import shared.Generators._
 import shared.Models.TestDataUpdate
 import weaver._
 import weaver.scalacheck._
+
+import java.security.KeyPair
 
 object SignatureProtocolSuite extends SimpleIOSuite with Checkers {
   private val securityProviderResource: Resource[IO, SecurityProvider[IO]] = SecurityProvider.forAsync[IO]
