@@ -15,7 +15,6 @@ import org.tessellation.security.signature.signature.{Signature, SignatureProof}
 import org.tessellation.security.signature.{Signed, Signing}
 
 import io.constellationnetwork.metagraph_sdk.std.{JsonBinaryCodec, JsonBinaryHasher}
-
 import io.circe.{Decoder, Encoder}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
