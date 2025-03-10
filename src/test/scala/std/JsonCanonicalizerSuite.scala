@@ -9,7 +9,7 @@ import cats.implicits.catsSyntaxApplicativeId
 import io.constellationnetwork.metagraph_sdk.std.JsonCanonicalizer.JsonPrinterEncodeOps
 import io.constellationnetwork.security.hex.Hex
 
-import io.circe.{Json, parser}
+import io.circe.{parser, Json}
 import shared.Generators._
 import weaver.scalacheck.Checkers
 import weaver.{Expectations, SimpleIOSuite}
