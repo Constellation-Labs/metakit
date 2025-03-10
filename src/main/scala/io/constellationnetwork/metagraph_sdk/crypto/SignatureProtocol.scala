@@ -7,15 +7,17 @@ import cats.data.{NonEmptyList, NonEmptySet}
 import cats.effect.Async
 import cats.syntax.all._
 
-import org.tessellation.security.SecurityProvider
-import org.tessellation.security.hash.Hash
-import org.tessellation.security.hex.Hex
-import org.tessellation.security.key.ops.PublicKeyOps
-import org.tessellation.security.signature.signature.{Signature, SignatureProof}
-import org.tessellation.security.signature.{Signed, Signing}
-
 import io.constellationnetwork.metagraph_sdk.std.{JsonBinaryCodec, JsonBinaryHasher}
+import io.constellationnetwork.security.SecurityProvider
+import io.constellationnetwork.security.hash.Hash
+import io.constellationnetwork.security.hex.{Hex => tessHex}
+import io.constellationnetwork.security.key.ops.PublicKeyOps
+import io.constellationnetwork.security.signature.signature.{Signature, SignatureProof}
+import io.constellationnetwork.security.signature.{Signed, Signing}
+
 import io.circe.{Decoder, Encoder}
+import io.estatico.newtype.ops.toCoercibleIdOps
+import org.bouncycastle.util.encoders.{Hex => bcHex}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 trait SignatureProver[F[_]] {
