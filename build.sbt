@@ -21,20 +21,9 @@ ThisBuild / developers := List(
 ThisBuild / evictionErrorLevel := Level.Warn
 ThisBuild / scalafixDependencies += Libraries.organizeImports
 
-ThisBuild / assemblyMergeStrategy := {
-  case "logback.xml"                                                => MergeStrategy.first
-  case x if x.contains("io.netty.versions.properties")              => MergeStrategy.discard
-  case PathList("io", "constellationnetwork", "buildinfo", xs @ _*) => MergeStrategy.first
-  case PathList(xs @ _*) if xs.last == "module-info.class"          => MergeStrategy.first
-  case x =>
-    val oldStrategy = (assembly / assemblyMergeStrategy).value
-    oldStrategy(x)
-}
-
 lazy val commonSettings = Seq(
   scalacOptions ++= List("-Ymacro-annotations", "-Yrangepos", "-Wconf:cat=unused:info", "-language:reflectiveCalls"),
   resolvers += Resolver.mavenLocal,
-  resolvers += Resolver.githubPackages("abankowski", "http-request-signer"),
   libraryDependencies ++= Seq(
     CompilerPlugin.kindProjector,
     CompilerPlugin.betterMonadicFor,
