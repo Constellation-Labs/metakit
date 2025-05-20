@@ -33,7 +33,8 @@ package object models {
     def parseJson[F[_]: MonadThrow](canonical: CanonicalJson): F[Json] =
       parse(canonical.value).liftTo[F]
 
-    implicit val encoder: Encoder[CanonicalJson] = Encoder.encodeJson.contramap(cj => parse(cj.value).getOrElse(Json.Null))
+    implicit val encoder: Encoder[CanonicalJson] =
+      Encoder.encodeJson.contramap(cj => parse(cj.value).getOrElse(Json.Null))
 
     implicit val decoder: Decoder[CanonicalJson] = Decoder.decodeJson.emap { json =>
       json.noSpaces.asRight[String].map(CanonicalJson(_))

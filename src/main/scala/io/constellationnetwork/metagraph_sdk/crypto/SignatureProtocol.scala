@@ -10,14 +10,12 @@ import cats.syntax.all._
 import io.constellationnetwork.metagraph_sdk.std.{JsonBinaryCodec, JsonBinaryHasher}
 import io.constellationnetwork.security.SecurityProvider
 import io.constellationnetwork.security.hash.Hash
-import io.constellationnetwork.security.hex.{Hex => tessHex}
+import io.constellationnetwork.security.hex.Hex
 import io.constellationnetwork.security.key.ops.PublicKeyOps
 import io.constellationnetwork.security.signature.signature.{Signature, SignatureProof}
 import io.constellationnetwork.security.signature.{Signed, Signing}
 
 import io.circe.{Decoder, Encoder}
-import io.estatico.newtype.ops.toCoercibleIdOps
-import org.bouncycastle.util.encoders.{Hex => bcHex}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 trait SignatureProver[F[_]] {

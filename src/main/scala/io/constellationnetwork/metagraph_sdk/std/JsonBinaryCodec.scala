@@ -1,17 +1,18 @@
 package io.constellationnetwork.metagraph_sdk.std
 
 import java.nio.charset.StandardCharsets
+
 import cats.MonadThrow
 import cats.data.EitherT
 import cats.syntax.all._
 
 import io.constellationnetwork.currency.dataApplication.DataUpdate
-import io.constellationnetwork.metagraph_sdk.std.JsonCanonicalizer.JsonPrinterEncodeOps
-import io.circe.jawn.JawnParser
-import io.circe.{Decoder, Encoder}
-import io.constellationnetwork.metagraph_sdk.models._
 import io.constellationnetwork.metagraph_sdk.models.CanonicalJson
 import io.constellationnetwork.metagraph_sdk.models.CanonicalJson._
+import io.constellationnetwork.metagraph_sdk.std.JsonCanonicalizer.JsonPrinterEncodeOps
+
+import io.circe.jawn.JawnParser
+import io.circe.{Decoder, Encoder}
 import org.bouncycastle.util.encoders.Base64
 
 trait JsonBinaryCodec[F[_], A] {
@@ -37,7 +38,7 @@ object JsonBinaryCodec {
       def deserialize(bytes: Array[Byte]): F[Either[Throwable, A]] =
         (for {
           canonical <- EitherT(bytes.fromBinary[CanonicalJson](jsonBinaryCodecForCanonical[F]))
-          parsed <- EitherT.fromEither[F].apply[Throwable, A](JawnParser(false).decode[A](canonical.value))
+          parsed    <- EitherT.fromEither[F].apply[Throwable, A](JawnParser(false).decode[A](canonical.value))
         } yield parsed).value
     }
 
@@ -46,8 +47,8 @@ object JsonBinaryCodec {
 
       def serialize(content: U): F[Array[Byte]] =
         for {
-          str   <- content.toCanonical
-          bytes <- str.toBinary(jsonBinaryCodecForCanonical[F])
+          str          <- content.toCanonical
+          bytes        <- str.toBinary(jsonBinaryCodecForCanonical[F])
           base64String <- Base64.toBase64String(bytes).pure[F]
           prefixedString = s"\u0019Constellation Signed Data:\n${base64String.length}\n$base64String"
           result <- prefixedString.getBytes("UTF-8").pure[F]
@@ -72,12 +73,13 @@ object JsonBinaryCodec {
 
           base64Part = parts(2)
           decodedBytes <- EitherT.fromEither[F](
-            Either.catchNonFatal(Base64.decode(base64Part))
+            Either
+              .catchNonFatal(Base64.decode(base64Part))
               .leftMap(e => new IllegalArgumentException(s"Invalid Base64: ${e.getMessage}"): Throwable)
           )
 
           canonical <- EitherT(decodedBytes.fromBinary[CanonicalJson](jsonBinaryCodecForCanonical[F]))
-          parsed <- EitherT.fromEither[F].apply[Throwable, U](JawnParser(false).decode[U](canonical.value))
+          parsed    <- EitherT.fromEither[F].apply[Throwable, U](JawnParser(false).decode[U](canonical.value))
         } yield parsed).value
     }
 
