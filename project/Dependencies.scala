@@ -3,7 +3,7 @@ import sbt._
 object Dependencies {
 
   object V {
-    val tessellation = "3.0.0-rc.9"
+    val tessellation = "3.1.0"
     val cats = "2.9.0"
     val catsEffect = "3.4.2"
     val weaver = "0.8.1"
