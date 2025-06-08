@@ -32,6 +32,22 @@ object JsonLogicRuntime {
     ): F[Either[JsonLogicException, JsonLogicValue]] = interpret(expr, ctx)
   }
 
+  /*
+    Accessor method to look up a variable in the "vars" within of a given JsonLogicSemantics, optionally, a ctx can
+    be provided to extend the current scope of evaluation
+   */
+  private def lookupVar[F[_]: Monad: JsonLogicSemantics](key: String, defaultOpt: Option[JsonLogicValue])(
+    ctx: Option[JsonLogicValue] = None
+  ): F[Either[JsonLogicException, JsonLogicValue]] =
+    JsonLogicSemantics[F]
+      .getVar(key, ctx)
+      .map(_.orElse {
+        defaultOpt match {
+          case Some(d) => d.asRight[JsonLogicException]
+          case None    => NullValue.asRight[JsonLogicException]
+        }
+      })
+
   def evaluate[F[_]: Monad: JsonLogicSemantics](
     expr: JsonLogicExpression,
     ctx:  Option[JsonLogicValue] = None
@@ -39,11 +55,11 @@ object JsonLogicRuntime {
 
     def run: JsonLogicExpression => F[Either[JsonLogicException, JsonLogicValue]] = {
       case ConstExpression(v)                   => Monad[F].pure(Right(v))
-      case VarExpression(Left(key), defaultOpt) => lookupVar(key, defaultOpt)
+      case VarExpression(Left(key), defaultOpt) => lookupVar(key, defaultOpt)(ctx)
       case VarExpression(Right(expr), defaultOpt) =>
         run(expr).flatMap {
-          case Right(StrValue(name))                  => lookupVar(name, defaultOpt)
-          case Right(ArrayValue(StrValue(name) :: _)) => lookupVar(name, defaultOpt)
+          case Right(StrValue(name))                  => lookupVar(name, defaultOpt)(ctx)
+          case Right(ArrayValue(StrValue(name) :: _)) => lookupVar(name, defaultOpt)(ctx)
           case Right(v) => JsonLogicException(s"Got non-string input: $v").asLeft[JsonLogicValue].pure[F]
           case Left(ex) => ex.asLeft[JsonLogicValue].pure[F]
         }
@@ -62,16 +78,6 @@ object JsonLogicRuntime {
           result    <- argValues.flatTraverse(JsonLogicSemantics[F].applyOp(op)(_))
         } yield result
     }
-
-    def lookupVar(key: String, defaultOpt: Option[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] =
-      JsonLogicSemantics[F]
-        .getVar(key, ctx)
-        .map(_.orElse {
-          defaultOpt match {
-            case Some(d) => d.asRight[JsonLogicException]
-            case None    => NullValue.asRight[JsonLogicException]
-          }
-        })
 
     def callbackFunc(
       op:       JsonLogicOp,
@@ -96,16 +102,6 @@ object JsonLogicRuntime {
     expr: JsonLogicExpression,
     ctx:  Option[JsonLogicValue] = None
   ): F[Either[JsonLogicException, JsonLogicValue]] = {
-
-    def lookupVar(key: String, defaultOpt: Option[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] =
-      JsonLogicSemantics[F]
-        .getVar(key, ctx)
-        .map(_.orElse {
-          defaultOpt match {
-            case Some(d) => d.asRight[JsonLogicException]
-            case None    => NullValue.asRight[JsonLogicException]
-          }
-        })
 
     val initStack: Frame.Stack = List(Frame.Eval(expr, None))
 
@@ -141,7 +137,7 @@ object JsonLogicRuntime {
 
       // Handle VarExpr with Left(key)
       case Frame.Eval(VarExpression(Left(key), defaultOpt), contOpt) :: tail =>
-        lookupVar(key, defaultOpt)
+        lookupVar(key, defaultOpt)(ctx)
           .map {
             case Left(err)    => err.asLeft[JsonLogicValue].asRight[Frame.Stack]
             case Right(value) => contOpt.continueOrTerminate(value, tail)
@@ -223,9 +219,9 @@ object JsonLogicRuntime {
       case Frame.ApplyValue(value, Continuation(_, _, _, parentContOpt, _, defaultOpt, true, _, _)) :: tail =>
         (value match {
           case StrValue(name) =>
-            lookupVar(name, defaultOpt)
+            lookupVar(name, defaultOpt)(ctx)
           case ArrayValue(StrValue(name) :: _) =>
-            lookupVar(name, defaultOpt)
+            lookupVar(name, defaultOpt)(ctx)
           case v =>
             JsonLogicException(s"Got non-string input: $v").asLeft[JsonLogicValue].pure[F]
         }).map {
