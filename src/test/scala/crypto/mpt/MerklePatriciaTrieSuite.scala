@@ -729,20 +729,20 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
       Hash("AFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD1") -> "initial value 1",
       Hash("BFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD2") -> "initial value 2"
     )
-    
+
     val insertKey = Hash("CFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD3")
     val insertValue = "inserted value"
 
     for {
       trie1 <- MerklePatriciaTrie.create(initialLeafMap)
       root1 = trie1.rootNode.digest
-      
+
       trie2 <- MerklePatriciaTrie.insert(trie1, Map(insertKey -> insertValue)).flatMap(IO.fromEither(_))
       root2 = trie2.rootNode.digest
-      
+
       trie3 <- MerklePatriciaTrie.remove(trie2, List(insertKey)).flatMap(IO.fromEither(_))
       root3 = trie3.rootNode.digest
-      
+
     } yield expect(root1 == root3 && root1 != root2 && root2 != root3)
   }
 }
