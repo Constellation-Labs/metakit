@@ -6,20 +6,10 @@ import cats.syntax.either._
 import cats.syntax.flatMap._
 import cats.syntax.functor._
 
-import io.constellationnetwork.metagraph_sdk.crypto.mpt.{
-  MerklePatriciaCommitment,
-  MerklePatriciaInclusionProof,
-  MerklePatriciaNode,
-  MerklePatriciaTrie,
-  Nibble
-}
+import io.constellationnetwork.metagraph_sdk.crypto.mpt._
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher
 import io.constellationnetwork.security.hash.Hash
 
-/**
- * Type class for generating Merkle Patricia Trie inclusion proofs
- */
-// Interface for MerklePatriciaProver
 trait MerklePatriciaProver[F[_]] {
 
   /**

@@ -5,12 +5,7 @@ import cats.syntax.applicativeError._
 import cats.syntax.either._
 import cats.syntax.functor._
 
-import io.constellationnetwork.metagraph_sdk.crypto.mpt.{
-  MerklePatriciaCommitment,
-  MerklePatriciaInclusionProof,
-  MerklePatriciaNode,
-  Nibble
-}
+import io.constellationnetwork.metagraph_sdk.crypto.mpt._
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher
 import io.constellationnetwork.security.hash.Hash
 

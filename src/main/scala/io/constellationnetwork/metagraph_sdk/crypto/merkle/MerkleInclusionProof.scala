@@ -5,8 +5,8 @@ import cats.syntax.either._
 
 import io.constellationnetwork.security.hash.Hash
 
+import io.circe._
 import io.circe.syntax.EncoderOps
-import io.circe.{Decoder, DecodingFailure, Encoder, HCursor, Json}
 
 sealed trait MerkleProofError
 case class InvalidWitness(message: String) extends MerkleProofError

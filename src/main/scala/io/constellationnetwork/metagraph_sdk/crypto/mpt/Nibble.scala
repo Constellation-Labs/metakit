@@ -1,8 +1,9 @@
 package io.constellationnetwork.metagraph_sdk.crypto.mpt
 
 import cats.data.Validated
-import cats.implicits.toTraverseOps
+import cats.syntax.traverse._
 import cats.syntax.bifunctor._
+import cats.syntax.foldable._
 
 import scala.collection.immutable.ArraySeq
 
@@ -13,16 +14,20 @@ import io.circe.syntax.EncoderOps
 
 class Nibble private (val value: Byte) extends AnyVal {
 
-  override def toString: String = {
-    val hexChars = "0123456789abcdef".toCharArray
-    "" + hexChars(value & 0x0f)
-  }
+  override def toString: String = "" + Nibble.hexChars(value & 0x0f)
 }
 
 object Nibble {
   val empty: Nibble = new Nibble(0: Byte)
 
   private val hexChars: Array[Char] = "0123456789abcdef".toCharArray
+
+  private def charToByteValue(char: Char): Option[Byte] = char match {
+    case c if c >= '0' && c <= '9' => Some((c - '0').toByte)
+    case c if c >= 'a' && c <= 'f' => Some((c - 'a' + 10).toByte)
+    case c if c >= 'A' && c <= 'F' => Some((c - 'A' + 10).toByte)
+    case _ => None
+  }
 
   def apply(digest: Hash): Seq[Nibble] =
     digest.value.view.map(unsafe).to(ArraySeq)
@@ -36,17 +41,25 @@ object Nibble {
       Nibble.unsafe((byte & 0x0f).toByte)
     )
 
-  def fromHexString(hexString: String): Either[InvalidNibble, Seq[Nibble]] =
-    hexString.toList.traverse(validated(_).toEither).map(_.to(ArraySeq))
+  def fromHexString(hexString: String): Either[InvalidNibble, Seq[Nibble]] = {
+    val builder = ArraySeq.newBuilder[Nibble]
+    builder.sizeHint(hexString.length)
+
+    hexString.toCharArray.toList.foldM(builder) { (acc, char) =>
+      charToByteValue(char) match {
+        case Some(byteValue) => Right(acc += Nibble.unsafe(byteValue))
+        case None => Left(CharOutOfRange)
+      }
+    }.map(_.result())
+  }
 
   def unsafe(byte: Byte): Nibble = new Nibble(byte)
 
-  def unsafe(char: Char): Nibble = char match {
-    case c if c >= '0' && c <= '9' => Nibble.unsafe((c - '0').toByte)
-    case c if c >= 'a' && c <= 'f' => Nibble.unsafe((c - 'a' + 10).toByte)
-    case c if c >= 'A' && c <= 'F' => Nibble.unsafe((c - 'A' + 10).toByte)
-    case _                         => throw new IllegalArgumentException("Invalid character: " + char)
-  }
+  def unsafe(char: Char): Nibble =
+    charToByteValue(char) match {
+      case Some(byteValue) => Nibble.unsafe(byteValue)
+      case None => throw new IllegalArgumentException("Invalid character: " + char)
+    }
 
   def toBytes(nibbles: Seq[Nibble]): Array[Byte] =
     nibbles
@@ -60,12 +73,11 @@ object Nibble {
     if (byte >= 0 && byte <= 15) Validated.valid(new Nibble(byte))
     else Validated.invalid(ByteOutOfRange)
 
-  def validated(c: Char): Validated[InvalidNibble, Nibble] = c match {
-    case c if c >= '0' && c <= '9' => Validated.valid(Nibble.unsafe((c - '0').toByte))
-    case c if c >= 'a' && c <= 'f' => Validated.valid(Nibble.unsafe((c - 'a' + 10).toByte))
-    case c if c >= 'A' && c <= 'F' => Validated.valid(Nibble.unsafe((c - 'A' + 10).toByte))
-    case _                         => Validated.invalid(CharOutOfRange)
-  }
+  def validated(c: Char): Validated[InvalidNibble, Nibble] =
+    charToByteValue(c) match {
+      case Some(byteValue) => Validated.valid(Nibble.unsafe(byteValue))
+      case None => Validated.invalid(CharOutOfRange)
+    }
 
   def commonPrefix(a: Seq[Nibble], b: Seq[Nibble]): Seq[Nibble] =
     a.zip(b)

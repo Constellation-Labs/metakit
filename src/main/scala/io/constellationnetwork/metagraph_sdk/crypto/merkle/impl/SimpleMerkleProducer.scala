@@ -3,12 +3,7 @@ package io.constellationnetwork.metagraph_sdk.crypto.merkle.impl
 import cats.effect.{Ref, Sync}
 import cats.syntax.all._
 
-import io.constellationnetwork.metagraph_sdk.crypto.merkle.api.{
-  InvalidIndex,
-  MerkleProducer,
-  MerkleProducerError,
-  TreeBuildError
-}
+import io.constellationnetwork.metagraph_sdk.crypto.merkle.api._
 import io.constellationnetwork.metagraph_sdk.crypto.merkle.{MerkleNode, MerkleTree}
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher
 

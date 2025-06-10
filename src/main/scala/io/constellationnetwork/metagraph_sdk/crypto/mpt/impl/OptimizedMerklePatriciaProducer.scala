@@ -71,10 +71,8 @@ class OptimizedMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
         .grouped(batchSize)
         .toList
         .foldM[F, Either[MerklePatriciaError, MerklePatriciaTrie]](current.asRight[MerklePatriciaError]) {
-          case (Right(acc), batch) =>
-            insertBatch(acc, batch)
-          case (Left(err), _) =>
-            err.asLeft[MerklePatriciaTrie].pure[F]
+          case (Right(acc), batch) => insertBatch(acc, batch)
+          case (Left(err), _)      => err.asLeft[MerklePatriciaTrie].pure[F]
         }
         .handleError(e => OperationError(e.getMessage).asLeft[MerklePatriciaTrie])
     }
@@ -134,7 +132,6 @@ class OptimizedMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
       }
       .map(_.map(MerklePatriciaTrie(_)))
 
-  // InsertState stays the same
   sealed private trait InsertState
 
   private case class InsertContinue(
@@ -156,7 +153,6 @@ class OptimizedMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
     path:        Seq[Nibble],
     data:        Json
   ): F[Either[MerklePatriciaError, MerklePatriciaNode]] = {
-    // Helper functions to reduce code duplication
 
     // Efficiently create branch with two nodes
     def createBranchWithTwoNodes(
@@ -345,7 +341,6 @@ class OptimizedMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
     initialState.tailRecM[F, Either[MerklePatriciaError, MerklePatriciaNode]](step)
   }
 
-  // RemoveState stays the same
   sealed private trait RemoveState
 
   private case class RemoveContinue(
@@ -366,7 +361,7 @@ class OptimizedMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
     currentNode: MerklePatriciaNode,
     path:        Seq[Nibble]
   ): F[Either[MerklePatriciaError, MerklePatriciaNode]] = {
-    // Helper functions for common node operations
+
     def handleSingleRemainingChild(
       remainingNibble: Nibble,
       onlyChild:       MerklePatriciaNode,

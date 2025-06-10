@@ -5,12 +5,7 @@ import cats.syntax.all._
 
 import scala.annotation.tailrec
 
-import io.constellationnetwork.metagraph_sdk.crypto.merkle.api.{
-  InvalidIndex,
-  MerkleProducer,
-  MerkleProducerError,
-  TreeBuildError
-}
+import io.constellationnetwork.metagraph_sdk.crypto.merkle.api._
 import io.constellationnetwork.metagraph_sdk.crypto.merkle.{MerkleNode, MerkleTree}
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher
 import io.constellationnetwork.security.hash.Hash
