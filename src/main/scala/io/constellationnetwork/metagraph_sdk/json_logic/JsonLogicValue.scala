@@ -147,11 +147,11 @@ object CoercedValue {
   @tailrec
   def coerceToPrimitive(value: JsonLogicValue): Either[JsonLogicException, CoercedValue] =
     value match {
-      case NullValue           => CoercedNull.asRight
-      case BoolValue(b)        => CoercedBool(b).asRight
-      case IntValue(i)         => CoercedInt(i).asRight
-      case FloatValue(d)       => CoercedFloat(d).asRight
-      case StrValue(s)         =>
+      case NullValue     => CoercedNull.asRight
+      case BoolValue(b)  => CoercedBool(b).asRight
+      case IntValue(i)   => CoercedInt(i).asRight
+      case FloatValue(d) => CoercedFloat(d).asRight
+      case StrValue(s)   =>
         // JavaScript semantics: empty string coerces to 0, numeric strings coerce to their numeric value
         if (s.isEmpty) CoercedInt(0).asRight
         else s.toIntOption.fold[CoercedValue](CoercedString(s))(i => CoercedInt(i)).asRight
@@ -171,16 +171,16 @@ object CoercedValue {
     }
 
   private def safeParseBigInt(s: String): Option[BigInt] =
-    try {
+    try
       Some(BigInt(s))
-    } catch {
+    catch {
       case _: NumberFormatException => None
     }
 
   private def safeParseBigDecimal(s: String): Option[BigDecimal] =
-    try {
+    try
       Some(BigDecimal(s))
-    } catch {
+    catch {
       case _: NumberFormatException => None
     }
 

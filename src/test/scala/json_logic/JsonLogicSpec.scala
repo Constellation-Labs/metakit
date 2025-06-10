@@ -5,7 +5,6 @@ import cats.effect.IO
 import io.constellationnetwork.metagraph_sdk.json_logic._
 
 import io.circe.parser
-import org.scalacheck.{Arbitrary, Gen}
 import weaver.scalacheck.Checkers
 import weaver.{Expectations, SimpleIOSuite}
 
@@ -1653,7 +1652,6 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
       staticTestRunner(expr, data, BoolValue(false))
     }
   }
-
 
   test("reduce with empty array and no initial value should return null") {
     val exprStr = """{"reduce":[[], {"+":[{"var":"current"}, {"var":"accumulator"}]}]}"""
