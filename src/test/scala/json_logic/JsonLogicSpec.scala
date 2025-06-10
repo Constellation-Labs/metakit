@@ -5,6 +5,7 @@ import cats.effect.IO
 import io.constellationnetwork.metagraph_sdk.json_logic._
 
 import io.circe.parser
+import org.scalacheck.{Arbitrary, Gen}
 import weaver.scalacheck.Checkers
 import weaver.{Expectations, SimpleIOSuite}
 
@@ -31,6 +32,19 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         }
       }
       .map(actual => expect(actual == expected))
+
+  private def expectError(
+    expr: JsonLogicExpression,
+    data: JsonLogicValue
+  ): IO[Expectations] =
+    JsonLogicEvaluator
+      .tailRecursive[F]
+      .evaluate(expr, data, None)
+      .attempt
+      .map {
+        case Left(_)  => success
+        case Right(_) => failure("Expected an error but evaluation succeeded")
+      }
 
   test("should evaluate named variable to expected value given array syntax") {
     val exprStr =
@@ -1565,6 +1579,167 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
           )
         )
       )
+    }
+  }
+
+  test("division by zero should throw error for integer division") {
+    val exprStr = """{"/":[10, 0]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
+      expectError(expr, data)
+    }
+  }
+
+  test("division by zero should throw error for float division") {
+    val exprStr = """{"/":[10.5, 0.0]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
+      expectError(expr, data)
+    }
+  }
+
+  test("division by zero should throw error for mixed types") {
+    val exprStr = """{"/":[10, 0.0]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
+      expectError(expr, data)
+    }
+  }
+
+  test("modulo by zero should throw error for integer modulo") {
+    val exprStr = """{"%":[10, 0]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
+      expectError(expr, data)
+    }
+  }
+
+  test("modulo by zero should throw error for float modulo") {
+    val exprStr = """{"%":[10.5, 0.0]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
+      expectError(expr, data)
+    }
+  }
+
+  test("array access with negative index should return null") {
+    val exprStr = """{"var": -1}"""
+    val dataStr = """["zero", "one", "two"]"""
+
+    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
+      staticTestRunner(expr, data, NullValue)
+    }
+  }
+
+  test("array access with out-of-bounds index should return null") {
+    val exprStr = """{"var": 5}"""
+    val dataStr = """["zero", "one", "two"]"""
+
+    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
+      staticTestRunner(expr, data, NullValue)
+    }
+  }
+
+  test("string to number coercion should handle invalid numbers gracefully") {
+    val exprStr = """{"==":[1, "not_a_number"]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
+      staticTestRunner(expr, data, BoolValue(false))
+    }
+  }
+
+
+  test("reduce with empty array and no initial value should return null") {
+    val exprStr = """{"reduce":[[], {"+":[{"var":"current"}, {"var":"accumulator"}]}]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
+      staticTestRunner(expr, data, NullValue)
+    }
+  }
+
+  test("reduce with empty array and initial value should return initial value") {
+    val exprStr = """{"reduce":[[], {"+":[{"var":"current"}, {"var":"accumulator"}]}, 42]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
+      staticTestRunner(expr, data, IntValue(42))
+    }
+  }
+
+  test("reduce with non-empty array and no initial value should use first element") {
+    val exprStr = """{"reduce":[[1,2,3,4], {"+":[{"var":"current"}, {"var":"accumulator"}]}]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
+      staticTestRunner(expr, data, IntValue(10)) // 1 + 2 + 3 + 4 = 10
+    }
+  }
+
+  test("reduce with single element array and no initial value should return that element") {
+    val exprStr = """{"reduce":[[42], {"+":[{"var":"current"}, {"var":"accumulator"}]}]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
+      staticTestRunner(expr, data, IntValue(42))
+    }
+  }
+
+  test("division should work correctly with valid operands") {
+    val exprStr = """{"/":[10, 2]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
+      staticTestRunner(expr, data, IntValue(5))
+    }
+  }
+
+  test("modulo should work correctly with valid operands") {
+    val exprStr = """{"%":[10, 3]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
+      staticTestRunner(expr, data, IntValue(1))
+    }
+  }
+
+  test("array access should handle edge cases correctly") {
+    val testCases = List(
+      ("""{"var": 0}""", """["first", "second"]""", StrValue("first")),
+      ("""{"var": 1}""", """["first", "second"]""", StrValue("second")),
+      ("""{"var": 2}""", """["first", "second"]""", NullValue),
+      ("""{"var": -1}""", """["first", "second"]""", NullValue)
+    )
+
+    testCases.foldLeft(IO.pure(success)) { case (acc, (exprStr, dataStr, expected)) =>
+      acc.flatMap { prevResult =>
+        parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
+          staticTestRunner(expr, data, expected).map(result => prevResult and result)
+        }
+      }
+    }
+  }
+
+  test("type coercion should handle various string formats") {
+    val testCases = List(
+      ("""{"==":[1, "1"]}""", BoolValue(true)),
+      ("""{"==":[0, ""]}""", BoolValue(true)),
+      ("""{"==":[1, "not_a_number"]}""", BoolValue(false)),
+      ("""{"==":[123, "123abc"]}""", BoolValue(false))
+    )
+
+    testCases.foldLeft(IO.pure(success)) { case (acc, (exprStr, expected)) =>
+      acc.flatMap { prevResult =>
+        parseTestJson(exprStr, "null").flatMap { case (expr, data) =>
+          staticTestRunner(expr, data, expected).map(result => prevResult and result)
+        }
+      }
     }
   }
 }

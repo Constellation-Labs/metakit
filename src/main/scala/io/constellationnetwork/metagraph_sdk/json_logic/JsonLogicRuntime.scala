@@ -115,12 +115,10 @@ object JsonLogicRuntime {
       case Frame.Eval(ConstExpression(v), contOpt) :: tail =>
         contOpt.continueOrTerminate(v, tail).pure[F]
 
-      // Handle ArrayExpr (not in the original interpret)
       case Frame.Eval(ArrayExpression(args), contOpt) :: tail =>
         if (args.isEmpty) {
           contOpt.continueOrTerminate(ArrayValue(List.empty), tail).pure[F]
         } else {
-          // Create a continuation to collect array elements
           val newCont = Continuation(
             JsonLogicOp.NoOp,
             Nil,
@@ -135,7 +133,6 @@ object JsonLogicRuntime {
           (Frame.Eval(args.head, Some(newCont)) :: tail).asLeft[Either[JsonLogicException, JsonLogicValue]].pure[F]
         }
 
-      // Handle VarExpr with Left(key)
       case Frame.Eval(VarExpression(Left(key), defaultOpt), contOpt) :: tail =>
         lookupVar(key, defaultOpt)(ctx)
           .map {
@@ -143,7 +140,6 @@ object JsonLogicRuntime {
             case Right(value) => contOpt.continueOrTerminate(value, tail)
           }
 
-      // Handle VarExpr with Right(expr) (not in the original interpret)
       case Frame.Eval(VarExpression(Right(expr), defaultOpt), contOpt) :: tail =>
         // Create a continuation that will look up the variable after evaluating expr
         val varNameCont = Continuation(JsonLogicOp.NoOp, Nil, Nil, contOpt, None, defaultOpt, isVarName = true)
@@ -229,7 +225,7 @@ object JsonLogicRuntime {
           case Right(result) => parentContOpt.continueOrTerminate(result, tail)
         }
 
-      // Handle callback operations
+      // Handle applying a value to callback operations
       case Frame.ApplyValue(value, Continuation(op, _, _, parentContOpt, Some(cbExpr), _, _, _, _)) :: tail
           if Frame.isCallbackOp(op) =>
         value match {
@@ -248,16 +244,14 @@ object JsonLogicRuntime {
               .pure[F]
         }
 
-      // Handle ReduceOp with no explicit init value
+      // Handle ReduceOp without explicit init value (uses first array element)
       case Frame.ApplyValue(
-            arr @ ArrayValue(elements),
+            ArrayValue(elements),
             Continuation(ReduceOp, _, _, parentContOpt, Some(cbExpr), _, _, true, _)
           ) :: tail =>
         if (elements.isEmpty) {
-          // Empty array for reduce without init - return null
           parentContOpt.continueOrTerminate(NullValue, tail).pure[F]
         } else {
-          // Use first element as init and rest as the array
           val init = elements.head
           val rest = ArrayValue(elements.tail)
           JsonLogicSemantics[F]
@@ -270,40 +264,25 @@ object JsonLogicRuntime {
 
       // Handle ReduceOp with explicit init value
       case Frame.ApplyValue(
-            value,
-            Continuation(ReduceOp, processed, remaining, parentContOpt, Some(cbExpr), _, _, _, _)
+            arr @ ArrayValue(_),
+            Continuation(ReduceOp, List(init), Nil, parentContOpt, Some(cbExpr), _, _, false, _)
           ) :: tail =>
-        if (remaining.isEmpty) {
-          value match {
-            case arr @ ArrayValue(_) =>
-              processed match {
-                case List(init) =>
-                  JsonLogicSemantics[F]
-                    .applyOp(ReduceOp)(List(arr, FunctionValue(cbExpr), init))
-                    .map {
-                      case Left(err)  => err.asLeft[JsonLogicValue].asRight[Frame.Stack]
-                      case Right(res) => parentContOpt.continueOrTerminate(res, tail)
-                    }
-
-                case ex =>
-                  JsonLogicException(s"Invalid state for reduce operation, got: $ex")
-                    .asLeft[JsonLogicValue]
-                    .asRight[Frame.Stack]
-                    .pure[F]
-              }
-
-            case ex =>
-              JsonLogicException(s"Expected array value for callback operation, got: $ex")
-                .asLeft[JsonLogicValue]
-                .asRight[Frame.Stack]
-                .pure[F]
+        JsonLogicSemantics[F]
+          .applyOp(ReduceOp)(List(arr, FunctionValue(cbExpr), init))
+          .map {
+            case Left(err)  => err.asLeft[JsonLogicValue].asRight[Frame.Stack]
+            case Right(res) => parentContOpt.continueOrTerminate(res, tail)
           }
-        } else {
-          val newCont = Continuation(ReduceOp, List(value), remaining.tail, parentContOpt, Some(cbExpr))
-          (Frame.Eval(remaining.head, Some(newCont)) :: tail)
-            .asLeft[Either[JsonLogicException, JsonLogicValue]]
-            .pure[F]
-        }
+
+      // Handle ReduceOp continuation (still processing arguments)
+      case Frame.ApplyValue(
+            value,
+            cont @ Continuation(ReduceOp, _, remaining, _, _, _, _, false, _)
+          ) :: tail if remaining.nonEmpty =>
+        val newCont = cont.copy(processed = List(value), remaining = remaining.tail)
+        (Frame.Eval(remaining.head, Some(newCont)) :: tail)
+          .asLeft[Either[JsonLogicException, JsonLogicValue]]
+          .pure[F]
 
       // Standard value application
       case Frame.ApplyValue(

@@ -37,8 +37,8 @@ object JsonLogicSemantics {
           case (_, Some(NullValue))                 => base.asRight[JsonLogicException]
           case (_, Some(_: JsonLogicPrimitive))     => base.asRight[JsonLogicException]
           case (ArrayValue(l), Some(ArrayValue(r))) => ArrayValue(l ++ r).asRight
-          case (MapValue(l), Some(MapValue(r)))     => MapValue(l ++ r).asRight
-          case _ => JsonLogicException("Failed to combine semantic state and runtime context").asLeft
+          case (MapValue(l), Some(MapValue(r)))     => MapValue(r ++ l).asRight
+          case (_, Some(ctx))                       => ctx.asRight[JsonLogicException]
         }
 
         def getChild(
@@ -48,10 +48,10 @@ object JsonLogicSemantics {
           case ArrayValue(elements) =>
             segment.toLongOption match {
               case Some(idx) =>
-                elements.get(idx) match {
-                  case Some(child) => child.asRight
-                  case None =>
-                    JsonLogicException(s"Variable '$key' not found (array index $segment out of range)").asLeft
+                if (idx >= 0 && idx < elements.length) {
+                  elements(idx.toInt).asRight
+                } else {
+                  JsonLogicException(s"Variable '$key' not found (array index $segment out of range)").asLeft
                 }
               case None => JsonLogicException(s"Segment '$segment' is not a valid array index").asLeft
             }
@@ -323,9 +323,9 @@ object JsonLogicSemantics {
 
       private def handleModuloOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] =
         (args match {
-          case IntValue(l) :: IntValue(r) :: Nil if (l.toInt == 0 || r.toInt == 0) =>
+          case IntValue(l) :: IntValue(r) :: Nil if r == 0 =>
             new JsonLogicException("Division by zero in modulo operation").asLeft[JsonLogicValue]
-          case FloatValue(l) :: FloatValue(r) :: Nil if (l.toInt == 0 || r.toInt == 0) =>
+          case FloatValue(l) :: FloatValue(r) :: Nil if r == 0 =>
             new JsonLogicException("Division by zero in modulo operation").asLeft[JsonLogicValue]
           case IntValue(l) :: IntValue(r) :: Nil     => IntValue(l % r).asRight
           case FloatValue(l) :: FloatValue(r) :: Nil => FloatValue(l % r).asRight
@@ -476,10 +476,9 @@ object JsonLogicSemantics {
 
       private def handleDivOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] =
         (args match {
-          case IntValue(l) :: IntValue(r) :: Nil if (l.toInt == 0 || r.toInt == 0) =>
+          case IntValue(l) :: IntValue(r) :: Nil if r == 0 =>
             new JsonLogicException("Division by zero").asLeft[JsonLogicValue]
-          case FloatValue(l) :: FloatValue(r) :: Nil if (l.toInt == 0 || r.toInt == 0) =>
-            FloatValue(l % r).asRight
+          case FloatValue(l) :: FloatValue(r) :: Nil if r == 0 =>
             new JsonLogicException("Division by zero").asLeft[JsonLogicValue]
           case IntValue(l) :: IntValue(r) :: Nil     => IntValue(l / r).asRight
           case FloatValue(l) :: FloatValue(r) :: Nil => FloatValue(l / r).asRight
@@ -635,7 +634,12 @@ object JsonLogicSemantics {
           }
 
         args match {
-          case ArrayValue(arr) :: FunctionValue(expr) :: Nil => impl(arr, expr, arr.head.getDefault)
+          case ArrayValue(arr) :: FunctionValue(expr) :: Nil =>
+            if (arr.isEmpty) {
+              JsonLogicException(s"Cannot reduce empty array without initial value").asLeft[JsonLogicValue].pure[F]
+            } else {
+              impl(arr.tail, expr, arr.head)
+            }
           case ArrayValue(arr) :: FunctionValue(expr) :: (init: JsonLogicPrimitive) :: Nil => impl(arr, expr, init)
           case _ => JsonLogicException(s"Unexpected input to ${ReduceOp.tag}").asLeft[JsonLogicValue].pure[F]
         }

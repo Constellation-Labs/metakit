@@ -151,7 +151,10 @@ object CoercedValue {
       case BoolValue(b)        => CoercedBool(b).asRight
       case IntValue(i)         => CoercedInt(i).asRight
       case FloatValue(d)       => CoercedFloat(d).asRight
-      case StrValue(s)         => s.toIntOption.fold[CoercedValue](CoercedString(s))(i => CoercedInt(i)).asRight
+      case StrValue(s)         =>
+        // JavaScript semantics: empty string coerces to 0, numeric strings coerce to their numeric value
+        if (s.isEmpty) CoercedInt(0).asRight
+        else s.toIntOption.fold[CoercedValue](CoercedString(s))(i => CoercedInt(i)).asRight
       case FunctionValue(expr) => JsonLogicException(s"Cannot coerce FunctionValue($expr) to a primitive").asLeft
       case ArrayValue(elems) =>
         elems match {
@@ -167,6 +170,20 @@ object CoercedValue {
         }
     }
 
+  private def safeParseBigInt(s: String): Option[BigInt] =
+    try {
+      Some(BigInt(s))
+    } catch {
+      case _: NumberFormatException => None
+    }
+
+  private def safeParseBigDecimal(s: String): Option[BigDecimal] =
+    try {
+      Some(BigDecimal(s))
+    } catch {
+      case _: NumberFormatException => None
+    }
+
   def compareCoercedValues(l: CoercedValue, r: CoercedValue): Either[JsonLogicException, Boolean] =
     (l, r) match {
       case (CoercedNull, CoercedNull)             => true.asRight
@@ -176,10 +193,10 @@ object CoercedValue {
       case (CoercedBool(lb), CoercedInt(ri))      => (if (lb) ri == 1 else ri == 0).asRight
       case (CoercedInt(li), CoercedBool(rb))      => (if (rb) li == 1 else li == 0).asRight
       case (CoercedInt(li), CoercedInt(ri))       => (li == ri).asRight
-      case (CoercedInt(li), CoercedString(rs))    => (Option(BigInt(rs)).contains(li)).asRight
-      case (CoercedString(ls), CoercedInt(ri))    => (Option(BigInt(ls)).contains(ri)).asRight
-      case (CoercedFloat(li), CoercedString(rs))  => (Option(BigDecimal(rs)).contains(li)).asRight
-      case (CoercedString(ls), CoercedFloat(ri))  => (Option(BigDecimal(ls)).contains(ri)).asRight
+      case (CoercedInt(li), CoercedString(rs))    => safeParseBigInt(rs).exists(_ == li).asRight
+      case (CoercedString(ls), CoercedInt(ri))    => safeParseBigInt(ls).exists(_ == ri).asRight
+      case (CoercedFloat(li), CoercedString(rs))  => safeParseBigDecimal(rs).exists(_ == li).asRight
+      case (CoercedString(ls), CoercedFloat(ri))  => safeParseBigDecimal(ls).exists(_ == ri).asRight
       case (CoercedString(ls), CoercedString(rs)) => (ls == rs).asRight
       case _ => JsonLogicException(s"Cannot compare coerced values $l and $r").asLeft
     }

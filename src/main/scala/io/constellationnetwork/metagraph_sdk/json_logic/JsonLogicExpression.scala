@@ -8,9 +8,9 @@ import io.circe.syntax.EncoderOps
 
 sealed trait JsonLogicExpression
 
+final case class ApplyExpression(op: JsonLogicOp, args: List[JsonLogicExpression]) extends JsonLogicExpression
 final case class ConstExpression(value: JsonLogicValue) extends JsonLogicExpression
 final case class ArrayExpression(value: List[JsonLogicExpression]) extends JsonLogicExpression
-final case class ApplyExpression(op: JsonLogicOp, args: List[JsonLogicExpression]) extends JsonLogicExpression
 
 final case class VarExpression(value: Either[String, JsonLogicExpression], default: Option[JsonLogicValue] = None)
     extends JsonLogicExpression
