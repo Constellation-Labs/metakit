@@ -13,14 +13,6 @@ import io.constellationnetwork.security.hash.Hash
 trait MerklePatriciaProver[F[_]] {
 
   /**
-   * Generate a proof that a path exists in the trie
-   *
-   * @param path The path to prove inclusion for
-   * @return A proof of inclusion if the path exists, or an error
-   */
-  def attestPath(path: String): F[Either[MerklePatriciaProofError, MerklePatriciaInclusionProof]]
-
-  /**
    * Generate a proof that a digest exists in the trie
    *
    * @param digest The digest to prove inclusion for
@@ -39,12 +31,6 @@ object MerklePatriciaProver {
     trie: MerklePatriciaTrie
   )(implicit producer: JsonBinaryHasher[F]): MerklePatriciaProver[F] =
     new MerklePatriciaProver[F] {
-
-      def attestPath(path: String): F[Either[MerklePatriciaProofError, MerklePatriciaInclusionProof]] =
-        JsonBinaryHasher[F]
-          .computeDigest(path)
-          .flatMap(digest => attestDigest(digest))
-          .handleError(e => ProofGenerationError(e.getMessage).asLeft[MerklePatriciaInclusionProof])
 
       def attestDigest(digest: Hash): F[Either[MerklePatriciaProofError, MerklePatriciaInclusionProof]] = {
         type Continue = (MerklePatriciaNode, Seq[Nibble], List[MerklePatriciaCommitment])
@@ -113,19 +99,6 @@ object MerklePatriciaProver {
    * Import xyz.kd5ujc.accumulators.mpt.api.MerklePatriciaProver.syntax._ to use these extensions
    */
   object syntax {
-
-    implicit class MerklePatriciaPathOps(val path: String) extends AnyVal {
-
-      /**
-       * Generate a proof that this path exists in the trie
-       *
-       * @return A proof of inclusion if the path exists
-       */
-      def attestInclusion[F[_]](implicit
-        P: MerklePatriciaProver[F]
-      ): F[Either[MerklePatriciaProofError, MerklePatriciaInclusionProof]] =
-        P.attestPath(path)
-    }
 
     implicit class MerklePatriciaDigestOps(val digest: Hash) extends AnyVal {
 

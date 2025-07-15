@@ -20,23 +20,11 @@ trait MerklePatriciaVerifier[F[_]] {
    * @return Success if the proof is valid, error otherwise
    */
   def confirm(proof: MerklePatriciaInclusionProof): F[Either[MerklePatriciaVerificationError, Unit]]
-
-  /**
-   * Confirm that a path exists in the trie
-   *
-   * @param path The path to verify
-   * @param proof The inclusion proof for this path
-   * @return Success if the path exists and proof is valid
-   */
-  def confirmPath(path: String, proof: MerklePatriciaInclusionProof): F[Either[MerklePatriciaVerificationError, Unit]]
 }
 
 object MerklePatriciaVerifier {
   def apply[F[_]](implicit verifier: MerklePatriciaVerifier[F]): MerklePatriciaVerifier[F] = verifier
 
-  /**
-   * Create a verifier for a specific root digest
-   */
   def make[F[_]: MonadThrow](root: Hash)(implicit producer: JsonBinaryHasher[F]): MerklePatriciaVerifier[F] =
     new MerklePatriciaVerifier[F] {
 
@@ -103,7 +91,6 @@ object MerklePatriciaVerifier {
               )
           }
 
-        // Main verification logic using helper functions
         MonadThrow[F]
           .tailRecM[Continue, Return]((proof.witness.reverse, root, Nibble(proof.path))) {
             case (commitments, currentDigest, remainingPath) =>
@@ -125,13 +112,6 @@ object MerklePatriciaVerifier {
           }
           .handleError(e => InvalidWitness(s"Verification failed with error: ${e.getMessage}").asLeft[Unit])
       }
-
-      def confirmPath(
-        path:  String,
-        proof: MerklePatriciaInclusionProof
-      ): F[Either[MerklePatriciaVerificationError, Unit]] =
-        if (proof.path.value == path) confirm(proof)
-        else MonadThrow[F].pure(InvalidPath(s"Path mismatch: expected $path but got ${proof.path}").asLeft[Unit])
     }
 
   /**
@@ -150,20 +130,6 @@ object MerklePatriciaVerifier {
        */
       def confirm[F[_]](implicit V: MerklePatriciaVerifier[F]): F[Either[MerklePatriciaVerificationError, Unit]] =
         V.confirm(proof)
-    }
-
-    implicit class MerklePatriciaPathOps(val path: String) extends AnyVal {
-
-      /**
-       * Confirm this path exists in the trie
-       *
-       * @param proof The inclusion proof for this path
-       * @return Success if the path exists and proof is valid
-       */
-      def confirmInclusion[F[_]](proof: MerklePatriciaInclusionProof)(implicit
-        V: MerklePatriciaVerifier[F]
-      ): F[Either[MerklePatriciaVerificationError, Unit]] =
-        V.confirmPath(path, proof)
     }
   }
 }
