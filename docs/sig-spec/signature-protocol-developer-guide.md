@@ -17,6 +17,40 @@ JSON Data → RFC 8785 Canonicalization → UTF-8 Bytes → SHA-256 Hash → ECD
 3. **SHA-256 Hashing**: Compute 32-byte hash of the UTF-8 bytes
 4. **ECDSA Signature**: Sign using the Constellation-specific hex conversion step
 
+## Detailed Signature Creation Steps
+
+### For Regular Data Objects
+
+1. **Start with JSON data**: Take your structured data object containing fields and values
+
+2. **Apply RFC 8785 canonicalization**: Transform the JSON into a deterministic format by sorting object keys in UTF-16BE binary order, removing all whitespace between elements, and formatting numbers without trailing zeros
+
+3. **Convert to UTF-8 bytes**: Take the canonical JSON string and encode it as a UTF-8 byte array
+
+4. **Compute SHA-256 hash**: Feed the UTF-8 byte array into the SHA-256 algorithm to produce a 32-byte hash digest
+
+5. **Convert hash to hex string**: Take each byte of the hash and convert it to a two-character hexadecimal representation, resulting in a 64-character string
+
+6. **Treat hex string as UTF-8 bytes**: Take the hex string and encode it as UTF-8 bytes (not parsing it as hex, but treating the string itself as text)
+
+7. **Apply SHA-512**: Hash these UTF-8 bytes using SHA-512 to produce a 64-byte digest
+
+8. **Truncate to 32 bytes**: Take only the first 32 bytes of the SHA-512 output
+
+9. **Sign with ECDSA**: Use the truncated 32-byte value as input to ECDSA signing with your secp256k1 private key to produce a DER-encoded signature
+
+### For DataUpdate Objects
+
+1. **Steps 1-3 are identical**: Canonicalize JSON and convert to UTF-8 bytes
+
+2. **Base64 encode**: Convert the UTF-8 byte array to a Base64 string
+
+3. **Add Constellation prefix**: Create a new string starting with byte 0x19, followed by the text "Constellation Signed Data:\n", then the length of the Base64 string, a newline, and finally the Base64 string itself
+
+4. **Convert prefixed string to UTF-8 bytes**: Encode this entire prefixed string as UTF-8 bytes
+
+5. **Continue from step 4 above**: Compute SHA-256 hash and proceed with the same hex conversion and signing process
+
 ## Reference Implementations
 
 Each implementation demonstrates the complete protocol with cross-language compatibility:
