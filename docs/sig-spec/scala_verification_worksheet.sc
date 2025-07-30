@@ -1,9 +1,8 @@
-// IntelliJ IDEA Scala Worksheet for cross-language signature verification
-// To use: Open in IntelliJ, ensure "Use compile server" is checked in worksheet settings
-
-import cats.effect.{IO, Resource}
+import cats.effect.{Async, IO, Resource}
+import cats.effect.std.Console
 import cats.effect.unsafe.implicits.global
 import cats.syntax.all._
+import cats.{Applicative, FlatMap, MonadThrow}
 import derevo.cats.show
 import derevo.circe.magnolia.{decoder, encoder}
 import derevo.derive
@@ -18,161 +17,208 @@ import io.constellationnetwork.security.SecurityProvider
 import io.constellationnetwork.security.hash.Hash
 import io.constellationnetwork.security.hex.Hex
 import io.constellationnetwork.security.signature.signature.{Signature, SignatureProof}
-import fs2.io.file.Path
+import fs2.io.file.{Files, Path}
+import org.typelevel.log4cats.Logger
+import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 @derive(encoder, decoder, show)
 case class TestData(id: String, value: Int)
 
-@derive(encoder, decoder, show) 
+@derive(encoder, decoder, show)
 case class TestDataUpdate(id: String, value: Int) extends DataUpdate
 
-// IntelliJ runs from project root, so we need to check if test_vectors.json exists
-// First, let's see where we are running from
-val currentDir = System.getProperty("user.dir")
-println(s"Current working directory: $currentDir")
+sealed trait VerificationResult
+case class VerificationSuccess(
+                                canonicalMatches: Boolean,
+                                hashMatches: Boolean,
+                                signatureValid: Boolean
+                              ) extends VerificationResult
+case class VerificationFailure(error: String) extends VerificationResult
 
-// Try different path options relative to where IntelliJ might be running
-val paths = List(
-  "test_vectors.json",
-  "docs/sig-spec/test_vectors.json",
-  "git/metakit/docs/sig-spec/test_vectors.json",
-  "../metakit/docs/sig-spec/test_vectors.json"
-)
+case class TestVector(
+                       source: String,
+                       testType: String,
+                       dataJson: Json,
+                       expectedCanonical: String,
+                       expectedHashHex: String,
+                       signatureHex: String,
+                       publicKeyHex: String
+                     )
 
-// Find the first path that exists
-val foundPath = paths.find(p => java.nio.file.Files.exists(java.nio.file.Paths.get(p)))
-
-val testVectorsPath = foundPath match {
-  case Some(p) =>
-    println(s"Found test_vectors.json at: $p")
-    Path(p)
-  case None =>
-    println("Failed to find test_vectors.json in any of the expected locations:")
-    paths.foreach(p => println(s"  - $p"))
-    println("Defaulting to docs/sig-spec/test_vectors.json")
-    Path("docs/sig-spec/test_vectors.json")
+trait FileLoader[F[_]] {
+  def findTestVectorsPath(paths: List[String]): F[Option[Path]]
+  def loadJson(path: Path): F[Option[Json]]
 }
 
-// Helper functions
-def verifySignature(hash: Hash, signatureHex: String, publicKeyHex: String)(implicit sp: SecurityProvider[IO]): IO[Boolean] = {
-  val parseSignatureProof: IO[SignatureProof] = IO {
-    val publicKeyData = publicKeyHex.substring(2) // Remove "04" prefix
-    val id = Id(Hex(publicKeyData))
-    val signature = Signature(Hex(signatureHex))
-    SignatureProof(id, signature)
+trait SignatureVerifier[F[_]] {
+  def verifySignature(hash: Hash, signatureHex: String, publicKeyHex: String): F[Boolean]
+}
+
+trait VectorProcessor[F[_]] {
+  def parseVector(json: Json): F[TestVector]
+  def verifyTestData(data: TestData, expected: TestVector): F[VerificationResult]
+  def verifyTestDataUpdate(data: TestDataUpdate, expected: TestVector): F[VerificationResult]
+}
+
+object FileLoader {
+  def apply[F[_]: Async](files: Files[F]): FileLoader[F] = new FileLoader[F] {
+    def findTestVectorsPath(paths: List[String]): F[Option[Path]] =
+      paths.traverse { p =>
+        files.exists(Path(p)).map(exists => if (exists) Some(Path(p)) else None)
+      }.map(_.flatten.headOption)
+
+    def loadJson(path: Path): F[Option[Json]] =
+      files.readUtf8(path)
+        .compile
+        .string
+        .map(parser.parse(_).toOption)
+        .handleError(_ => None)
   }
-
-  parseSignatureProof
-    .flatTap(_ => IO.println("    Python signature components parsed successfully"))
-    .flatMap(proof => SignatureProtocol.verifier[IO].confirm(hash, proof))
-    .handleErrorWith { e =>
-      IO.println(s"    Signature verification failed: ${e.getMessage}").as(false)
-    }
 }
 
-def loadTestVectors(path: Path): IO[Option[Json]] = IO {
-  val javaPath = java.nio.file.Paths.get(path.toString)
-  println(s"Looking for test vectors at: ${javaPath.toAbsolutePath}")
-  
-  if (java.nio.file.Files.exists(javaPath)) {
-    val content = new String(java.nio.file.Files.readAllBytes(javaPath))
-    parser.parse(content) match {
-      case Right(json) => 
-        println("✓ Test vectors loaded successfully")
-        Some(json)
-      case Left(error) =>
-        println(s"✗ Failed to parse test_vectors.json: $error")
-        None
-    }
-  } else {
-    println("✗ test_vectors.json not found.")
-    println("Run python_verification_example.py first to generate test vectors.")
-    val parentDir = javaPath.getParent
-    if (parentDir != null && java.nio.file.Files.exists(parentDir)) {
-      println(s"Files in ${parentDir}:")
-      import scala.jdk.CollectionConverters._
-      java.nio.file.Files.list(parentDir).iterator().asScala.take(10).foreach { p =>
-        println(s"  - ${p.getFileName}")
+object SignatureVerifier {
+  def apply[F[_]: Async](implicit sp: SecurityProvider[F]): SignatureVerifier[F] =
+    new SignatureVerifier[F] {
+      def verifySignature(hash: Hash, signatureHex: String, publicKeyHex: String): F[Boolean] = {
+        val parseSignatureProof = Async[F].catchNonFatal {
+          val publicKeyData = publicKeyHex.substring(2)
+          val id = Id(Hex(publicKeyData))
+          val signature = Signature(Hex(signatureHex))
+          SignatureProof(id, signature)
+        }
+
+        parseSignatureProof
+          .flatMap(SignatureProtocol.verifier[F].confirm(hash, _))
+          .handleError(_ => false)
       }
     }
-    None
+}
+
+object VectorProcessor {
+  def apply[F[_]: MonadThrow](
+                               signatureVerifier: SignatureVerifier[F]
+                             ): VectorProcessor[F] = new VectorProcessor[F] {
+
+    def parseVector(json: Json): F[TestVector] = MonadThrow[F].fromEither {
+      val cursor = json.hcursor
+      for {
+        source <- cursor.get[String]("source")
+        testType <- cursor.get[String]("type")
+        dataJson <- cursor.get[Json]("data")
+        expectedCanonical <- cursor.get[String]("canonical_json")
+        expectedHashHex <- cursor.get[String]("sha256_hash_hex")
+        signatureHex <- cursor.get[String]("signature_hex")
+        publicKeyHex <- cursor.get[String]("public_key_hex")
+      } yield TestVector(
+        source, testType, dataJson, expectedCanonical,
+        expectedHashHex, signatureHex, publicKeyHex
+      )
+    }
+
+    def verifyTestData(data: TestData, expected: TestVector): F[VerificationResult] =
+      for {
+        canonical <- data.toCanonicalString(MonadThrow[F], implicitly)
+        hash <- data.computeDigest(MonadThrow[F], JsonBinaryCodec[F, TestData])
+        sigValid <- signatureVerifier.verifySignature(hash, expected.signatureHex, expected.publicKeyHex)
+      } yield VerificationSuccess(
+        canonicalMatches = canonical == expected.expectedCanonical,
+        hashMatches = hash.value == expected.expectedHashHex,
+        signatureValid = sigValid
+      )
+
+    def verifyTestDataUpdate(data: TestDataUpdate, expected: TestVector): F[VerificationResult] =
+      for {
+        canonical <- data.toCanonicalString(MonadThrow[F], implicitly)
+        hash <- data.computeDigest(MonadThrow[F], JsonBinaryCodec[F, TestDataUpdate])
+        sigValid <- signatureVerifier.verifySignature(hash, expected.signatureHex, expected.publicKeyHex)
+      } yield VerificationSuccess(
+        canonicalMatches = canonical == expected.expectedCanonical,
+        hashMatches = hash.value == expected.expectedHashHex,
+        signatureValid = sigValid
+      )
   }
 }
 
-def verifyTestVector(vector: Json, index: Int)(implicit sp: SecurityProvider[IO]): IO[Unit] = {
-  val testType = vector.hcursor.get[String]("type").getOrElse("Unknown")
-  val dataJson = vector.hcursor.get[Json]("data").getOrElse(Json.Null)
-  val expectedCanonical = vector.hcursor.get[String]("canonical_json").getOrElse("")
-  val expectedHashHex = vector.hcursor.get[String]("sha256_hash_hex").getOrElse("")
-  val signatureHex = vector.hcursor.get[String]("signature_hex").getOrElse("")
-  val publicKeyHex = vector.hcursor.get[String]("public_key_hex").getOrElse("")
+class VerificationProgram[F[_]: MonadThrow: Logger](
+                                                     fileLoader: FileLoader[F],
+                                                     vectorProcessor: VectorProcessor[F]
+                                                   ) {
 
-  for {
-    _ <- IO.println(s"Verifying Test Vector ${index + 1} ($testType):")
-    _ <- testType match {
-      case "TestData" =>
-        dataJson.as[TestData] match {
-          case Right(testData) =>
-            for {
-              canonical <- testData.toCanonicalString(cats.MonadThrow[IO], implicitly)
-              hash <- testData.computeDigest(cats.MonadThrow[IO], JsonBinaryCodec[IO, TestData])
-              pythonSigVerified <- verifySignature(hash, signatureHex, publicKeyHex)
-              _ <- IO {
-                println(s"  ✓ Canonical JSON matches: ${canonical == expectedCanonical}")
-                println(s"  ✓ SHA-256 hash matches: ${hash.value == expectedHashHex}")
-                println(s"  ✓ Python signature verified: $pythonSigVerified")
-              }
-            } yield ()
-          case Left(error) =>
-            IO.println(s"  ✗ Failed to parse TestData: $error")
-        }
-        
-      case "TestDataUpdate" =>
-        dataJson.as[TestDataUpdate] match {
-          case Right(testUpdate) =>
-            for {
-              canonical <- testUpdate.toCanonicalString(cats.MonadThrow[IO], implicitly)
-              hash <- testUpdate.computeDigest(cats.MonadThrow[IO], JsonBinaryCodec[IO, TestDataUpdate])
-              pythonSigVerified <- verifySignature(hash, signatureHex, publicKeyHex)
-              _ <- IO {
-                println(s"  ✓ Canonical JSON matches: ${canonical == expectedCanonical}")
-                println(s"  ✓ SHA-256 hash matches: ${hash.value == expectedHashHex}")
-                println(s"  ✓ Python signature verified: $pythonSigVerified")
-              }
-            } yield ()
-          case Left(error) =>
-            IO.println(s"  ✗ Failed to parse TestDataUpdate: $error")
-        }
-        
-      case _ =>
-        IO.println(s"  ✗ Unknown test type: $testType")
+  val testVectorPaths = List(
+    "test_vectors.json",
+    "docs/sig-spec/test_vectors.json",
+    "git/metakit/docs/sig-spec/test_vectors.json",
+    "../metakit/docs/sig-spec/test_vectors.json"
+  )
+
+  def verifyVector(vector: Json, index: Int): F[Unit] =
+    vectorProcessor.parseVector(vector).flatMap { tv =>
+      val result = tv.testType match {
+        case "TestData" =>
+          tv.dataJson.as[TestData].fold(
+            err => VerificationFailure(s"Failed to parse TestData: $err").pure[F],
+            data => vectorProcessor.verifyTestData(data, tv)
+          )
+        case "TestDataUpdate" =>
+          tv.dataJson.as[TestDataUpdate].fold(
+            err => VerificationFailure(s"Failed to parse TestDataUpdate: $err").pure[F],
+            data => vectorProcessor.verifyTestDataUpdate(data, tv)
+          )
+        case other =>
+          VerificationFailure(s"Unknown test type: $other").pure[F]
+      }
+
+      result.flatMap {
+        case VerificationSuccess(canonical, hash, sig) =>
+          Logger[F].info(s"Test Vector ${index + 1} (${tv.source} ${tv.testType}):") *>
+            Logger[F].info(s"  ✓ Canonical JSON matches: $canonical") *>
+            Logger[F].info(s"  ✓ SHA-256 hash matches: $hash") *>
+            Logger[F].info(s"  ✓ Signature verified: $sig")
+        case VerificationFailure(err) =>
+          Logger[F].error(s"✗ Test Vector ${index + 1} failed: $err")
+      }
     }
-    _ <- IO.println("")
+
+  def run: F[Unit] = for {
+    _ <- Logger[F].info("=== Scala: Cross-Language Signature Verification ===")
+
+    maybePath <- fileLoader.findTestVectorsPath(testVectorPaths)
+
+    _ <- maybePath.fold(
+      Logger[F].error("Failed to find test_vectors.json in any expected location") *>
+        testVectorPaths.traverse_(p => Logger[F].info(s"  - $p"))
+    )(path => Logger[F].info(s"Found test_vectors.json at: $path"))
+
+    _ <- maybePath.traverse_ { path =>
+      fileLoader.loadJson(path).flatMap {
+        case Some(json) =>
+          json.asArray.fold(
+            Logger[F].error("Failed to parse test vectors as array")
+          )(vectors =>
+            vectors.zipWithIndex.traverse_ { case (vector, index) =>
+              verifyVector(vector, index)
+            }
+          )
+        case None =>
+          Logger[F].error("Failed to load test vectors JSON")
+      }
+    }
   } yield ()
 }
 
-// Main verification program
-val verificationProgram: Resource[IO, IO[Unit]] = {
+val program: Resource[IO, IO[Unit]] =
   SecurityProvider.forAsync[IO].map { implicit sp =>
-    for {
-      _ <- IO.println("=== Scala: Verifying Python Signatures ===\n")
-      testVectorsJson <- loadTestVectors(testVectorsPath)
-      _ <- testVectorsJson match {
-        case Some(json) =>
-          json.asArray match {
-            case Some(vectors) =>
-              vectors.zipWithIndex.traverse_ { case (vector, index) =>
-                verifyTestVector(vector, index)
-              }
-            case None =>
-              IO.println("Failed to parse test vectors as array")
-          }
-        case None =>
-          IO.unit
-      }
-    } yield ()
-  }
-}
+    implicit val logger: Logger[IO] = Slf4jLogger.getLogger[IO]
+    val files: Files[IO] = Files[IO]
 
-// Execute the program
-verificationProgram.use(identity).unsafeRunSync()
+    val fileLoader = FileLoader[IO](files)
+    val signatureVerifier = SignatureVerifier[IO]
+    val vectorProcessor = VectorProcessor[IO](signatureVerifier)
+
+    new VerificationProgram[IO](
+      fileLoader,
+      vectorProcessor
+    ).run
+  }
+
+program.use(identity).unsafeRunSync()
