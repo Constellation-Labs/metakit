@@ -1,0 +1,54 @@
+[
+  {
+    "source": "python",
+    "type": "TestData",
+    "data": {
+      "id": "python-test-data-001",
+      "value": 42
+    },
+    "canonical_json": "{\"id\":\"python-test-data-001\",\"value\":42}",
+    "utf8_bytes_hex": "7b226964223a22707974686f6e2d746573742d646174612d303031222c2276616c7565223a34327d",
+    "sha256_hash_hex": "8ea0ee8225a7e0cf0a93962a601dd5349e95ab0ab8f95441098d0e4ecdcf2651",
+    "signature_hex": "3044022055f090af50998d092c9db4a4e1b576eced84e3114bc7f2dfad3a311348fb5fe4022077c38af9c689a304b15d02967b81dbfd2c8f7d0f0af3755a7b1a0390aa71bb7a",
+    "public_key_hex": "047a0dc7f12dcddff7b9c3a9a20856a5a7204fe9da0cf6c7376833d690dbd8f3f6e794ed426bf897b04408d205cc8e9ce34691bc3b0442b119d4a228a3f2017dd8"
+  },
+  {
+    "source": "python",
+    "type": "TestDataUpdate",
+    "data": {
+      "id": "python-test-update-001",
+      "value": 123
+    },
+    "canonical_json": "{\"id\":\"python-test-update-001\",\"value\":123}",
+    "utf8_bytes_hex": "19436f6e7374656c6c6174696f6e205369676e656420446174613a0a36300a65794a705a434936496e423564476876626931305a584e304c5856775a4746305a5330774d4445694c434a32595778315a5349364d54497a66513d3d",
+    "sha256_hash_hex": "66060d26e00103ba9580cf622f964f0455af74d514aaf2de7be3d22a03c49dec",
+    "signature_hex": "304402201f1489a2aa9ff649ff28e779c38c8b07a9cbdb3e58428c7f9d9f67cca4f7bfb602204e7d2c989ef17060a57e2cc52f73df18c620888e2917bc1107e1f50e245a02f3",
+    "public_key_hex": "047a0dc7f12dcddff7b9c3a9a20856a5a7204fe9da0cf6c7376833d690dbd8f3f6e794ed426bf897b04408d205cc8e9ce34691bc3b0442b119d4a228a3f2017dd8"
+  },
+  {
+    "source": "python",
+    "type": "TestData",
+    "data": {
+      "id": "python-test-data-002",
+      "value": 999
+    },
+    "canonical_json": "{\"id\":\"python-test-data-002\",\"value\":999}",
+    "utf8_bytes_hex": "7b226964223a22707974686f6e2d746573742d646174612d303032222c2276616c7565223a3939397d",
+    "sha256_hash_hex": "1dae9a20a46f9db92beaaa63368b9700d762ca2cc32f9cedfc04aff44ff2cdba",
+    "signature_hex": "3045022100be6e5b53e0934724e6d381833c40021ae21252b5afa732709a7e8d58f03064960220608cf4e671e9cbc605157d09b5533b80ca00559a8858eb0574f7eb36352f7054",
+    "public_key_hex": "047a0dc7f12dcddff7b9c3a9a20856a5a7204fe9da0cf6c7376833d690dbd8f3f6e794ed426bf897b04408d205cc8e9ce34691bc3b0442b119d4a228a3f2017dd8"
+  },
+  {
+    "source": "python",
+    "type": "TestDataUpdate",
+    "data": {
+      "id": "python-test-update-002",
+      "value": 777
+    },
+    "canonical_json": "{\"id\":\"python-test-update-002\",\"value\":777}",
+    "utf8_bytes_hex": "19436f6e7374656c6c6174696f6e205369676e656420446174613a0a36300a65794a705a434936496e423564476876626931305a584e304c5856775a4746305a5330774d4449694c434a32595778315a5349364e7a633366513d3d",
+    "sha256_hash_hex": "2deb0501d3615a6aa1b6ca33fcb327acb7f03fac574a9fd59a9fdee72bd357f7",
+    "signature_hex": "3045022100b66c5d177f9a4d9518cc31e516f17da30f839ec5686b3e1c9a53b18e77074b35022071c23a9bad114f09a75af60f63160bdc02b2541448c23366017daac2973873f8",
+    "public_key_hex": "047a0dc7f12dcddff7b9c3a9a20856a5a7204fe9da0cf6c7376833d690dbd8f3f6e794ed426bf897b04408d205cc8e9ce34691bc3b0442b119d4a228a3f2017dd8"
+  }
+]

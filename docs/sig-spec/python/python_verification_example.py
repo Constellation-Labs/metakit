@@ -14,6 +14,7 @@ from typing import Dict, Any, List
 from dataclasses import dataclass
 from ecdsa import SigningKey, VerifyingKey, SECP256k1
 from ecdsa.util import sigdecode_der, sigencode_der
+import rfc8785
 
 
 @dataclass
@@ -34,36 +35,12 @@ class TestDataUpdate:
         return {"id": self.id, "value": self.value}
 
 
-def canonicalize_json_rfc8785(obj: Any) -> str:
-    """Canonicalize JSON according to RFC 8785"""
-    if obj is None:
-        return "null"
-    elif isinstance(obj, bool):
-        return "true" if obj else "false"
-    elif isinstance(obj, (int, float)):
-        if obj == int(obj):
-            return str(int(obj))
-        return json.dumps(float(obj))
-    elif isinstance(obj, str):
-        return '"' + obj.replace('\\', '\\\\').replace('"', '\\"') + '"'
-    elif isinstance(obj, list):
-        items = [canonicalize_json_rfc8785(item) for item in obj]
-        return "[" + ",".join(items) + "]"
-    elif isinstance(obj, dict):
-        # Sort by UTF-16BE bytes
-        sorted_items = sorted(obj.items(), key=lambda x: x[0].encode('utf-16-be'))
-        items = [f'"{k}":{canonicalize_json_rfc8785(v)}' for k, v in sorted_items]
-        return "{" + ",".join(items) + "}"
-    elif hasattr(obj, 'to_dict'):
-        return canonicalize_json_rfc8785(obj.to_dict())
-    else:
-        raise ValueError(f"Cannot canonicalize object of type {type(obj)}")
-
-
 def serialize_data(data: Any, is_data_update: bool = False) -> bytes:
-    """Serialize data according to Constellation protocol"""
-    canonical_json = canonicalize_json_rfc8785(data)
-    utf8_bytes = canonical_json.encode('utf-8')
+    if hasattr(data, 'to_dict'):
+        data = data.to_dict()
+    
+    # Use RFC 8785 canonical JSON serialization (returns bytes)
+    utf8_bytes = rfc8785.dumps(data)
     
     if is_data_update:
         # Add Constellation prefix for DataUpdate
@@ -106,15 +83,16 @@ def create_test_vectors() -> List[Dict[str, Any]]:
     test_vectors = []
     
     # Test vector 1: Regular TestData
-    test_data = TestData(id="cross-verify-001", value=42)
+    test_data = TestData(id="python-test-data-001", value=42)
     data_bytes = serialize_data(test_data)
     hash_bytes = compute_hash(data_bytes)
     signature = sign_hash(hash_bytes, private_key)
     
     test_vectors.append({
+        "source": "python",
         "type": "TestData",
         "data": test_data.to_dict(),
-        "canonical_json": canonicalize_json_rfc8785(test_data),
+        "canonical_json": rfc8785.dumps(test_data.to_dict()).decode('utf-8'),
         "utf8_bytes_hex": data_bytes.hex(),
         "sha256_hash_hex": hash_bytes.hex(),
         "signature_hex": signature.hex(),
@@ -122,19 +100,53 @@ def create_test_vectors() -> List[Dict[str, Any]]:
     })
     
     # Test vector 2: TestDataUpdate with Constellation prefix
-    test_update = TestDataUpdate(id="cross-verify-update", value=123)
+    test_update = TestDataUpdate(id="python-test-update-001", value=123)
     update_bytes = serialize_data(test_update, is_data_update=True)
     update_hash_bytes = compute_hash(update_bytes)
     update_signature = sign_hash(update_hash_bytes, private_key)
     
     test_vectors.append({
+        "source": "python",
         "type": "TestDataUpdate",
         "data": test_update.to_dict(),
-        "canonical_json": canonicalize_json_rfc8785(test_update),
-        "serialized_with_prefix": update_bytes.decode('utf-8'),
+        "canonical_json": rfc8785.dumps(test_update.to_dict()).decode('utf-8'),
         "utf8_bytes_hex": update_bytes.hex(),
         "sha256_hash_hex": update_hash_bytes.hex(),
         "signature_hex": update_signature.hex(),
+        "public_key_hex": public_key_hex
+    })
+    
+    # Test vector 3: Additional TestData with different values
+    test_data_2 = TestData(id="python-test-data-002", value=999)
+    data_bytes_2 = serialize_data(test_data_2)
+    hash_bytes_2 = compute_hash(data_bytes_2)
+    signature_2 = sign_hash(hash_bytes_2, private_key)
+    
+    test_vectors.append({
+        "source": "python",
+        "type": "TestData",
+        "data": test_data_2.to_dict(),
+        "canonical_json": rfc8785.dumps(test_data_2.to_dict()).decode('utf-8'),
+        "utf8_bytes_hex": data_bytes_2.hex(),
+        "sha256_hash_hex": hash_bytes_2.hex(),
+        "signature_hex": signature_2.hex(),
+        "public_key_hex": public_key_hex
+    })
+    
+    # Test vector 4: Additional TestDataUpdate
+    test_update_2 = TestDataUpdate(id="python-test-update-002", value=777)
+    update_bytes_2 = serialize_data(test_update_2, is_data_update=True)
+    update_hash_bytes_2 = compute_hash(update_bytes_2)
+    update_signature_2 = sign_hash(update_hash_bytes_2, private_key)
+    
+    test_vectors.append({
+        "source": "python",
+        "type": "TestDataUpdate",
+        "data": test_update_2.to_dict(),
+        "canonical_json": rfc8785.dumps(test_update_2.to_dict()).decode('utf-8'),
+        "utf8_bytes_hex": update_bytes_2.hex(),
+        "sha256_hash_hex": update_hash_bytes_2.hex(),
+        "signature_hex": update_signature_2.hex(),
         "public_key_hex": public_key_hex
     })
     

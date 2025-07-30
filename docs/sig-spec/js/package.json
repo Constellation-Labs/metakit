@@ -1,0 +1,24 @@
+{
+  "name": "constellation-signature-verification",
+  "version": "1.0.0",
+  "description": "JavaScript implementation of Constellation Network signature protocol",
+  "main": "javascript_verification_example.js",
+  "type": "module",
+  "scripts": {
+    "test": "node javascript_verification_example.js"
+  },
+  "keywords": [
+    "constellation",
+    "signature",
+    "ecdsa",
+    "secp256k1"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "canonicalize": "^2.0.0",
+    "elliptic": "^6.5.4",
+    "js-sha256": "^0.9.0",
+    "js-sha512": "^0.8.0"
+  }
+}

@@ -1,0 +1,54 @@
+[
+  {
+    "source": "go",
+    "type": "TestData",
+    "data": {
+      "id": "go-test-data-001",
+      "value": 42
+    },
+    "canonical_json": "{\"id\":\"go-test-data-001\",\"value\":42}",
+    "utf8_bytes_hex": "7b226964223a22676f2d746573742d646174612d303031222c2276616c7565223a34327d",
+    "sha256_hash_hex": "dc741f95b8aceba8aec928c20d657f4c3ca55bcb300a35667dd1b4f5ef1a4514",
+    "signature_hex": "3045022100820511ff711cc15a27f8c7b3779a8c9282c5620cfcc9ab1a6034f58f7e8052fc022051a669979667b1a1fcb4d71271ffc89a8a4a9e6b497121e18347f9e310a4ab18",
+    "public_key_hex": "04ef14c68b1b7b5652d37c295d435fd44de290a8f8a57d73d44e1eb2da40929b9b6444740d793ecb249d37a573dc1702014ab445d0176da5ddf233404107667b10"
+  },
+  {
+    "source": "go",
+    "type": "TestDataUpdate",
+    "data": {
+      "id": "go-test-update-001",
+      "value": 123
+    },
+    "canonical_json": "{\"id\":\"go-test-update-001\",\"value\":123}",
+    "utf8_bytes_hex": "19436f6e7374656c6c6174696f6e205369676e656420446174613a0a35320a65794a705a434936496d64764c58526c633351746458426b5958526c4c5441774d534973496e5a686248566c496a6f784d6a4e39",
+    "sha256_hash_hex": "a114354747a4ffceb35296e8fb98cc5fbbff82df4eb5c8342baf92cb1a58945f",
+    "signature_hex": "3044022004e4ff590e8185adcc257a248c333dc83d52334ecfd64295b673fb2e471d7479022054e4b017ca34c8806e3a6e438bebf0a0e29935e3f43203b231cf1881b66bd7d3",
+    "public_key_hex": "04ef14c68b1b7b5652d37c295d435fd44de290a8f8a57d73d44e1eb2da40929b9b6444740d793ecb249d37a573dc1702014ab445d0176da5ddf233404107667b10"
+  },
+  {
+    "source": "go",
+    "type": "TestData",
+    "data": {
+      "id": "go-test-data-002",
+      "value": 777
+    },
+    "canonical_json": "{\"id\":\"go-test-data-002\",\"value\":777}",
+    "utf8_bytes_hex": "7b226964223a22676f2d746573742d646174612d303032222c2276616c7565223a3737377d",
+    "sha256_hash_hex": "e67fa7209ac35383cbada6340d29c6e8582ff96b47cae2e4e053b22d6c755428",
+    "signature_hex": "304402203bc4366499bd89568cd66f6e6fbce9796248fcd478b6a7dbcc826c58d7add04b0220166b793f6ebbdbc56727bed5d9537c2728dd57975e1bb1c583891c7caf8f399c",
+    "public_key_hex": "04ef14c68b1b7b5652d37c295d435fd44de290a8f8a57d73d44e1eb2da40929b9b6444740d793ecb249d37a573dc1702014ab445d0176da5ddf233404107667b10"
+  },
+  {
+    "source": "go",
+    "type": "TestDataUpdate",
+    "data": {
+      "id": "go-test-update-002",
+      "value": 555
+    },
+    "canonical_json": "{\"id\":\"go-test-update-002\",\"value\":555}",
+    "utf8_bytes_hex": "19436f6e7374656c6c6174696f6e205369676e656420446174613a0a35320a65794a705a434936496d64764c58526c633351746458426b5958526c4c5441774d694973496e5a686248566c496a6f314e545639",
+    "sha256_hash_hex": "dea2ec20af3c4f0c04a6bd67046d46c4542809930c2eda65640161761a945cf7",
+    "signature_hex": "3045022100f3adfebab9f558ae79f103a0a8dc3a53fa485b282a1e6891aef5bfa3a564de0802201cb15e33c67793de391a0e31148bc2b9b0013dec6872bba98c71ab7e929f87d1",
+    "public_key_hex": "04ef14c68b1b7b5652d37c295d435fd44de290a8f8a57d73d44e1eb2da40929b9b6444740d793ecb249d37a573dc1702014ab445d0176da5ddf233404107667b10"
+  }
+]

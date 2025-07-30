@@ -191,3 +191,93 @@ env/
 # Generated test files
 # ------------------------
 test_vectors.json
+# Exception: Allow JSON files in docs directory
+!docs/**/*.json
+
+# ------------------------
+# Additional Language Dependencies
+# ------------------------
+
+# Python
+pip-log.txt
+pip-delete-this-directory.txt
+.pip
+.Python
+pipenv
+Pipfile.lock
+requirements-dev.txt
+.venv*
+venv*
+env*
+ENV*
+env.bak/
+venv.bak/
+site-packages/
+.wheel/
+.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+*.manifest
+*.spec
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+pyrightconfig.json
+
+# Node.js / JavaScript
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+.pnpm/
+.npm
+.eslintcache
+.rpt2_cache/
+.rts2_cache_cjs/
+.rts2_cache_es/
+.rts2_cache_umd/
+.nyc_output
+.next
+.nuxt
+.cache
+.parcel-cache
+.svelte-kit
+.storybook-static
+coverage/
+lib-cov/
+jspm_packages/
+web_modules/
+typings/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+.cache/
+go.work
+go.work.sum
+vendor/
+
+# Rust
+target/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# Claude Code
+.claude/
+.claude-session-history
+claude-session.md

@@ -1,0 +1,54 @@
+[
+  {
+    "source": "javascript",
+    "type": "TestData",
+    "data": {
+      "id": "javascript-test-data-001",
+      "value": 42
+    },
+    "canonical_json": "{\"id\":\"javascript-test-data-001\",\"value\":42}",
+    "utf8_bytes_hex": "7b226964223a226a6176617363726970742d746573742d646174612d303031222c2276616c7565223a34327d",
+    "sha256_hash_hex": "f42068267fe1f15d35212c5852fe2cb59225a8ec0955f555ddfb598ca2f7da5d",
+    "signature_hex": "30440220368de64b39d7f8ebc81cd31837f164402af7fd8cbb2f610e0b7e6e1cb920a8db0220098a6808848ed9173da7d0f3a4f34e577e7971317c40892cb898211002553beb",
+    "public_key_hex": "040e0dda0ab6d68df727b6d1f38fcecea1e2c5637dfabadd0a40ca93a746cfd07b231bf82d78033c3377926ed7ae165890c3f503bdf8a2b78c6deaa69ba8009ad9"
+  },
+  {
+    "source": "javascript",
+    "type": "TestDataUpdate",
+    "data": {
+      "id": "javascript-test-update-001",
+      "value": 123
+    },
+    "canonical_json": "{\"id\":\"javascript-test-update-001\",\"value\":123}",
+    "utf8_bytes_hex": "19436f6e7374656c6c6174696f6e205369676e656420446174613a0a36340a65794a705a434936496d7068646d467a59334a70634851746447567a6443313163475268644755744d44417849697769646d4673645755694f6a45794d33303d",
+    "sha256_hash_hex": "e560892e449a594f8780becd2c9cc5f213b01133478014e3630bcff470788ead",
+    "signature_hex": "30440220367694dab842ec90f7cb5c0d74febacb3ac52d8453092978af0f020b0e791578022025a6e748b1455293533c9f66d692880d8f0f1454e79ab1ff443cf449b343caa0",
+    "public_key_hex": "040e0dda0ab6d68df727b6d1f38fcecea1e2c5637dfabadd0a40ca93a746cfd07b231bf82d78033c3377926ed7ae165890c3f503bdf8a2b78c6deaa69ba8009ad9"
+  },
+  {
+    "source": "javascript",
+    "type": "TestData",
+    "data": {
+      "id": "javascript-test-data-002",
+      "value": 888
+    },
+    "canonical_json": "{\"id\":\"javascript-test-data-002\",\"value\":888}",
+    "utf8_bytes_hex": "7b226964223a226a6176617363726970742d746573742d646174612d303032222c2276616c7565223a3838387d",
+    "sha256_hash_hex": "20c87df070253e2fefae736b5d1d93752dc17eaccfead1675a6192d252e1118e",
+    "signature_hex": "304502201da7800b55e3aade115d2be23af75846728c136c33b72502e36be589c6b3ed9e022100c9e49655c970e57e7417e9df7bf22c6937d22c2b2f9c13a0a00432a7ebea8e80",
+    "public_key_hex": "040e0dda0ab6d68df727b6d1f38fcecea1e2c5637dfabadd0a40ca93a746cfd07b231bf82d78033c3377926ed7ae165890c3f503bdf8a2b78c6deaa69ba8009ad9"
+  },
+  {
+    "source": "javascript",
+    "type": "TestDataUpdate",
+    "data": {
+      "id": "javascript-test-update-002",
+      "value": 555
+    },
+    "canonical_json": "{\"id\":\"javascript-test-update-002\",\"value\":555}",
+    "utf8_bytes_hex": "19436f6e7374656c6c6174696f6e205369676e656420446174613a0a36340a65794a705a434936496d7068646d467a59334a70634851746447567a6443313163475268644755744d44417949697769646d4673645755694f6a55314e58303d",
+    "sha256_hash_hex": "ba1c77f5b24f537add443cc8cad3549fb1431eeb006f46c629a4bf86dcf85063",
+    "signature_hex": "3045022100f3f9ebef0f2ac047f670d02f7f31b947903f4a2505c7e07935d7072ed09117ae02204e132ed868fdb097679d4250d480495e4c2f60cfb2db60fd8e5fdd0955741a76",
+    "public_key_hex": "040e0dda0ab6d68df727b6d1f38fcecea1e2c5637dfabadd0a40ca93a746cfd07b231bf82d78033c3377926ed7ae165890c3f503bdf8a2b78c6deaa69ba8009ad9"
+  }
+]
