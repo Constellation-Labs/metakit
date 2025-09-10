@@ -1,0 +1,24 @@
+{
+  "name": "merkle-patricia-verifier",
+  "version": "1.0.0",
+  "description": "JavaScript implementation of Merkle Patricia Trie inclusion proof verifier",
+  "main": "merkle-patricia-verifier.js",
+  "scripts": {
+    "test": "node test.js",
+    "example": "node example-usage.js"
+  },
+  "keywords": [
+    "merkle",
+    "patricia",
+    "trie",
+    "verification",
+    "proof",
+    "cryptography"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "canonicalize": "^2.0.0"
+  },
+  "devDependencies": {}
+}
