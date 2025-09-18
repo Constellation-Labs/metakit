@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Merkle Patricia Trie Verifier</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 10px;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-top: 20px;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #444;
+        }
+        input[type="text"], textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        input[type="text"]:focus, textarea:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 2px rgba(0,123,255,0.1);
+        }
+        textarea {
+            min-height: 200px;
+            resize: vertical;
+        }
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #0056b3;
+        }
+        .btn-primary:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .btn-secondary {
+            background: #28a745;
+            color: white;
+        }
+        .btn-secondary:hover {
+            background: #218838;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 20px;
+            border-radius: 4px;
+            display: none;
+        }
+        .result.show {
+            display: block;
+        }
+        .result.success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .result.error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .result h3 {
+            margin-top: 0;
+            margin-bottom: 10px;
+        }
+        .example-note {
+            background: #e7f3ff;
+            border: 1px solid #b3d9ff;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 20px;
+            color: #004085;
+        }
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+            font-size: 14px;
+        }
+        .hash-display {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            word-break: break-all;
+            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔐 Merkle Patricia Trie Verifier</h1>
+
+    <div class="container">
+        <p>Verify Merkle Patricia Trie inclusion proofs directly in your browser. All verification happens locally using the Web Crypto API.</p>
+
+        <label for="rootHash">Root Hash (64 hex characters):</label>
+        <input type="text" id="rootHash" placeholder="Enter the root hash...">
+
+        <label for="proofJson">Proof JSON:</label>
+        <textarea id="proofJson" placeholder='{
+  "path": "abc123",
+  "witness": [
+    {
+      "type": "Leaf",
+      "contents": {
+        "remaining": "123",
+        "dataDigest": "..."
+      }
+    }
+  ]
+}'></textarea>
+
+        <div class="button-group">
+            <button class="btn-primary" onclick="verifyProof()">Verify Proof</button>
+            <button class="btn-secondary" onclick="loadExample()">Load Example</button>
+        </div>
+
+        <div id="result" class="result"></div>
+
+        <div class="example-note">
+            <strong>Tip:</strong> Click "Load Example" to see a valid proof structure. The proof must include a <code>path</code> and a <code>witness</code> array with node commitments.
+        </div>
+    </div>
+
+    <script>
+        // Inline RFC 8785 canonicalize implementation
+        function canonicalize(object) {
+            if (object === null || typeof object !== 'object' || object.toJSON != null) {
+                return JSON.stringify(object);
+            }
+            if (object instanceof Array) {
+                let result = '[';
+                let separator = '';
+                object.forEach((element) => {
+                    result += separator;
+                    separator = ',';
+                    result += canonicalize(element);
+                });
+                return result + ']';
+            }
+            let result = '{';
+            let separator = '';
+            Object.keys(object).sort().forEach((property) => {
+                if (object[property] !== undefined) {
+                    result += separator;
+                    separator = ',';
+                    result += JSON.stringify(property);
+                    result += ':';
+                    result += canonicalize(object[property]);
+                }
+            });
+            return result + '}';
+        }
+
+        // Inline Merkle Patricia Verifier implementation
+
+        class Nibble {
+            static fromHexString(hexString) {
+                const nibbles = [];
+                for (const char of hexString) {
+                    const value = parseInt(char, 16);
+                    if (isNaN(value)) {
+                        throw new Error(`Invalid hex character: ${char}`);
+                    }
+                    nibbles.push(value);
+                }
+                return nibbles;
+            }
+
+            static fromHash(hash) {
+                return Nibble.fromHexString(hash);
+            }
+
+            static sequenceEquals(a, b) {
+                if (a.length !== b.length) return false;
+                for (let i = 0; i < a.length; i++) {
+                    if (a[i] !== b[i]) return false;
+                }
+                return true;
+            }
+
+            static sequenceDrop(sequence, count) {
+                return sequence.slice(count);
+            }
+        }
+
+        class JsonBinaryHasher {
+            static async computeDigest(jsonObject, prefixBytes = []) {
+                const canonicalJson = canonicalize(jsonObject);
+
+                const encoder = new TextEncoder();
+                const jsonBytes = encoder.encode(canonicalJson);
+
+                const prefixArray = new Uint8Array(prefixBytes);
+                const combined = new Uint8Array(prefixArray.length + jsonBytes.length);
+                combined.set(prefixArray);
+                combined.set(jsonBytes, prefixArray.length);
+
+                const hashBuffer = await crypto.subtle.digest('SHA-256', combined);
+                const hashArray = Array.from(new Uint8Array(hashBuffer));
+                const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+                return hashHex;
+            }
+        }
+
+        const NodePrefix = {
+            LEAF: [0],
+            BRANCH: [1],
+            EXTENSION: [2]
+        };
+
+        class MerklePatriciaVerificationError extends Error {
+            constructor(message, type) {
+                super(message);
+                this.name = 'MerklePatriciaVerificationError';
+                this.type = type;
+            }
+        }
+
+        class InvalidWitness extends MerklePatriciaVerificationError {
+            constructor(message) {
+                super(message, 'InvalidWitness');
+            }
+        }
+
+        class InvalidPath extends MerklePatriciaVerificationError {
+            constructor(message) {
+                super(message, 'InvalidPath');
+            }
+        }
+
+        class InvalidNodeCommitment extends MerklePatriciaVerificationError {
+            constructor(message) {
+                super(message, 'InvalidNodeCommitment');
+            }
+        }
+
+        class MerklePatriciaVerifier {
+            constructor(rootHash) {
+                this.rootHash = rootHash;
+            }
+
+            async verify(proof) {
+                try {
+                    const pathNibbles = Nibble.fromHash(proof.path);
+                    const witness = [...proof.witness].reverse();
+
+                    let currentDigest = this.rootHash;
+                    let remainingPath = pathNibbles;
+                    let index = 0;
+
+                    while (index < witness.length) {
+                        const commitment = witness[index];
+
+                        if (!commitment.type || !commitment.contents) {
+                            throw new InvalidWitness('Invalid commitment structure');
+                        }
+
+                        switch (commitment.type) {
+                            case 'Leaf':
+                                return await this.verifyLeaf(commitment.contents, currentDigest, remainingPath, index === witness.length - 1);
+
+                            case 'Extension':
+                                const extResult = await this.verifyExtension(commitment.contents, currentDigest, remainingPath);
+                                if (!extResult.success) return extResult;
+                                currentDigest = commitment.contents.childDigest;
+                                remainingPath = extResult.remainingPath;
+                                index++;
+                                break;
+
+                            case 'Branch':
+                                const branchResult = await this.verifyBranch(commitment.contents, currentDigest, remainingPath);
+                                if (!branchResult.success) return branchResult;
+                                currentDigest = branchResult.childDigest;
+                                remainingPath = branchResult.remainingPath;
+                                index++;
+                                break;
+
+                            default:
+                                throw new InvalidWitness(`Unknown commitment type: ${commitment.type}`);
+                        }
+                    }
+
+                    throw new InvalidWitness('Proof verification incomplete');
+
+                } catch (error) {
+                    if (error instanceof MerklePatriciaVerificationError) {
+                        return { success: false, error };
+                    }
+                    return { success: false, error: new InvalidWitness(`Verification failed: ${error.message}`) };
+                }
+            }
+
+            async verifyLeaf(nodeCommit, currentDigest, remainingPath, isFinal) {
+                if (!isFinal) {
+                    return { success: false, error: new InvalidWitness('Leaf must be the final commitment') };
+                }
+
+                const commitmentJson = {
+                    remaining: nodeCommit.remaining,
+                    dataDigest: nodeCommit.dataDigest
+                };
+
+                const computedDigest = await JsonBinaryHasher.computeDigest(commitmentJson, NodePrefix.LEAF);
+
+                if (computedDigest !== currentDigest) {
+                    return { success: false, error: new InvalidNodeCommitment('Invalid leaf commitment digest') };
+                }
+
+                const commitmentRemaining = Nibble.fromHexString(nodeCommit.remaining);
+
+                if (!Nibble.sequenceEquals(remainingPath, commitmentRemaining)) {
+                    return { success: false, error: new InvalidNodeCommitment('Path mismatch at leaf') };
+                }
+
+                return { success: true };
+            }
+
+            async verifyExtension(nodeCommit, currentDigest, remainingPath) {
+                const commitmentJson = {
+                    shared: nodeCommit.shared,
+                    childDigest: nodeCommit.childDigest
+                };
+
+                const computedDigest = await JsonBinaryHasher.computeDigest(commitmentJson, NodePrefix.EXTENSION);
+
+                if (computedDigest !== currentDigest) {
+                    return { success: false, error: new InvalidNodeCommitment('Invalid extension commitment digest') };
+                }
+
+                const sharedNibbles = Nibble.fromHexString(nodeCommit.shared);
+
+                for (let i = 0; i < sharedNibbles.length; i++) {
+                    if (i >= remainingPath.length || remainingPath[i] !== sharedNibbles[i]) {
+                        return { success: false, error: new InvalidPath('Path does not match extension shared prefix') };
+                    }
+                }
+
+                const newRemainingPath = Nibble.sequenceDrop(remainingPath, sharedNibbles.length);
+
+                return {
+                    success: true,
+                    remainingPath: newRemainingPath
+                };
+            }
+
+            async verifyBranch(nodeCommit, currentDigest, remainingPath) {
+                if (remainingPath.length === 0) {
+                    return { success: false, error: new InvalidPath('No remaining path at branch') };
+                }
+
+                const nextNibble = remainingPath[0];
+                const nibbleKey = nextNibble.toString(16);
+
+                if (!nodeCommit.pathsDigest || !nodeCommit.pathsDigest[nibbleKey]) {
+                    return { success: false, error: new InvalidPath(`Path not found in branch: ${nibbleKey}`) };
+                }
+
+                const commitmentJson = {
+                    pathsDigest: nodeCommit.pathsDigest
+                };
+
+                const computedDigest = await JsonBinaryHasher.computeDigest(commitmentJson, NodePrefix.BRANCH);
+
+                if (computedDigest !== currentDigest) {
+                    return { success: false, error: new InvalidNodeCommitment('Invalid branch commitment digest') };
+                }
+
+                const childDigest = nodeCommit.pathsDigest[nibbleKey];
+                const newRemainingPath = remainingPath.slice(1);
+
+                return {
+                    success: true,
+                    childDigest,
+                    remainingPath: newRemainingPath
+                };
+            }
+        }
+
+        // UI Functions
+        async function verifyProof() {
+            const rootHash = document.getElementById('rootHash').value.trim();
+            const proofJson = document.getElementById('proofJson').value.trim();
+            const resultDiv = document.getElementById('result');
+
+            // Clear previous results
+            resultDiv.className = 'result';
+            resultDiv.innerHTML = '';
+
+            // Validate inputs
+            if (!rootHash) {
+                showError('Please enter a root hash');
+                return;
+            }
+
+            if (rootHash.length !== 64 || !/^[0-9a-fA-F]+$/.test(rootHash)) {
+                showError('Root hash must be exactly 64 hexadecimal characters');
+                return;
+            }
+
+            if (!proofJson) {
+                showError('Please enter a proof JSON');
+                return;
+            }
+
+            try {
+                // Parse the proof
+                const proof = JSON.parse(proofJson);
+
+                // Validate proof structure
+                if (!proof.path || !proof.witness) {
+                    showError('Proof must contain "path" and "witness" fields');
+                    return;
+                }
+
+                // Create verifier and verify
+                const verifier = new MerklePatriciaVerifier(rootHash);
+                const result = await verifier.verify(proof);
+
+                if (result.success) {
+                    showSuccess('Proof verified successfully! ✓', 'The inclusion proof is valid for the given root hash.');
+                } else {
+                    showError(`Verification failed: ${result.error?.message || 'Unknown error'}`);
+                }
+
+            } catch (error) {
+                if (error instanceof SyntaxError) {
+                    showError('Invalid JSON format. Please check your proof JSON.');
+                } else {
+                    showError(`Error: ${error.message}`);
+                }
+            }
+        }
+
+        async function loadExample() {
+            // Create example proof
+            const leafCommitment = {
+                remaining: "abc567",
+                dataDigest: "1234567890123456789012345678901234567890123456789012345678901234"
+            };
+
+            const proof = {
+                path: "abc567",
+                witness: [
+                    {
+                        type: "Leaf",
+                        contents: leafCommitment
+                    }
+                ]
+            };
+
+            // Calculate the root hash for this proof
+            const leafDigest = await JsonBinaryHasher.computeDigest(leafCommitment, NodePrefix.LEAF);
+
+            // Set the values in the form
+            document.getElementById('rootHash').value = leafDigest;
+            document.getElementById('proofJson').value = JSON.stringify(proof, null, 2);
+
+            // Show info message
+            const resultDiv = document.getElementById('result');
+            resultDiv.className = 'result success show';
+            resultDiv.innerHTML = `
+                <h3>Example Loaded</h3>
+                <p>An example proof has been loaded. Click "Verify Proof" to validate it.</p>
+                <p><strong>Root Hash:</strong></p>
+                <div class="hash-display">${leafDigest}</div>
+            `;
+        }
+
+        function showSuccess(title, message) {
+            const resultDiv = document.getElementById('result');
+            resultDiv.className = 'result success show';
+            resultDiv.innerHTML = `
+                <h3>${title}</h3>
+                <p>${message}</p>
+            `;
+        }
+
+        function showError(message) {
+            const resultDiv = document.getElementById('result');
+            resultDiv.className = 'result error show';
+            resultDiv.innerHTML = `
+                <h3>Verification Failed</h3>
+                <p>${message}</p>
+            `;
+        }
+    </script>
+</body>
+</html>
