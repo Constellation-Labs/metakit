@@ -21,7 +21,7 @@ object MerklePatriciaVerifierSuite extends SimpleIOSuite with Checkers {
     }) { case (list, randomIndex) =>
       for {
         leafPairs    <- list.traverse(el => el.computeDigest.map(_ -> el))
-        trie         <- MerklePatriciaTrie.create(leafPairs.toMap)
+        trie         <- MerklePatriciaTrie.make(leafPairs.toMap)
         verifier     <- MerklePatriciaVerifier.make(trie.rootNode.digest).pure[F]
         prover       <- MerklePatriciaProver.make(trie).pure[F]
         proof        <- prover.attestDigest(leafPairs(randomIndex)._1).flatMap(IO.fromEither(_))
@@ -36,7 +36,7 @@ object MerklePatriciaVerifierSuite extends SimpleIOSuite with Checkers {
     }) { case (list, randomIndex) =>
       for {
         leafPairs <- list.traverse(el => el.computeDigest.map(_ -> el))
-        trie      <- MerklePatriciaTrie.create(leafPairs.toMap)
+        trie      <- MerklePatriciaTrie.make(leafPairs.toMap)
         verifier <- MerklePatriciaVerifier
           .make(Hash("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"))
           .pure[F]
@@ -45,5 +45,32 @@ object MerklePatriciaVerifierSuite extends SimpleIOSuite with Checkers {
         resultEither <- verifier.confirm(proof)
       } yield expect(resultEither.isLeft)
     }
+  }
+
+  test("verifier can handle large trie with 1k entries and verify random subset of leaves") {
+    val numEntries = 1000
+    val numProofsToVerify = 50
+
+    for {
+      entries <- (1 to numEntries).toList.traverse { i =>
+        s"entry_$i".computeDigest.map(_ -> s"value_$i")
+      }
+      trie     <- MerklePatriciaTrie.make(entries.toMap)
+      verifier <- MerklePatriciaVerifier.make(trie.rootNode.digest).pure[F]
+      prover   <- MerklePatriciaProver.make(trie).pure[F]
+
+      randomIndices = scala.util.Random.shuffle((0 until numEntries).toList).take(numProofsToVerify)
+
+      verificationResults <- randomIndices.traverse { idx =>
+        val (digest, _) = entries(idx)
+        for {
+          proof        <- prover.attestDigest(digest).flatMap(IO.fromEither(_))
+          resultEither <- verifier.confirm(proof)
+        } yield resultEither.isRight
+      }
+    } yield expect.all(
+      verificationResults.forall(identity),
+      verificationResults.size == numProofsToVerify
+    )
   }
 }

@@ -37,32 +37,20 @@ object MerklePatriciaTrie {
       .simple[F]
       .create(data)
 
-  /**
-   * Create a new MerklePatriciaTrie from a map of data (uses simple producer for backward compatibility)
-   */
-  def create[F[_]: JsonBinaryHasher: MonadThrow, A: Encoder](data: Map[Hash, A]): F[MerklePatriciaTrie] =
-    simple(data)
-
-  /**
-   * Insert new data into an existing MerklePatriciaTrie (uses simple producer for backward compatibility)
-   */
   def insert[F[_]: JsonBinaryHasher: MonadThrow, A: Encoder](
     current: MerklePatriciaTrie,
     data:    Map[Hash, A]
   ): F[Either[MerklePatriciaError, MerklePatriciaTrie]] =
     MerklePatriciaProducer
-      .simple[F]
+      .make[F]
       .insert(current, data)
 
-  /**
-   * Remove data from an existing MerklePatriciaTrie (uses simple producer for backward compatibility)
-   */
   def remove[F[_]: JsonBinaryHasher: MonadThrow](
     current: MerklePatriciaTrie,
     data:    List[Hash]
   ): F[Either[MerklePatriciaError, MerklePatriciaTrie]] =
     MerklePatriciaProducer
-      .simple[F]
+      .make[F]
       .remove(current, data)
 
   def collectLeafNodes(trie: MerklePatriciaTrie): List[MerklePatriciaNode.Leaf] = {

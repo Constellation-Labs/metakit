@@ -56,6 +56,7 @@ lazy val buildInfoSettings = Seq(
 )
 
 lazy val root = (project in file("."))
+  .enablePlugins(JmhPlugin)
   .settings(
     commonSettings,
     commonTestSettings,

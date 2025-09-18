@@ -20,7 +20,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
     forall(Gen.listOfN(32, Gen.long)) { listLong =>
       for {
         leafMap      <- listLong.traverse(el => el.computeDigest.map(_ -> el)).map(_.toMap)
-        trieExpected <- MerklePatriciaTrie.create(leafMap)
+        trieExpected <- MerklePatriciaTrie.make(leafMap)
         trieActual   <- IO.fromEither(trieExpected.asJson.as[MerklePatriciaTrie])
       } yield expect(trieExpected == trieActual)
     }
@@ -30,7 +30,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
     forall(Gen.listOfN(32, Gen.long)) { listLong =>
       for {
         leafMap <- listLong.traverse(el => el.computeDigest.map(_ -> el)).map(_.toMap)
-        trie    <- MerklePatriciaTrie.create(leafMap)
+        trie    <- MerklePatriciaTrie.make(leafMap)
       } yield expect(trie.rootNode.digest.value.nonEmpty)
     }
   }
@@ -39,7 +39,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
     forall(Gen.listOfN(32, Gen.long)) { listLong =>
       for {
         leafMap    <- listLong.traverse(el => el.computeDigest.map(_ -> el)).map(_.toMap)
-        trie       <- MerklePatriciaTrie.create(leafMap)
+        trie       <- MerklePatriciaTrie.make(leafMap)
         listLeaves <- IO.fromEither(MerklePatriciaTrie.collectLeafNodes(trie).traverse(_.data.as[Long]))
         sortedInputSet = SortedSet.from(listLong)
         sortedOutputSet = SortedSet.from(listLeaves)
@@ -57,7 +57,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
       for {
         initMap    <- list1.traverse(el => el.computeDigest.map(_ -> el)).map(_.toMap)
         updMap     <- list2.traverse(el => el.computeDigest.map(_ -> el)).map(_.toMap)
-        trie       <- MerklePatriciaTrie.create(initMap)
+        trie       <- MerklePatriciaTrie.make(initMap)
         trie2      <- MerklePatriciaTrie.insert(trie, updMap).flatMap(IO.fromEither(_))
         listLeaves <- IO.fromEither(MerklePatriciaTrie.collectLeafNodes(trie2).traverse(_.data.as[Long]))
         sortedInputSet = SortedSet.from(list1 ++ list2)
@@ -76,7 +76,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
       for {
         createMap   <- createList.traverse(el => el.computeDigest.map(_ -> el)).map(_.toMap)
         removePaths <- removeList.traverse[IO, Hash](el => el.computeDigest)
-        trie1       <- MerklePatriciaTrie.create(createMap)
+        trie1       <- MerklePatriciaTrie.make(createMap)
         trie2       <- MerklePatriciaTrie.remove(trie1, removePaths).flatMap(IO.fromEither(_))
         listLeaves  <- IO.fromEither(MerklePatriciaTrie.collectLeafNodes(trie2).traverse(_.data.as[Long]))
       } yield expect(listLeaves.forall(!removeList.contains(_)))
@@ -87,7 +87,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
     forall(Gen.long.flatMap(v1 => Gen.long.flatMap(v2 => (v1, v2))).suchThat(g => g._1 != g._2)) { case (val1, val2) =>
       for {
         path  <- Hash(Array.fill(32)('1').mkString).pure[IO]
-        trie1 <- MerklePatriciaTrie.create[IO, Long](Map(path -> val1))
+        trie1 <- MerklePatriciaTrie.make[IO, Long](Map(path -> val1))
         trie2 <- MerklePatriciaTrie.insert[IO, Long](trie1, Map(path -> val2)).flatMap(IO.fromEither(_))
         (root1, data1, digest1) <- trie1.rootNode match {
           case MerklePatriciaNode.Leaf(_, _data, _digest) => IO.pure((trie1.rootNode.digest, _data, _digest))
@@ -105,7 +105,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
   test("create produces a trie with a known root digest") {
     for {
       leafMap <- (0 to 31).toList.traverse(el => el.computeDigest.map(_ -> el)).map(_.toMap)
-      trie    <- MerklePatriciaTrie.create[IO, Int](leafMap)
+      trie    <- MerklePatriciaTrie.make[IO, Int](leafMap)
     } yield expect(trie.rootNode.digest == Hash("2c225239414a82ea1b72061de98199f90e910106b9e9896bd6df4cc74e6c39a0"))
 
   }
@@ -113,7 +113,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
   test("create then insert produces a trie with a known root digest") {
     for {
       leafMap   <- (0 to 31).toList.traverse(el => el.computeDigest.map(_ -> el)).map(_.toMap)
-      trie      <- MerklePatriciaTrie.create[IO, Int](leafMap)
+      trie      <- MerklePatriciaTrie.make[IO, Int](leafMap)
       newLeaves <- (-31 to -0).toList.traverse(el => el.computeDigest.map(_ -> el)).map(_.toMap)
       trie2     <- MerklePatriciaTrie.insert(trie, newLeaves).flatMap(IO.fromEither(_))
     } yield expect(trie2.rootNode.digest == Hash("f01117b41e875b6f432e12a10b340ddd0cafa077a4b9b82aed688695adf58c45"))
@@ -122,7 +122,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
   test("create then remove produces a trie with a known root digest") {
     for {
       leafMap   <- (0 to 31).toList.traverse(el => el.computeDigest.map(_ -> el)).map(_.toMap)
-      trie      <- MerklePatriciaTrie.create[IO, Int](leafMap)
+      trie      <- MerklePatriciaTrie.make[IO, Int](leafMap)
       remLeaves <- (17 to 31).toList.traverse[IO, Hash](el => el.computeDigest)
       trie2     <- MerklePatriciaTrie.remove(trie, remLeaves).flatMap(IO.fromEither(_))
     } yield expect(trie2.rootNode.digest == Hash("dd0c87acf3b891f2461cb9776a1e3376216b156ff0bebdb6b7c1b4c6f8ee9f35"))
@@ -133,7 +133,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
     for {
       content    <- List(1, 2, 3, 5, 7, 8, 9).pure[IO]
       leafMap    <- content.traverse(el => el.computeDigest.map(_ -> el)).map(_.toMap)
-      trieActual <- MerklePatriciaTrie.create[IO, Int](leafMap)
+      trieActual <- MerklePatriciaTrie.make[IO, Int](leafMap)
       trieExpected <- for {
         leafNodes <- leafMap.toList.traverse { case (digest, data) =>
           val path = Nibble(digest)
@@ -155,7 +155,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
     )
 
     for {
-      trieActual <- MerklePatriciaTrie.create(leafMap)
+      trieActual <- MerklePatriciaTrie.make(leafMap)
       trieExpected <- for {
         leaf1Rem <- IO.fromEither(
           Nibble.fromHexString("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF")
@@ -208,7 +208,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
     )
 
     for {
-      trieActual <- MerklePatriciaTrie.create(leafMap)
+      trieActual <- MerklePatriciaTrie.make(leafMap)
       trieExpected <- for {
         leaf1Rem <- IO.fromEither(
           Nibble.fromHexString("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFA1")
@@ -236,7 +236,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
     )
 
     for {
-      trieActual <- MerklePatriciaTrie.create(leafMap)
+      trieActual <- MerklePatriciaTrie.make(leafMap)
       trieExpected <- for {
         leaf1Rem <- IO.fromEither(Nibble.fromHexString("1"))
         leaf2Rem <- IO.fromEither(Nibble.fromHexString("2"))
@@ -278,7 +278,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
     )
 
     for {
-      trieActual <- MerklePatriciaTrie.create(leafMap)
+      trieActual <- MerklePatriciaTrie.make(leafMap)
       trieExpected <- for {
         leaf1Rem <- IO.fromEither(
           Nibble.fromHexString("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFA1")
@@ -312,7 +312,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
     )
 
     for {
-      trieActual <- MerklePatriciaTrie.create(leafMap)
+      trieActual <- MerklePatriciaTrie.make(leafMap)
       trieExpected <- for {
         leaf1Rem <- IO.fromEither(Nibble.fromHexString("1"))
         leaf2Rem <- IO.fromEither(Nibble.fromHexString("2"))
@@ -341,7 +341,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
     )
 
     for {
-      trieActual <- MerklePatriciaTrie.create(leafMap)
+      trieActual <- MerklePatriciaTrie.make(leafMap)
       trieExpected <- for {
         leaf1Rem <- IO.fromEither(
           Nibble.fromHexString("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFA1")
@@ -379,7 +379,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
     )
 
     for {
-      trieActual <- MerklePatriciaTrie.create(leafMap)
+      trieActual <- MerklePatriciaTrie.make(leafMap)
       trieExpected <- for {
         leaf1Rem <- IO.fromEither(Nibble.fromHexString("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFA1"))
         leaf2Rem <- IO.fromEither(Nibble.fromHexString("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFB2"))
@@ -414,7 +414,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
     )
 
     for {
-      trieActual <- MerklePatriciaTrie.create(leafMap)
+      trieActual <- MerklePatriciaTrie.make(leafMap)
       trieExpected <- for {
         leaf1Rem <- IO.fromEither(
           Nibble.fromHexString("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFA1")
@@ -451,7 +451,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
     )
 
     for {
-      trieActual <- MerklePatriciaTrie.create(leafMap)
+      trieActual <- MerklePatriciaTrie.make(leafMap)
       trieExpected <- for {
         leaf1Rem <- IO.fromEither(Nibble.fromHexString("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFA1"))
         leaf2Rem <- IO.fromEither(Nibble.fromHexString("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFB2"))
@@ -490,7 +490,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
 
     for {
       trieActual <- MerklePatriciaTrie
-        .create(leafMap)
+        .make(leafMap)
         .flatMap(
           MerklePatriciaTrie.remove(_, List(Hash("FFAFFAFFFFFFFFFFFFFFFFFFFBFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD4")))
         )
@@ -530,7 +530,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
 
     for {
       trieActual <- MerklePatriciaTrie
-        .create(leafMap)
+        .make(leafMap)
         .flatMap(trie =>
           MerklePatriciaTrie
             .remove(trie, List(Hash("FFAFFAFFFFFFFFFFFFFFFFFFFBFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD4")))
@@ -567,7 +567,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
 
     for {
       trieActual <- MerklePatriciaTrie
-        .create(leafMap)
+        .make(leafMap)
         .flatMap(trie =>
           MerklePatriciaTrie
             .remove(trie, List(Hash("FFAFFAFFFFFFFFFFFFFFFFFFFBFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD4")))
@@ -613,7 +613,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
 
     for {
       trieActual <- MerklePatriciaTrie
-        .create(leafMap)
+        .make(leafMap)
         .flatMap(
           MerklePatriciaTrie.remove(_, List(Hash("FFAFFAFFFFFFFFFFFFFFFFFFFBFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD4")))
         )
@@ -654,7 +654,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
 
     for {
       trieActual <- MerklePatriciaTrie
-        .create(leafMap)
+        .make(leafMap)
         .flatMap(
           MerklePatriciaTrie.remove(_, List(Hash("FFAFFAFFFFFFFFFFFFFFFFFFFBFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD4")))
         )
@@ -697,7 +697,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
 
     for {
       trieActual <- MerklePatriciaTrie
-        .create(leafMap)
+        .make(leafMap)
         .flatMap(
           MerklePatriciaTrie.remove(_, List(Hash("FFAFFAFFFFFFFFFFFFFFFFFFFBFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD4")))
         )
@@ -734,7 +734,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
     val insertValue = "inserted value"
 
     for {
-      trie1 <- MerklePatriciaTrie.create(initialLeafMap)
+      trie1 <- MerklePatriciaTrie.make(initialLeafMap)
       root1 = trie1.rootNode.digest
 
       trie2 <- MerklePatriciaTrie.insert(trie1, Map(insertKey -> insertValue)).flatMap(IO.fromEither(_))

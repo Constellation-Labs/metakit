@@ -21,7 +21,7 @@ object MerklePatriciaProverSuite extends SimpleIOSuite with Checkers {
     }) { case (list, randomIndex) =>
       for {
         leafPairs <- list.traverse(el => el.computeDigest.map(_ -> el))
-        trie      <- MerklePatriciaTrie.create(leafPairs.toMap)
+        trie      <- MerklePatriciaTrie.make(leafPairs.toMap)
         prover    <- MerklePatriciaProver.make(trie).pure[F]
         proof     <- prover.attestDigest(leafPairs(randomIndex)._1).flatMap(IO.fromEither)
       } yield expect(proof.witness.nonEmpty)
@@ -32,7 +32,7 @@ object MerklePatriciaProverSuite extends SimpleIOSuite with Checkers {
     forall(Gen.listOfN(32, Gen.long)) { list =>
       for {
         leafMap     <- list.traverse(el => el.computeDigest.map(_ -> el)).map(_.toMap)
-        trie        <- MerklePatriciaTrie.create(leafMap)
+        trie        <- MerklePatriciaTrie.make(leafMap)
         prover      <- MerklePatriciaProver.make(trie).pure[F]
         proofEither <- prover.attestDigest(Hash("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"))
       } yield expect(proofEither.isLeft)
