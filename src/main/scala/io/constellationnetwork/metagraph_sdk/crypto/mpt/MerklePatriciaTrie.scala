@@ -21,6 +21,9 @@ object MerklePatriciaTrie {
   implicit val merkleTreeDecoder: Decoder[MerklePatriciaTrie] = (c: HCursor) =>
     c.downField("rootNode").as[MerklePatriciaNode].map(MerklePatriciaTrie(_))
 
+  def create[F[_]: JsonBinaryHasher: MonadThrow, A: Encoder](data: Map[Hash, A]): F[MerklePatriciaTrie] =
+    make(data)
+
   /**
    * Create a new MerklePatriciaTrie from a map of data using the optimized producer
    */
