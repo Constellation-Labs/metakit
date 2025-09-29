@@ -9,7 +9,7 @@ sealed trait MerkleCommitment
 
 object MerkleCommitment {
   final case class Leaf(dataDigest: Hash) extends MerkleCommitment
-  final case class Internal(leftDigest: Hash, rightDigest: Option[Hash]) extends MerkleCommitment
+  final case class Internal(leftDigest: Hash, rightDigest: Hash) extends MerkleCommitment
 
   object Leaf {
 
@@ -40,7 +40,7 @@ object MerkleCommitment {
       Decoder.instance { hCursor =>
         for {
           leftDigest  <- hCursor.downField("leftDigest").as[Hash]
-          rightDigest <- hCursor.downField("rightDigest").as[Option[Hash]]
+          rightDigest <- hCursor.downField("rightDigest").as[Hash]
         } yield Internal(leftDigest, rightDigest)
       }
   }

@@ -10,7 +10,7 @@ import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher.HasherOps
 import io.constellationnetwork.metagraph_sdk.std.{JsonBinaryCodec, JsonBinaryHasher}
 import io.constellationnetwork.security.hash.Hash
 
-import io.circe.{Decoder, Encoder, Json, parser}
+import io.circe.{parser, Decoder, Encoder, Json}
 import shared.Generators._
 import shared.Models._
 import weaver.scalacheck.Checkers

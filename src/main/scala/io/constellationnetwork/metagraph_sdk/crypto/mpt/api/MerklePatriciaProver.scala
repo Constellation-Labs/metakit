@@ -3,7 +3,6 @@ package io.constellationnetwork.metagraph_sdk.crypto.mpt.api
 import cats.MonadThrow
 import cats.syntax.applicativeError._
 import cats.syntax.either._
-import cats.syntax.flatMap._
 import cats.syntax.functor._
 
 import io.constellationnetwork.metagraph_sdk.crypto.mpt._

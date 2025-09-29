@@ -77,10 +77,70 @@ object MerkleTreeSuite extends SimpleIOSuite with Checkers {
   //
   //  console.log(internalDigest.toString('hex'))
 
+  test("handles unbalanced tree with odd number of leaves correctly") {
+    val oddNumbers = List("one", "two", "three", "four", "five")
+    for {
+      merkleTree <- MerkleTree.create[IO, String](oddNumbers)
+      _ = assert(merkleTree.leafDigestIndex.size == 5)
+      _ = assert(merkleTree.rootNode.digest.value.nonEmpty)
+    } yield success
+  }
+
+  test("handles unbalanced tree with various leaf counts") {
+    forall(Gen.choose(1, 17)) { count =>
+      val strings = (1 to count).map(_.toString).toList
+      for {
+        merkleTree <- MerkleTree.create[IO, String](strings)
+        _ = assert(merkleTree.leafDigestIndex.size == count)
+      } yield success
+    }
+  }
+
   test("ensure root of MerkleTree matches expected value for fixed data") {
     for {
       tree <- MerkleTree.create[IO, Json](List(Json.obj("a" -> 1.asJson), Json.obj("b" -> 2.asJson)))
       expectedRootHash = Hash("1f385c4a728d0e3e49cdf53203df3af57804a18aab5247fa9ddf6f943a65c159")
     } yield expect.same(tree.rootNode.digest, expectedRootHash)
+  }
+
+  test("handles power-of-2 leaf counts correctly") {
+    val powerOfTwoGen = Gen.oneOf(1, 2, 4, 8, 16, 32)
+    forall(powerOfTwoGen) { count =>
+      val strings = (1 to count).map(i => s"leaf-$i").toList
+      for {
+        merkleTree <- MerkleTree.create[IO, String](strings)
+        _ = assert(merkleTree.leafDigestIndex.size == count)
+        _ = assert(merkleTree.rootNode.digest.value.nonEmpty)
+      } yield success
+    }
+  }
+
+  test("handles non-power-of-2 leaf counts correctly") {
+    val nonPowerOfTwoGen = Gen.oneOf(3, 5, 6, 7, 9, 10, 11, 13, 15, 17)
+    forall(nonPowerOfTwoGen) { count =>
+      val strings = (1 to count).map(i => s"item-$i").toList
+      for {
+        merkleTree <- MerkleTree.create[IO, String](strings)
+        _ = assert(merkleTree.leafDigestIndex.size == count)
+        _ = assert(merkleTree.rootNode.digest.value.nonEmpty)
+      } yield success
+    }
+  }
+
+  test("single leaf tree has correct structure") {
+    for {
+      tree <- MerkleTree.create[IO, String](List("single"))
+      _ = assert(tree.leafDigestIndex.size == 1)
+      _ = assert(tree.rootNode.digest.value.nonEmpty)
+    } yield success
+  }
+
+  test("tree with 3 leaves maintains correct leaf count") {
+    val threeLeaves = List("first", "second", "third")
+    for {
+      tree <- MerkleTree.create[IO, String](threeLeaves)
+      _ = assert(tree.leafDigestIndex.size == 3)
+      _ = assert(tree.leafDigestIndex.values.toSet == Set(0, 1, 2))
+    } yield success
   }
 }

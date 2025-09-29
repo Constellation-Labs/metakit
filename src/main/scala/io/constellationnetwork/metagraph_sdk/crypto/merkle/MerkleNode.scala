@@ -51,10 +51,10 @@ object MerkleNode {
       left:  MerkleNode,
       right: Option[MerkleNode]
     ): F[Internal] = for {
-      leftDigest     <- left.digest.pure[F]
-      rightDigestOpt <- right.map(_.digest).pure[F]
-      commitment     <- MerkleCommitment.Internal(leftDigest, rightDigestOpt).pure[F]
-      nodeDigest     <- JsonBinaryHasher[F].computeDigest(commitment.asJson, InternalPrefix)
+      leftDigest  <- left.digest.pure[F]
+      rightDigest <- right.map(_.digest).getOrElse(left.digest).pure[F]
+      commitment  <- MerkleCommitment.Internal(leftDigest, rightDigest).pure[F]
+      nodeDigest  <- JsonBinaryHasher[F].computeDigest(commitment.asJson, InternalPrefix)
     } yield Internal(left, right, nodeDigest)
 
     implicit val encodeInternalNode: Encoder[Internal] = Encoder.instance { node =>

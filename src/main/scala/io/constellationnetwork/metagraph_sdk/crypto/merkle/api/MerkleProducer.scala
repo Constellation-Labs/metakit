@@ -1,9 +1,15 @@
 package io.constellationnetwork.metagraph_sdk.crypto.merkle.api
 
-import cats.effect.{Ref, Sync}
+import java.nio.file.Path
+
+import cats.effect.{Ref, Resource, Sync}
 import cats.syntax.all._
 
-import io.constellationnetwork.metagraph_sdk.crypto.merkle.impl.{OptimizedMerkleProducer, SimpleMerkleProducer}
+import io.constellationnetwork.metagraph_sdk.crypto.merkle.impl.{
+  InMemoryMerkleProducer,
+  LevelDbMerkleProducer,
+  SimpleMerkleProducer
+}
 import io.constellationnetwork.metagraph_sdk.crypto.merkle.{MerkleNode, MerkleTree}
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher
 
@@ -62,24 +68,15 @@ object MerkleProducer {
   def apply[F[_]](implicit producer: MerkleProducer[F]): MerkleProducer[F] = producer
 
   /**
-   * Create an optimized producer instance
+   * Create an in-memory cached producer instance
    *
    * @param initial Initial leaf nodes
-   * @return Optimized producer with caching
+   * @return Producer with in-memory caching
    */
   def make[F[_]: Sync: JsonBinaryHasher](
     initial: List[MerkleNode.Leaf]
   ): F[MerkleProducer[F]] =
-    Ref
-      .of[F, OptimizedMerkleProducer.ProducerState](
-        OptimizedMerkleProducer.ProducerState(
-          leaves = Vector.from(initial),
-          nodeCache = Map.empty,
-          dirtyNodes = Set.empty,
-          currentRoot = None
-        )
-      )
-      .map(new OptimizedMerkleProducer[F](_))
+    inMemory(initial)
 
   /**
    * Create a simple producer instance
@@ -93,6 +90,41 @@ object MerkleProducer {
     Ref
       .of[F, Vector[MerkleNode.Leaf]](Vector.from(initial))
       .map(new SimpleMerkleProducer[F](_))
+
+  /**
+   * Create an in-memory cached producer instance
+   *
+   * @param initial Initial leaf nodes
+   * @return Producer with in-memory caching
+   */
+  def inMemory[F[_]: Sync: JsonBinaryHasher](
+    initial: List[MerkleNode.Leaf]
+  ): F[MerkleProducer[F]] =
+    InMemoryMerkleProducer.make[F](initial).widen
+
+  /**
+   * Create a LevelDB-backed persistent producer instance
+   *
+   * @param dbPath Path to the LevelDB database directory
+   * @param initial Initial leaf nodes (only used if database is empty)
+   * @return Producer with persistent storage
+   */
+  def levelDb[F[_]: Sync: JsonBinaryHasher](
+    dbPath:  Path,
+    initial: List[MerkleNode.Leaf] = List.empty
+  ): Resource[F, LevelDbMerkleProducer[F]] =
+    LevelDbMerkleProducer.make(dbPath, initial)
+
+  /**
+   * Load an existing LevelDB-backed producer instance
+   *
+   * @param dbPath Path to the existing LevelDB database directory
+   * @return Producer connected to existing persistent storage
+   */
+  def loadLevelDb[F[_]: Sync: JsonBinaryHasher](
+    dbPath: Path
+  ): Resource[F, LevelDbMerkleProducer[F]] =
+    LevelDbMerkleProducer.load(dbPath)
 
   /**
    * Provides syntax extensions for more ergonomic tree building

@@ -3,7 +3,6 @@ package io.constellationnetwork.metagraph_sdk.crypto.merkle.api
 import cats.syntax.applicative._
 import cats.syntax.foldable._
 import cats.syntax.functor._
-import cats.syntax.option._
 import cats.{Applicative, MonadThrow}
 
 import io.constellationnetwork.metagraph_sdk.crypto.merkle.{MerkleCommitment, MerkleInclusionProof, MerkleNode}
@@ -47,14 +46,13 @@ object MerkleVerifier {
       def confirm(proof: MerkleInclusionProof): F[Boolean] = {
         def combine(a: Hash, b: Hash): F[Hash] =
           MerkleCommitment
-            .Internal(a, b.some)
+            .Internal(a, b)
             .computePrefixDigest(MerkleNode.InternalPrefix)
 
         proof.witness
           .foldLeftM(proof.leafDigest) {
             case (acc, (digest, MerkleInclusionProof.LeftSide))  => combine(digest, acc)
             case (acc, (digest, MerkleInclusionProof.RightSide)) => combine(acc, digest)
-            case (acc, _)                                        => acc.pure[F]
           }
           .map(_ == root)
       }

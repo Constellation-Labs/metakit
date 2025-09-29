@@ -1,7 +1,6 @@
 package io.constellationnetwork.metagraph_sdk.crypto.merkle.api
 
 import cats.MonadThrow
-import cats.implicits.toTraverseOps
 import cats.syntax.applicative._
 import cats.syntax.either._
 import cats.syntax.functor._
@@ -9,7 +8,10 @@ import cats.syntax.functor._
 import scala.annotation.tailrec
 
 import io.constellationnetwork.metagraph_sdk.crypto.merkle.MerkleInclusionProof.Side
+import io.constellationnetwork.metagraph_sdk.crypto.merkle.impl.CollectionMerkleProver
 import io.constellationnetwork.metagraph_sdk.crypto.merkle.{MerkleInclusionProof, MerkleNode, MerkleTree}
+import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher
+import io.constellationnetwork.metagraph_sdk.storage.CollectionReader
 import io.constellationnetwork.security.hash.Hash
 
 /**
@@ -64,48 +66,90 @@ object MerkleProver {
         proofByIndex(index)
 
       private def proofByIndex(index: Int): F[Either[MerkleProofError, MerkleInclusionProof]] = {
-        // bitwise shift operation to calculate log2 by counting number of divisions by 2
-        @tailrec
-        def log2(n: Int, acc: Int = 0): Int =
-          if (n <= 1) acc
-          else log2(n >> 1, acc + 1)
-
-        val maxDepth = log2(tree.leafDigestIndex.size)
+        if (index < 0 || index >= tree.leafDigestIndex.size)
+          return InvalidLeafIndex(index, tree.leafDigestIndex.size).asLeft[MerkleInclusionProof].pure[F].widen
 
         @tailrec
-        def loop(
-          node:  MerkleNode,
-          acc:   Seq[Option[(Hash, Side)]],
-          depth: Int
-        ): Option[(MerkleNode.Leaf, Seq[Option[(Hash, Side)]])] =
-          node match {
-            case MerkleNode.Internal(left, right, _) =>
-              if (((index >> (maxDepth - depth)) & 1) == 0) {
-                loop(left, right.map(_.digest).map((_, MerkleInclusionProof.RightSide)) +: acc, depth + 1)
-              } else {
-                loop(right.get, Some((left.digest, MerkleInclusionProof.LeftSide)) +: acc, depth + 1)
+        def countLeaves(nodes: List[MerkleNode], acc: Int = 0): Int =
+          nodes match {
+            case Nil => acc
+            case (_: MerkleNode.Leaf) :: tail =>
+              countLeaves(tail, acc + 1)
+            case MerkleNode.Internal(left, rightOpt, _) :: tail =>
+              rightOpt match {
+                case Some(right) => countLeaves(left :: right :: tail, acc)
+                case None        => countLeaves(left :: tail, acc)
               }
-
-            case n: MerkleNode.Leaf =>
-              Some((n, acc))
           }
 
-        if (index < 0 || index >= tree.leafDigestIndex.size)
-          InvalidLeafIndex(index, tree.leafDigestIndex.size).asLeft[MerkleInclusionProof].pure[F].widen
-        else
-          loop(tree.rootNode, Seq(), 0)
-            .flatMap { case (leaf, witness) =>
-              witness.sequence.map(MerkleInclusionProof(leaf.digest, _))
-            }
-            .toRight[MerkleProofError](InvalidLeafIndex(index, tree.leafDigestIndex.size))
-            .pure[F]
+        @tailrec
+        def findPath(
+          node:       MerkleNode,
+          targetIdx:  Int,
+          currentIdx: Int,
+          acc:        List[(Hash, Side)]
+        ): Option[(MerkleNode.Leaf, List[(Hash, Side)])] =
+          node match {
+            case n: MerkleNode.Leaf =>
+              if (currentIdx == targetIdx) Some((n, acc))
+              else None
+
+            case MerkleNode.Internal(left, rightOpt, _) =>
+              val leftCount = countLeaves(List(left))
+
+              rightOpt match {
+                case Some(right) =>
+                  if (targetIdx < currentIdx + leftCount) {
+                    // Target is in left subtree
+                    findPath(
+                      left,
+                      targetIdx,
+                      currentIdx,
+                      (right.digest, MerkleInclusionProof.RightSide) :: acc
+                    )
+                  } else {
+                    // Target is in right subtree
+                    findPath(
+                      right,
+                      targetIdx,
+                      currentIdx + leftCount,
+                      (left.digest, MerkleInclusionProof.LeftSide) :: acc
+                    )
+                  }
+                case None =>
+                  // Unbalanced tree indicates corruption - return None to signal error
+                  None
+              }
+          }
+
+        findPath(tree.rootNode, index, 0, List.empty) match {
+          case Some((leaf, witness)) =>
+            MerkleInclusionProof(leaf.digest, witness).asRight[MerkleProofError].pure[F]
+          case None =>
+            // Could be invalid index or malformed tree structure
+            MalformedTreeStructure(s"Failed to generate proof for index $index. Tree may be corrupted or unbalanced.")
+              .asLeft[MerkleInclusionProof]
+              .pure[F]
+              .widen[Either[MerkleProofError, MerkleInclusionProof]]
+        }
       }
     }
 
   /**
-   * Provides syntax extensions for more ergonomic proof generation
+   * Create a storage-backed prover that rebuilds the tree for each proof.
    *
-   * Import xyz.kd5ujc.accumulators.merkle.api.MerkleProver.syntax._ to use these extensions
+   * Use this for independent proof generation services that only read from storage.
+   *
+   * @param leavesStore Storage containing the leaf nodes
+   * @return A prover that generates proofs from storage
+   */
+  def fromStorage[F[_]: MonadThrow: JsonBinaryHasher](
+    leavesStore: CollectionReader[F, Int, MerkleNode.Leaf]
+  ): MerkleProver[F] =
+    CollectionMerkleProver.make(leavesStore)
+
+  /**
+   * Provides syntax extensions for more ergonomic proof generation*
    */
   object syntax {
 
@@ -141,4 +185,8 @@ case class LeafNotFound(digest: Hash) extends MerkleProofError {
 
 case class InvalidLeafIndex(index: Int, size: Int) extends MerkleProofError {
   override def getMessage: String = s"Invalid leaf index $index, tree size is $size"
+}
+
+case class MalformedTreeStructure(message: String) extends MerkleProofError {
+  override def getMessage: String = message
 }

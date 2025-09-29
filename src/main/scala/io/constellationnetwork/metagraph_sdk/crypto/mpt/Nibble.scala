@@ -1,9 +1,9 @@
 package io.constellationnetwork.metagraph_sdk.crypto.mpt
 
 import cats.data.Validated
-import cats.syntax.traverse._
 import cats.syntax.bifunctor._
 import cats.syntax.foldable._
+import cats.syntax.traverse._
 
 import scala.collection.immutable.ArraySeq
 
@@ -26,7 +26,7 @@ object Nibble {
     case c if c >= '0' && c <= '9' => Some((c - '0').toByte)
     case c if c >= 'a' && c <= 'f' => Some((c - 'a' + 10).toByte)
     case c if c >= 'A' && c <= 'F' => Some((c - 'A' + 10).toByte)
-    case _ => None
+    case _                         => None
   }
 
   def apply(digest: Hash): Seq[Nibble] =
@@ -45,12 +45,14 @@ object Nibble {
     val builder = ArraySeq.newBuilder[Nibble]
     builder.sizeHint(hexString.length)
 
-    hexString.toCharArray.toList.foldM(builder) { (acc, char) =>
-      charToByteValue(char) match {
-        case Some(byteValue) => Right(acc += Nibble.unsafe(byteValue))
-        case None => Left(CharOutOfRange)
+    hexString.toCharArray.toList
+      .foldM(builder) { (acc, char) =>
+        charToByteValue(char) match {
+          case Some(byteValue) => Right(acc += Nibble.unsafe(byteValue))
+          case None            => Left(CharOutOfRange)
+        }
       }
-    }.map(_.result())
+      .map(_.result())
   }
 
   def unsafe(byte: Byte): Nibble = new Nibble(byte)
@@ -58,7 +60,7 @@ object Nibble {
   def unsafe(char: Char): Nibble =
     charToByteValue(char) match {
       case Some(byteValue) => Nibble.unsafe(byteValue)
-      case None => throw new IllegalArgumentException("Invalid character: " + char)
+      case None            => throw new IllegalArgumentException("Invalid character: " + char)
     }
 
   def toBytes(nibbles: Seq[Nibble]): Array[Byte] =
@@ -76,7 +78,7 @@ object Nibble {
   def validated(c: Char): Validated[InvalidNibble, Nibble] =
     charToByteValue(c) match {
       case Some(byteValue) => Validated.valid(Nibble.unsafe(byteValue))
-      case None => Validated.invalid(CharOutOfRange)
+      case None            => Validated.invalid(CharOutOfRange)
     }
 
   def commonPrefix(a: Seq[Nibble], b: Seq[Nibble]): Seq[Nibble] =
