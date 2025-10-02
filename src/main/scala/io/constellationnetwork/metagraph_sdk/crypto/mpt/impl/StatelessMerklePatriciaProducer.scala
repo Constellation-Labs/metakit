@@ -9,6 +9,7 @@ import scala.collection.immutable.ArraySeq
 import io.constellationnetwork.metagraph_sdk.crypto.mpt.api.{
   MerklePatriciaError,
   MerklePatriciaProducer,
+  MerklePatriciaProver,
   OperationError
 }
 import io.constellationnetwork.metagraph_sdk.crypto.mpt.{MerklePatriciaNode, MerklePatriciaTrie, Nibble}
@@ -18,15 +19,11 @@ import io.constellationnetwork.security.hash.Hash
 import io.circe.syntax._
 import io.circe.{Encoder, Json}
 
-class OptimizedMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extends MerklePatriciaProducer[F] {
+class StatelessMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extends MerklePatriciaProducer[F] {
 
-  /**
-   * Create a new Merkle Patricia Trie from a map of data.
-   * Optimizations:
-   * - Use NonEmptyList to avoid empty data check
-   * - Batch node creation with traverse
-   * - More efficient folding with sortBy to help locality
-   */
+  def getProver(trie: MerklePatriciaTrie): F[MerklePatriciaProver[F]] =
+    MerklePatriciaProver.make[F](trie).pure[F]
+
   def create[A: Encoder](data: Map[Hash, A]): F[MerklePatriciaTrie] =
     NonEmptyList.fromList(data.toList) match {
       case Some(nel) =>
@@ -47,90 +44,48 @@ class OptimizedMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
       case None => new RuntimeException("Empty data provided").raiseError
     }
 
-  /**
-   * Insert new data into an existing Merkle Patricia Trie.
-   * Optimizations:
-   * - Early return for empty data case
-   * - Partition inserts into batches for potentially parallel processing
-   * - Use NonEmptyList to avoid empty checks
-   */
   def insert[A: Encoder](
     current: MerklePatriciaTrie,
     data:    Map[Hash, A]
   ): F[Either[MerklePatriciaError, MerklePatriciaTrie]] =
     if (data.isEmpty) {
-      // Fast path for empty data
       current.asRight[MerklePatriciaError].pure[F]
     } else {
-      // Group inserts by path prefix to improve locality for inserts in similar branches
-      val batchSize = 100 // Configurable batch size
-      val dataList = data.toList
-
-      // Process in batches to avoid stack overflows for large inputs
-      dataList
-        .grouped(batchSize)
-        .toList
-        .foldM[F, Either[MerklePatriciaError, MerklePatriciaTrie]](current.asRight[MerklePatriciaError]) {
-          case (Right(acc), batch) => insertBatch(acc, batch)
-          case (Left(err), _)      => err.asLeft[MerklePatriciaTrie].pure[F]
-        }
+      insertMultiple(current.rootNode, data.toList)
+        .map(_.map(MerklePatriciaTrie(_)))
         .handleError(e => OperationError(e.getMessage).asLeft[MerklePatriciaTrie])
     }
 
-  /**
-   * Process a batch of inserts efficiently
-   */
-  private def insertBatch[A: Encoder](
-    current: MerklePatriciaTrie,
-    data:    List[(Hash, A)]
-  ): F[Either[MerklePatriciaError, MerklePatriciaTrie]] =
-    data
-      .foldM[F, Either[MerklePatriciaError, MerklePatriciaNode]](current.rootNode.asRight[MerklePatriciaError]) {
-        case (Right(acc), (path, value)) => insertEncoded(acc, Nibble(path), value.asJson)
-        case (Left(err), _)              => err.asLeft[MerklePatriciaNode].pure[F]
-      }
-      .map(_.map(MerklePatriciaTrie(_)))
-
-  /**
-   * Remove data from a Merkle Patricia Trie.
-   * Optimizations:
-   * - Early return for empty data case
-   * - Batched processing for large removals
-   * - Use NonEmptyList to avoid empty checks
-   */
   def remove(current: MerklePatriciaTrie, data: List[Hash]): F[Either[MerklePatriciaError, MerklePatriciaTrie]] =
     if (data.isEmpty) {
-      // Fast path for empty data
       current.asRight[MerklePatriciaError].pure[F]
     } else {
-      // Process in batches to avoid stack overflows for large inputs
-      val batchSize = 100 // Configurable batch size
-
-      data
-        .grouped(batchSize)
-        .toList
-        .foldM[F, Either[MerklePatriciaError, MerklePatriciaTrie]](current.asRight[MerklePatriciaError]) {
-          case (Right(acc), batch) =>
-            removeBatch(acc, batch)
-          case (Left(err), _) =>
-            err.asLeft[MerklePatriciaTrie].pure[F]
-        }
+      removeMultiple(current.rootNode, data)
+        .map(_.map(MerklePatriciaTrie(_)))
         .handleError(e => OperationError(e.getMessage).asLeft[MerklePatriciaTrie])
     }
 
-  /**
-   * Process a batch of removals efficiently
-   */
-  private def removeBatch(
-    current: MerklePatriciaTrie,
-    paths:   List[Hash]
-  ): F[Either[MerklePatriciaError, MerklePatriciaTrie]] =
-    paths
-      .foldM[F, Either[MerklePatriciaError, MerklePatriciaNode]](current.rootNode.asRight[MerklePatriciaError]) {
-        case (Right(acc), path) => removeEncoded(acc, Nibble(path))
-        case (Left(err), _)     => err.asLeft[MerklePatriciaNode].pure[F]
-      }
-      .map(_.map(MerklePatriciaTrie(_)))
+  private def insertMultiple[A: Encoder](
+    initialNode: MerklePatriciaNode,
+    entries:     List[(Hash, A)]
+  ): F[Either[MerklePatriciaError, MerklePatriciaNode]] =
+    entries.foldM(initialNode.asRight[MerklePatriciaError]) {
+      case (Right(acc), (path, value)) =>
+        insertEncoded(acc, Nibble(path), value.asJson)
+      case (Left(err), _) =>
+        err.asLeft[MerklePatriciaNode].pure[F]
+    }
+
+  private def removeMultiple(
+    initialNode: MerklePatriciaNode,
+    paths:       List[Hash]
+  ): F[Either[MerklePatriciaError, MerklePatriciaNode]] =
+    paths.foldM(initialNode.asRight[MerklePatriciaError]) {
+      case (Right(acc), path) =>
+        removeEncoded(acc, Nibble(path))
+      case (Left(err), _) =>
+        err.asLeft[MerklePatriciaNode].pure[F]
+    }
 
   sealed private trait InsertState
 
@@ -141,110 +96,59 @@ class OptimizedMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
   ) extends InsertState
   private case class InsertDone(node: Either[MerklePatriciaError, MerklePatriciaNode]) extends InsertState
 
-  /**
-   * Insert a value with the given path into the trie.
-   * Optimizations:
-   * - Add path length hint for optimization
-   * - More efficient error handling
-   * - Reduce allocations with cached empty values
-   */
   private def insertEncoded(
     currentNode: MerklePatriciaNode,
     path:        Seq[Nibble],
     data:        Json
   ): F[Either[MerklePatriciaError, MerklePatriciaNode]] = {
-
-    // Efficiently create branch with two nodes
-    def createBranchWithTwoNodes(
-      firstNibble:  Nibble,
-      firstNode:    MerklePatriciaNode,
-      secondNibble: Nibble,
-      secondNode:   MerklePatriciaNode
-    ): F[MerklePatriciaNode] =
-      MerklePatriciaNode
-        .Branch[F](
-          Map[Nibble, MerklePatriciaNode](
-            firstNibble  -> firstNode,
-            secondNibble -> secondNode
-          )
-        )
-        .widen
-
-    // Create a leaf or branch with optional extension based on prefix
-    def createNodeWithPrefix(
-      prefix:       Seq[Nibble],
-      node:         MerklePatriciaNode,
-      updateParent: MerklePatriciaNode => F[Either[MerklePatriciaError, MerklePatriciaNode]]
-    ): F[Either[MerklePatriciaError, MerklePatriciaNode]] =
-      (if (prefix.nonEmpty) {
-         node match {
-           case branch: MerklePatriciaNode.Branch =>
-             MerklePatriciaNode.Extension[F](prefix, branch)
-           case _ =>
-             MonadThrow[F].raiseError[MerklePatriciaNode](
-               new IllegalStateException("Only branch nodes can be extended")
-             )
-         }
-       } else {
-         node.pure[F]
-       })
-        .flatMap(updateParent)
-        .handleError(e => OperationError(e.getMessage).asLeft[MerklePatriciaNode])
-
     def insertForLeafNode(
       leafNode:     MerklePatriciaNode.Leaf,
-      key:          Seq[Nibble],
+      _key:         Seq[Nibble],
       updateParent: MerklePatriciaNode => F[Either[MerklePatriciaError, MerklePatriciaNode]]
     ): F[Either[InsertState, Either[MerklePatriciaError, MerklePatriciaNode]]] =
-      if (leafNode.remaining == key) {
-        // Replace leaf with new data
-        MerklePatriciaNode
-          .Leaf[F](key, data)
-          .flatMap(updateParent)
-          .map(_.asRight[InsertState])
-          .handleError(e => OperationError(e.getMessage).asLeft[MerklePatriciaNode].asRight[InsertState])
+      if (leafNode.remaining == _key) {
+        for {
+          newLeaf <- MerklePatriciaNode.Leaf[F](_key, data)
+          result  <- updateParent(newLeaf)
+        } yield result.asRight[InsertState]
       } else {
-        // Split into common prefix + branch with two leaves
-        val commonPrefix = Nibble.commonPrefix(leafNode.remaining, key)
+        val commonPrefix = Nibble.commonPrefix(leafNode.remaining, _key)
         val leafRemaining = leafNode.remaining.drop(commonPrefix.length)
-        val keyRemaining = key.drop(commonPrefix.length)
+        val keyRemaining = _key.drop(commonPrefix.length)
 
         (for {
-          // Create two leaf nodes
           existingLeaf <- MerklePatriciaNode.Leaf[F](leafRemaining.tail, leafNode.data)
           newLeaf      <- MerklePatriciaNode.Leaf[F](keyRemaining.tail, data)
-
-          // Create branch with two paths
-          branchNode <- createBranchWithTwoNodes(
-            leafRemaining.head,
-            existingLeaf,
-            keyRemaining.head,
-            newLeaf
+          branchNode <- MerklePatriciaNode.Branch[F](
+            Map[Nibble, MerklePatriciaNode](
+              leafRemaining.head -> existingLeaf,
+              keyRemaining.head  -> newLeaf
+            )
           )
-
-          // Add extension node if needed and update parent
-          result <- createNodeWithPrefix(commonPrefix, branchNode, updateParent)
-        } yield InsertDone(result).asLeft[Either[MerklePatriciaError, MerklePatriciaNode]])
-          .handleError(e => InsertDone(OperationError(e.getMessage).asLeft[MerklePatriciaNode]).asLeft)
-          .widen
+          resultNode <-
+            if (commonPrefix.nonEmpty) MerklePatriciaNode.Extension[F](commonPrefix, branchNode)
+            else branchNode.pure[F]
+          updatedNode <- updateParent(resultNode)
+        } yield InsertDone(updatedNode).asLeft[Either[MerklePatriciaError, MerklePatriciaNode]]).handleError { e =>
+          InsertDone(OperationError(e.getMessage).asLeft[MerklePatriciaNode]).asLeft
+        }.widen
       }
 
     def insertForExtensionNode(
       extensionNode: MerklePatriciaNode.Extension,
-      key:           Seq[Nibble],
+      _key:          Seq[Nibble],
       updateParent:  MerklePatriciaNode => F[Either[MerklePatriciaError, MerklePatriciaNode]]
     ): F[Either[InsertState, Either[MerklePatriciaError, MerklePatriciaNode]]] = {
-      val commonPrefix = Nibble.commonPrefix(extensionNode.shared, key)
+      val commonPrefix = Nibble.commonPrefix(extensionNode.shared, _key)
       val sharedRemaining = extensionNode.shared.drop(commonPrefix.length)
-      val keyRemaining = key.drop(commonPrefix.length)
+      val keyRemaining = _key.drop(commonPrefix.length)
 
-      if (key.isEmpty) {
+      if (_key.isEmpty) {
         InsertDone(OperationError("Key exhausted at extension node").asLeft)
           .asLeft[Either[MerklePatriciaError, MerklePatriciaNode]]
           .pure[F]
           .widen
       } else if (sharedRemaining.isEmpty) {
-        // Continue with child node
         (InsertContinue(
           extensionNode.child,
           keyRemaining,
@@ -252,7 +156,7 @@ class OptimizedMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
             case branch: MerklePatriciaNode.Branch =>
               MerklePatriciaNode
                 .Extension[F](extensionNode.shared, branch)
-                .flatMap(updateParent)
+                .flatMap(ext => updateParent(ext))
                 .handleError(e => OperationError(e.getMessage).asLeft)
             case _ =>
               OperationError("Unexpected node type while creating extension node")
@@ -262,44 +166,41 @@ class OptimizedMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
           }
         ): InsertState).asLeft[Either[MerklePatriciaError, MerklePatriciaNode]].pure[F]
       } else {
-        // Split extension node
         (for {
           newExtension <- MerklePatriciaNode.Extension[F](sharedRemaining.tail, extensionNode.child)
           newLeaf      <- MerklePatriciaNode.Leaf[F](keyRemaining.tail, data)
-
-          // Create branch with two paths
-          branchNode <- createBranchWithTwoNodes(
-            sharedRemaining.head,
-            newExtension,
-            keyRemaining.head,
-            newLeaf
+          branchNode <- MerklePatriciaNode.Branch[F](
+            Map(
+              sharedRemaining.head -> newExtension,
+              keyRemaining.head    -> newLeaf
+            )
           )
-
-          // Add extension node if needed and update parent
-          result <- createNodeWithPrefix(commonPrefix, branchNode, updateParent)
-        } yield InsertDone(result).asLeft[Either[MerklePatriciaError, MerklePatriciaNode]])
-          .handleError(e => InsertDone(OperationError(e.getMessage).asLeft[MerklePatriciaNode]).asLeft)
-          .widen
+          resultNode <-
+            if (commonPrefix.nonEmpty) MerklePatriciaNode.Extension[F](commonPrefix, branchNode)
+            else branchNode.pure[F]
+          updatedNode <- updateParent(resultNode)
+        } yield InsertDone(updatedNode).asLeft[Either[MerklePatriciaError, MerklePatriciaNode]]).handleError { e =>
+          InsertDone(OperationError(e.getMessage).asLeft[MerklePatriciaNode]).asLeft
+        }.widen
       }
     }
 
     def insertForBranchNode(
       branchNode:   MerklePatriciaNode.Branch,
-      key:          Seq[Nibble],
+      _key:         Seq[Nibble],
       updateParent: MerklePatriciaNode => F[Either[MerklePatriciaError, MerklePatriciaNode]]
     ): F[Either[InsertState, Either[MerklePatriciaError, MerklePatriciaNode]]] =
-      if (key.isEmpty) {
+      if (_key.isEmpty) {
         InsertDone(OperationError("Key exhausted at branch node").asLeft)
           .asLeft[Either[MerklePatriciaError, MerklePatriciaNode]]
           .pure[F]
           .widen
       } else {
-        val nibble = key.head
-        val keyRemaining = key.tail
+        val nibble = _key.head
+        val keyRemaining = _key.tail
 
         branchNode.paths.get(nibble) match {
           case Some(childNode) =>
-            // Continue with child node
             (InsertContinue(
               childNode,
               keyRemaining,
@@ -311,13 +212,13 @@ class OptimizedMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
             ): InsertState).asLeft[Either[MerklePatriciaError, MerklePatriciaNode]].pure[F]
 
           case None =>
-            // Add new path to branch
             (for {
               newLeaf       <- MerklePatriciaNode.Leaf[F](keyRemaining, data)
               updatedBranch <- MerklePatriciaNode.Branch[F](branchNode.paths + (nibble -> newLeaf))
               result        <- updateParent(updatedBranch)
-            } yield result.asRight[InsertState])
-              .handleError(e => InsertDone(OperationError(e.getMessage).asLeft[MerklePatriciaNode]).asLeft)
+            } yield result.asRight[InsertState]).handleError { e =>
+              InsertDone(OperationError(e.getMessage).asLeft[MerklePatriciaNode]).asLeft
+            }
         }
       }
 
@@ -350,62 +251,32 @@ class OptimizedMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
   ) extends RemoveState
   private case class RemoveDone(nodeOpt: Either[MerklePatriciaError, Option[MerklePatriciaNode]]) extends RemoveState
 
-  /**
-   * Remove a value with the given path from the trie.
-   * Optimizations:
-   * - Cache common operations
-   * - Reduce allocations
-   * - Improve error handling
-   */
   private def removeEncoded(
     currentNode: MerklePatriciaNode,
     path:        Seq[Nibble]
   ): F[Either[MerklePatriciaError, MerklePatriciaNode]] = {
-
-    def handleSingleRemainingChild(
-      remainingNibble: Nibble,
-      onlyChild:       MerklePatriciaNode,
-      updateParent:    Option[MerklePatriciaNode] => F[Either[MerklePatriciaError, Option[MerklePatriciaNode]]]
-    ): F[Either[MerklePatriciaError, Option[MerklePatriciaNode]]] =
-      onlyChild match {
-        case leafNode: MerklePatriciaNode.Leaf =>
-          MerklePatriciaNode
-            .Leaf[F](ArraySeq(remainingNibble) ++ leafNode.remaining, leafNode.data)
-            .flatMap(node => updateParent(Some(node)))
-            .handleError(e => OperationError(e.getMessage).asLeft)
-
-        case extensionNode: MerklePatriciaNode.Extension =>
-          MerklePatriciaNode
-            .Extension[F](ArraySeq(remainingNibble) ++ extensionNode.shared, extensionNode.child)
-            .flatMap(node => updateParent(Some(node)))
-            .handleError(e => OperationError(e.getMessage).asLeft)
-
-        case branchNode: MerklePatriciaNode.Branch =>
-          MerklePatriciaNode
-            .Extension[F](ArraySeq(remainingNibble), branchNode)
-            .flatMap(node => updateParent(Some(node)))
-            .handleError(e => OperationError(e.getMessage).asLeft)
-      }
-
     def removeForLeafNode(
       leafNode:     MerklePatriciaNode.Leaf,
-      key:          Seq[Nibble],
+      _key:         Seq[Nibble],
       updateParent: Option[MerklePatriciaNode] => F[Either[MerklePatriciaError, Option[MerklePatriciaNode]]]
     ): F[Either[RemoveState, Either[MerklePatriciaError, Option[MerklePatriciaNode]]]] =
-      if (leafNode.remaining == key) updateParent(None).map(_.asRight)
-      else leafNode.some.asRight[MerklePatriciaError].asRight[RemoveState].pure[F].widen
+      if (leafNode.remaining == _key) {
+        updateParent(None).map(_.asRight)
+      } else {
+        leafNode.some.asRight[MerklePatriciaError].asRight[RemoveState].pure[F].widen
+      }
 
     def removeForExtensionNode(
       extensionNode: MerklePatriciaNode.Extension,
-      key:           Seq[Nibble],
+      _key:          Seq[Nibble],
       updateParent:  Option[MerklePatriciaNode] => F[Either[MerklePatriciaError, Option[MerklePatriciaNode]]]
     ): F[Either[RemoveState, Either[MerklePatriciaError, Option[MerklePatriciaNode]]]] = {
-      val commonPrefix = Nibble.commonPrefix(extensionNode.shared, key)
+      val commonPrefix = Nibble.commonPrefix(extensionNode.shared, _key)
 
       if (commonPrefix.length == extensionNode.shared.length) {
-        RemoveContinue(
+        (RemoveContinue(
           extensionNode.child,
-          key.drop(commonPrefix.length),
+          _key.drop(commonPrefix.length),
           {
             case Some(updatedChild) =>
               updatedChild match {
@@ -430,7 +301,7 @@ class OptimizedMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
 
             case None => updateParent(None)
           }
-        ).asLeft[Either[MerklePatriciaError, Option[MerklePatriciaNode]]].pure[F].widen
+        ): RemoveState).asLeft[Either[MerklePatriciaError, Option[MerklePatriciaNode]]].pure[F]
       } else {
         extensionNode.some.asRight[MerklePatriciaError].asRight[RemoveState].pure[F].widen
       }
@@ -438,17 +309,16 @@ class OptimizedMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
 
     def removeForBranchNode(
       branchNode:   MerklePatriciaNode.Branch,
-      key:          Seq[Nibble],
+      _key:         Seq[Nibble],
       updateParent: Option[MerklePatriciaNode] => F[Either[MerklePatriciaError, Option[MerklePatriciaNode]]]
     ): F[Either[RemoveState, Either[MerklePatriciaError, Option[MerklePatriciaNode]]]] =
-      if (key.nonEmpty) {
-        val nibble = key.head
-        val keyRemaining = key.tail
+      if (_key.nonEmpty) {
+        val nibble = _key.head
+        val keyRemaining = _key.tail
 
         branchNode.paths.get(nibble) match {
           case Some(childNode) =>
-            // Continue with child node
-            (RemoveContinue(
+            RemoveContinue(
               childNode,
               keyRemaining,
               {
@@ -457,7 +327,6 @@ class OptimizedMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
                     .Branch[F](branchNode.paths + (nibble -> updatedChild))
                     .flatMap(node => updateParent(Some(node)))
                     .handleError(e => OperationError(e.getMessage).asLeft)
-
                 case None =>
                   val updatedPaths = branchNode.paths - nibble
 
@@ -467,7 +336,25 @@ class OptimizedMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
 
                     case 1 =>
                       val (remainingNibble, onlyChild) = updatedPaths.head
-                      handleSingleRemainingChild(remainingNibble, onlyChild, updateParent)
+                      onlyChild match {
+                        case leafNode: MerklePatriciaNode.Leaf =>
+                          MerklePatriciaNode
+                            .Leaf[F](ArraySeq(remainingNibble) ++ leafNode.remaining, leafNode.data)
+                            .flatMap(node => updateParent(Some(node)))
+                            .handleError(e => OperationError(e.getMessage).asLeft)
+
+                        case extensionNode: MerklePatriciaNode.Extension =>
+                          MerklePatriciaNode
+                            .Extension[F](ArraySeq(remainingNibble) ++ extensionNode.shared, extensionNode.child)
+                            .flatMap(node => updateParent(Some(node)))
+                            .handleError(e => OperationError(e.getMessage).asLeft)
+
+                        case branchNode: MerklePatriciaNode.Branch =>
+                          MerklePatriciaNode
+                            .Extension[F](ArraySeq(remainingNibble), branchNode)
+                            .flatMap(node => updateParent(Some(node)))
+                            .handleError(e => OperationError(e.getMessage).asLeft)
+                      }
 
                     case _ =>
                       MerklePatriciaNode
@@ -476,14 +363,11 @@ class OptimizedMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
                         .handleError(e => OperationError(e.getMessage).asLeft)
                   }
               }
-            ): RemoveState).asLeft[Either[MerklePatriciaError, Option[MerklePatriciaNode]]].pure[F]
+            ).asLeft[Either[MerklePatriciaError, Option[MerklePatriciaNode]]].pure[F].widen
 
-          case None =>
-            branchNode.some.asRight[MerklePatriciaError].asRight[RemoveState].pure[F].widen
+          case None => branchNode.some.asRight[MerklePatriciaError].asRight[RemoveState].pure[F].widen
         }
-      } else {
-        branchNode.some.asRight[MerklePatriciaError].asRight[RemoveState].pure[F].widen
-      }
+      } else branchNode.some.asRight[MerklePatriciaError].asRight[RemoveState].pure[F].widen
 
     def step(state: RemoveState): F[Either[RemoveState, Either[MerklePatriciaError, Option[MerklePatriciaNode]]]] =
       state match {
@@ -508,4 +392,10 @@ class OptimizedMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
       case Left(err)                => err.asLeft[MerklePatriciaNode].pure[F]
     }
   }
+}
+
+object StatelessMerklePatriciaProducer {
+
+  def apply[F[_]: JsonBinaryHasher: MonadThrow]: StatelessMerklePatriciaProducer[F] =
+    new StatelessMerklePatriciaProducer[F]
 }

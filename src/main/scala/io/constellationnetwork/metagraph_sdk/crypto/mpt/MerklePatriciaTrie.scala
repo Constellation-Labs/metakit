@@ -4,7 +4,7 @@ import cats.MonadThrow
 
 import scala.annotation.tailrec
 
-import io.constellationnetwork.metagraph_sdk.crypto.mpt.api.{MerklePatriciaError, MerklePatriciaProducer}
+import io.constellationnetwork.metagraph_sdk.crypto.mpt.api.MerklePatriciaProducer
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher
 import io.constellationnetwork.security.hash.Hash
 
@@ -21,40 +21,13 @@ object MerklePatriciaTrie {
   implicit val merkleTreeDecoder: Decoder[MerklePatriciaTrie] = (c: HCursor) =>
     c.downField("rootNode").as[MerklePatriciaNode].map(MerklePatriciaTrie(_))
 
-  def create[F[_]: JsonBinaryHasher: MonadThrow, A: Encoder](data: Map[Hash, A]): F[MerklePatriciaTrie] =
-    make(data)
-
   /**
-   * Create a new MerklePatriciaTrie from a map of data using the optimized producer
+   * Create a new MerklePatriciaTrie from a map of data using the stateless producer
    */
   def make[F[_]: JsonBinaryHasher: MonadThrow, A: Encoder](data: Map[Hash, A]): F[MerklePatriciaTrie] =
     MerklePatriciaProducer
-      .make[F]
+      .stateless[F]
       .create(data)
-
-  /**
-   * Create a new MerklePatriciaTrie from a map of data using the simple producer
-   */
-  def simple[F[_]: JsonBinaryHasher: MonadThrow, A: Encoder](data: Map[Hash, A]): F[MerklePatriciaTrie] =
-    MerklePatriciaProducer
-      .simple[F]
-      .create(data)
-
-  def insert[F[_]: JsonBinaryHasher: MonadThrow, A: Encoder](
-    current: MerklePatriciaTrie,
-    data:    Map[Hash, A]
-  ): F[Either[MerklePatriciaError, MerklePatriciaTrie]] =
-    MerklePatriciaProducer
-      .make[F]
-      .insert(current, data)
-
-  def remove[F[_]: JsonBinaryHasher: MonadThrow](
-    current: MerklePatriciaTrie,
-    data:    List[Hash]
-  ): F[Either[MerklePatriciaError, MerklePatriciaTrie]] =
-    MerklePatriciaProducer
-      .make[F]
-      .remove(current, data)
 
   def collectLeafNodes(trie: MerklePatriciaTrie): List[MerklePatriciaNode.Leaf] = {
 

@@ -6,6 +6,7 @@ import cats.syntax.all._
 import scala.collection.immutable.SortedSet
 
 import io.constellationnetwork.metagraph_sdk.crypto.mpt.{MerklePatriciaNode, MerklePatriciaTrie, Nibble}
+import io.constellationnetwork.metagraph_sdk.crypto.mpt.api.MerklePatriciaProducer
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher.HasherOps
 import io.constellationnetwork.security.hash.Hash
 
@@ -58,7 +59,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
         initMap    <- list1.traverse(el => el.computeDigest.map(_ -> el)).map(_.toMap)
         updMap     <- list2.traverse(el => el.computeDigest.map(_ -> el)).map(_.toMap)
         trie       <- MerklePatriciaTrie.make(initMap)
-        trie2      <- MerklePatriciaTrie.insert(trie, updMap).flatMap(IO.fromEither(_))
+        trie2      <- MerklePatriciaProducer.stateless[IO].insert(trie, updMap).flatMap(IO.fromEither(_))
         listLeaves <- IO.fromEither(MerklePatriciaTrie.collectLeafNodes(trie2).traverse(_.data.as[Long]))
         sortedInputSet = SortedSet.from(list1 ++ list2)
         sortedOutputSet = SortedSet.from(listLeaves)
@@ -77,7 +78,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
         createMap   <- createList.traverse(el => el.computeDigest.map(_ -> el)).map(_.toMap)
         removePaths <- removeList.traverse[IO, Hash](el => el.computeDigest)
         trie1       <- MerklePatriciaTrie.make(createMap)
-        trie2       <- MerklePatriciaTrie.remove(trie1, removePaths).flatMap(IO.fromEither(_))
+        trie2       <- MerklePatriciaProducer.stateless[IO].remove(trie1, removePaths).flatMap(IO.fromEither(_))
         listLeaves  <- IO.fromEither(MerklePatriciaTrie.collectLeafNodes(trie2).traverse(_.data.as[Long]))
       } yield expect(listLeaves.forall(!removeList.contains(_)))
     }
@@ -88,7 +89,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
       for {
         path  <- Hash(Array.fill(32)('1').mkString).pure[IO]
         trie1 <- MerklePatriciaTrie.make[IO, Long](Map(path -> val1))
-        trie2 <- MerklePatriciaTrie.insert[IO, Long](trie1, Map(path -> val2)).flatMap(IO.fromEither(_))
+        trie2 <- MerklePatriciaProducer.stateless[IO].insert[Long](trie1, Map(path -> val2)).flatMap(IO.fromEither(_))
         (root1, data1, digest1) <- trie1.rootNode match {
           case MerklePatriciaNode.Leaf(_, _data, _digest) => IO.pure((trie1.rootNode.digest, _data, _digest))
           case _                                          => IO.raiseError(new Exception("unexpected root node found"))
@@ -115,7 +116,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
       leafMap   <- (0 to 31).toList.traverse(el => el.computeDigest.map(_ -> el)).map(_.toMap)
       trie      <- MerklePatriciaTrie.make[IO, Int](leafMap)
       newLeaves <- (-31 to -0).toList.traverse(el => el.computeDigest.map(_ -> el)).map(_.toMap)
-      trie2     <- MerklePatriciaTrie.insert(trie, newLeaves).flatMap(IO.fromEither(_))
+      trie2     <- MerklePatriciaProducer.stateless[IO].insert(trie, newLeaves).flatMap(IO.fromEither(_))
     } yield expect(trie2.rootNode.digest == Hash("f01117b41e875b6f432e12a10b340ddd0cafa077a4b9b82aed688695adf58c45"))
   }
 
@@ -124,7 +125,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
       leafMap   <- (0 to 31).toList.traverse(el => el.computeDigest.map(_ -> el)).map(_.toMap)
       trie      <- MerklePatriciaTrie.make[IO, Int](leafMap)
       remLeaves <- (17 to 31).toList.traverse[IO, Hash](el => el.computeDigest)
-      trie2     <- MerklePatriciaTrie.remove(trie, remLeaves).flatMap(IO.fromEither(_))
+      trie2     <- MerklePatriciaProducer.stateless[IO].remove(trie, remLeaves).flatMap(IO.fromEither(_))
     } yield expect(trie2.rootNode.digest == Hash("dd0c87acf3b891f2461cb9776a1e3376216b156ff0bebdb6b7c1b4c6f8ee9f35"))
   }
 
@@ -492,7 +493,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
       trieActual <- MerklePatriciaTrie
         .make(leafMap)
         .flatMap(
-          MerklePatriciaTrie.remove(_, List(Hash("FFAFFAFFFFFFFFFFFFFFFFFFFBFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD4")))
+          MerklePatriciaProducer.stateless[IO].remove(_, List(Hash("FFAFFAFFFFFFFFFFFFFFFFFFFBFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD4")))
         )
         .flatMap(IO.fromEither(_))
 
@@ -532,7 +533,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
       trieActual <- MerklePatriciaTrie
         .make(leafMap)
         .flatMap(trie =>
-          MerklePatriciaTrie
+          MerklePatriciaProducer.stateless[IO]
             .remove(trie, List(Hash("FFAFFAFFFFFFFFFFFFFFFFFFFBFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD4")))
         )
         .flatMap(IO.fromEither(_))
@@ -569,7 +570,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
       trieActual <- MerklePatriciaTrie
         .make(leafMap)
         .flatMap(trie =>
-          MerklePatriciaTrie
+          MerklePatriciaProducer.stateless[IO]
             .remove(trie, List(Hash("FFAFFAFFFFFFFFFFFFFFFFFFFBFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD4")))
         )
         .flatMap(IO.fromEither(_))
@@ -615,7 +616,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
       trieActual <- MerklePatriciaTrie
         .make(leafMap)
         .flatMap(
-          MerklePatriciaTrie.remove(_, List(Hash("FFAFFAFFFFFFFFFFFFFFFFFFFBFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD4")))
+          MerklePatriciaProducer.stateless[IO].remove(_, List(Hash("FFAFFAFFFFFFFFFFFFFFFFFFFBFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD4")))
         )
         .flatMap(IO.fromEither(_))
 
@@ -656,7 +657,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
       trieActual <- MerklePatriciaTrie
         .make(leafMap)
         .flatMap(
-          MerklePatriciaTrie.remove(_, List(Hash("FFAFFAFFFFFFFFFFFFFFFFFFFBFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD4")))
+          MerklePatriciaProducer.stateless[IO].remove(_, List(Hash("FFAFFAFFFFFFFFFFFFFFFFFFFBFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD4")))
         )
         .flatMap(IO.fromEither(_))
 
@@ -699,7 +700,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
       trieActual <- MerklePatriciaTrie
         .make(leafMap)
         .flatMap(
-          MerklePatriciaTrie.remove(_, List(Hash("FFAFFAFFFFFFFFFFFFFFFFFFFBFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD4")))
+          MerklePatriciaProducer.stateless[IO].remove(_, List(Hash("FFAFFAFFFFFFFFFFFFFFFFFFFBFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD4")))
         )
         .flatMap(IO.fromEither(_))
 
@@ -737,10 +738,10 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
       trie1 <- MerklePatriciaTrie.make(initialLeafMap)
       root1 = trie1.rootNode.digest
 
-      trie2 <- MerklePatriciaTrie.insert(trie1, Map(insertKey -> insertValue)).flatMap(IO.fromEither(_))
+      trie2 <- MerklePatriciaProducer.stateless[IO].insert(trie1, Map(insertKey -> insertValue)).flatMap(IO.fromEither(_))
       root2 = trie2.rootNode.digest
 
-      trie3 <- MerklePatriciaTrie.remove(trie2, List(insertKey)).flatMap(IO.fromEither(_))
+      trie3 <- MerklePatriciaProducer.stateless[IO].remove(trie2, List(insertKey)).flatMap(IO.fromEither(_))
       root3 = trie3.rootNode.digest
 
     } yield expect(root1 == root3 && root1 != root2 && root2 != root3)
