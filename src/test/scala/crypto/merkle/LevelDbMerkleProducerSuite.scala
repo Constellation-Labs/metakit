@@ -13,6 +13,7 @@ import io.constellationnetwork.metagraph_sdk.crypto.merkle.impl.LevelDbMerklePro
 
 import io.circe.syntax._
 import org.scalacheck.Gen
+import shared.Generators.nonEmptyAlphaStr
 import weaver.IOSuite
 import weaver.scalacheck.Checkers
 
@@ -46,7 +47,7 @@ object LevelDbMerkleProducerSuite extends IOSuite with Checkers {
   } *> IO.unit
 
   test("creates producer with initial leaves") { tempPath =>
-    forall(Gen.listOfN(3, Gen.alphaStr.suchThat(_.nonEmpty))) { strings =>
+    forall(Gen.listOfN(3, nonEmptyAlphaStr)) { strings =>
       for {
         initialLeaves <- strings.traverse(s => MerkleNode.Leaf[IO](s.asJson))
         randSuffix    <- IO(scala.util.Random.alphanumeric.take(10).mkString)
@@ -61,8 +62,8 @@ object LevelDbMerkleProducerSuite extends IOSuite with Checkers {
 
   test("persists leaves across sessions") { tempPath =>
     val genPersist = for {
-      initialStrings <- Gen.listOfN(2, Gen.alphaStr.suchThat(_.nonEmpty))
-      appendString   <- Gen.alphaStr.suchThat(_.nonEmpty)
+      initialStrings <- Gen.listOfN(2, nonEmptyAlphaStr)
+      appendString   <- nonEmptyAlphaStr
     } yield (initialStrings, appendString)
 
     forall(genPersist) {
@@ -108,9 +109,9 @@ object LevelDbMerkleProducerSuite extends IOSuite with Checkers {
   test("updates leaf at index") { tempPath =>
     val genInput = for {
       size         <- Gen.choose(2, 10)
-      strings      <- Gen.listOfN(size, Gen.alphaStr.suchThat(_.nonEmpty))
+      strings      <- Gen.listOfN(size, nonEmptyAlphaStr)
       updateIdx    <- Gen.choose(0, size - 1)
-      updateString <- Gen.alphaStr.suchThat(_.nonEmpty).suchThat(_ != strings(updateIdx))
+      updateString <- nonEmptyAlphaStr.map(_ + "-updated")
     } yield (strings, updateIdx, updateString)
 
     forall(genInput) {
@@ -132,9 +133,9 @@ object LevelDbMerkleProducerSuite extends IOSuite with Checkers {
   test("returns error for invalid index on update") { tempPath =>
     val genInvalidUpdate = for {
       size         <- Gen.choose(1, 5)
-      strings      <- Gen.listOfN(size, Gen.alphaStr.suchThat(_.nonEmpty))
+      strings      <- Gen.listOfN(size, nonEmptyAlphaStr)
       invalidIdx   <- Gen.choose(size + 1, size + 10)
-      updateString <- Gen.alphaStr.suchThat(_.nonEmpty)
+      updateString <- nonEmptyAlphaStr
     } yield (strings, invalidIdx, updateString)
 
     forall(genInvalidUpdate) {
@@ -158,8 +159,8 @@ object LevelDbMerkleProducerSuite extends IOSuite with Checkers {
     val genAppend = for {
       initialSize    <- Gen.choose(1, 5)
       appendSize     <- Gen.choose(1, 5)
-      initialStrings <- Gen.listOfN(initialSize, Gen.alphaStr.suchThat(_.nonEmpty))
-      appendStrings  <- Gen.listOfN(appendSize, Gen.alphaStr.suchThat(_.nonEmpty))
+      initialStrings <- Gen.listOfN(initialSize, nonEmptyAlphaStr)
+      appendStrings  <- Gen.listOfN(appendSize, nonEmptyAlphaStr)
     } yield (initialStrings, appendStrings)
 
     forall(genAppend) {
@@ -184,8 +185,8 @@ object LevelDbMerkleProducerSuite extends IOSuite with Checkers {
     val genPrepend = for {
       initialSize    <- Gen.choose(1, 5)
       prependSize    <- Gen.choose(1, 5)
-      initialStrings <- Gen.listOfN(initialSize, Gen.alphaStr.suchThat(_.nonEmpty))
-      prependStrings <- Gen.listOfN(prependSize, Gen.alphaStr.suchThat(_.nonEmpty))
+      initialStrings <- Gen.listOfN(initialSize, nonEmptyAlphaStr)
+      prependStrings <- Gen.listOfN(prependSize, nonEmptyAlphaStr)
     } yield (initialStrings, prependStrings)
 
     forall(genPrepend) {
@@ -209,7 +210,7 @@ object LevelDbMerkleProducerSuite extends IOSuite with Checkers {
   test("removes leaf at index") { tempPath =>
     val genRemove = for {
       size      <- Gen.choose(2, 10)
-      strings   <- Gen.listOfN(size, Gen.alphaStr.suchThat(_.nonEmpty))
+      strings   <- Gen.listOfN(size, nonEmptyAlphaStr)
       removeIdx <- Gen.choose(0, size - 1)
     } yield (strings, removeIdx)
 
@@ -235,7 +236,7 @@ object LevelDbMerkleProducerSuite extends IOSuite with Checkers {
   test("returns error for invalid index on remove") { tempPath =>
     val genInvalidRemove = for {
       size       <- Gen.choose(1, 5)
-      strings    <- Gen.listOfN(size, Gen.alphaStr.suchThat(_.nonEmpty))
+      strings    <- Gen.listOfN(size, nonEmptyAlphaStr)
       invalidIdx <- Gen.choose(size + 1, size + 10)
     } yield (strings, invalidIdx)
 
@@ -293,9 +294,9 @@ object LevelDbMerkleProducerSuite extends IOSuite with Checkers {
   test("getProver rebuilds tree when dirty") { tempPath =>
     val genUpdate = for {
       size         <- Gen.choose(2, 5)
-      strings      <- Gen.listOfN(size, Gen.alphaStr.suchThat(_.nonEmpty))
+      strings      <- Gen.listOfN(size, nonEmptyAlphaStr)
       updateIdx    <- Gen.choose(0, size - 1)
-      updateString <- Gen.alphaStr.suchThat(_.nonEmpty).suchThat(_ != strings(updateIdx))
+      updateString <- nonEmptyAlphaStr.map(_ + "-updated")
     } yield (strings, updateIdx, updateString)
 
     forall(genUpdate) {

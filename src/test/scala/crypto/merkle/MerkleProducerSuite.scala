@@ -26,7 +26,7 @@ object MerkleProducerSuite extends SimpleIOSuite with Checkers {
   }
 
   test("Building a tree with non-empty list is successful") {
-    forall(Gen.listOf(Gen.alphaNumStr).suchThat(_.nonEmpty)) { strings =>
+    forall(Gen.choose(1, 20).flatMap(n => Gen.listOfN(n, Gen.alphaNumStr))) { strings =>
       for {
         leaves        <- strings.map(_.asJson).traverse(MerkleNode.Leaf(_))
         producer      <- MerkleProducer.inMemory[IO](leaves)

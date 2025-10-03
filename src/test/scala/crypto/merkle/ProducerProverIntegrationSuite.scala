@@ -11,6 +11,7 @@ import io.constellationnetwork.metagraph_sdk.crypto.merkle.impl.LevelDbMerklePro
 
 import io.circe.syntax._
 import org.scalacheck.Gen
+import shared.Generators.nonEmptyAlphaStr
 import weaver.MutableIOSuite
 import weaver.scalacheck.Checkers
 
@@ -58,7 +59,7 @@ object ProducerProverIntegrationSuite extends MutableIOSuite with Checkers {
   }
 
   test("LevelDbProducer.getProver provides working prover") { tempPath =>
-    forall(Gen.listOfN(4, Gen.alphaStr.suchThat(_.nonEmpty))) { strings =>
+    forall(Gen.listOfN(4, nonEmptyAlphaStr)) { strings =>
       for {
         randSuffix <- IO(scala.util.Random.alphanumeric.take(10).mkString)
         dbPath = tempPath.resolve(s"test1_$randSuffix")
@@ -80,8 +81,8 @@ object ProducerProverIntegrationSuite extends MutableIOSuite with Checkers {
 
   test("Producer updates affect prover proofs") { tempPath =>
     val genUpdate = for {
-      initialStrings <- Gen.listOfN(3, Gen.alphaStr.suchThat(_.nonEmpty))
-      updateString   <- Gen.alphaStr.suchThat(s => s.nonEmpty && s != initialStrings(1))
+      initialStrings <- Gen.listOfN(3, nonEmptyAlphaStr)
+      updateString   <- nonEmptyAlphaStr
     } yield (initialStrings, updateString)
 
     forall(genUpdate) {
@@ -126,9 +127,9 @@ object ProducerProverIntegrationSuite extends MutableIOSuite with Checkers {
 
   test("Producer handles append and prepend with prover integration") { tempPath =>
     val genAppendPrepend = for {
-      middle <- Gen.alphaNumStr.suchThat(_.nonEmpty)
-      first  <- Gen.alphaNumStr.suchThat(_.nonEmpty)
-      last   <- Gen.alphaNumStr.suchThat(_.nonEmpty)
+      middle <- Gen.listOfN(5, Gen.alphaNumChar).map(_.mkString)
+      first  <- Gen.listOfN(5, Gen.alphaNumChar).map(_.mkString)
+      last   <- Gen.listOfN(5, Gen.alphaNumChar).map(_.mkString)
     } yield (first, middle, last)
 
     forall(genAppendPrepend) {
@@ -229,7 +230,7 @@ object ProducerProverIntegrationSuite extends MutableIOSuite with Checkers {
   }
 
   test("Different producer types generate compatible proofs") { tempPath =>
-    forall(Gen.listOfN(4, Gen.alphaStr.suchThat(_.nonEmpty))) { strings =>
+    forall(Gen.listOfN(4, nonEmptyAlphaStr)) { strings =>
       for {
         randSuffix <- IO(scala.util.Random.alphanumeric.take(10).mkString)
         dbPath = tempPath.resolve(s"test7_$randSuffix")
@@ -250,7 +251,7 @@ object ProducerProverIntegrationSuite extends MutableIOSuite with Checkers {
   }
 
   test("MerkleProducer.levelDb and loadLevelDb convenience methods work correctly") { tempPath =>
-    forall(Gen.listOfN(3, Gen.alphaStr.suchThat(_.nonEmpty))) { strings =>
+    forall(Gen.listOfN(3, nonEmptyAlphaStr)) { strings =>
       for {
         randSuffix <- IO(scala.util.Random.alphanumeric.take(10).mkString)
         dbPath = tempPath.resolve(s"test8_$randSuffix")

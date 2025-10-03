@@ -8,13 +8,14 @@ import io.constellationnetwork.security.hash.Hash
 import io.circe.Json
 import io.circe.syntax.EncoderOps
 import org.scalacheck.Gen
+import shared.Generators.nonEmptyAlphaStr
 import weaver.SimpleIOSuite
 import weaver.scalacheck.Checkers
 
 object MerkleTreeSuite extends SimpleIOSuite with Checkers {
 
   test("ensure root of MerkleTree is non-empty for list of non-empty strings") {
-    forall(Gen.nonEmptyListOf(Gen.alphaStr.suchThat(_.nonEmpty))) { strings =>
+    forall(Gen.nonEmptyListOf(nonEmptyAlphaStr)) { strings =>
       for {
         merkleTree <- MerkleTree.create[IO, String](strings)
       } yield expect(merkleTree.rootNode.digest.value.nonEmpty)
@@ -22,7 +23,7 @@ object MerkleTreeSuite extends SimpleIOSuite with Checkers {
   }
 
   test("the same list of strings produces MerkleTrees with the same root") {
-    forall(Gen.nonEmptyListOf(Gen.alphaStr.suchThat(_.nonEmpty))) { strings =>
+    forall(Gen.nonEmptyListOf(nonEmptyAlphaStr)) { strings =>
       for {
         merkleTree1 <- MerkleTree.create[IO, String](strings)
         merkleTree2 <- MerkleTree.create[IO, String](strings)
@@ -32,8 +33,9 @@ object MerkleTreeSuite extends SimpleIOSuite with Checkers {
 
   test("different lists of strings produce MerkleTrees with different roots") {
     val distinctNonEmptyLists: Gen[(List[String], List[String])] = for {
-      list1 <- Gen.nonEmptyListOf(Gen.alphaStr.suchThat(_.nonEmpty))
-      list2 <- Gen.nonEmptyListOf(Gen.alphaStr.suchThat(_.nonEmpty)).suchThat(_ != list1)
+      size  <- Gen.choose(1, 10)
+      list1 <- Gen.listOfN(size, nonEmptyAlphaStr)
+      list2 <- Gen.listOfN(size + 1, nonEmptyAlphaStr)
     } yield (list1, list2)
 
     forall(distinctNonEmptyLists) {

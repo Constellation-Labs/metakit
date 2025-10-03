@@ -38,7 +38,7 @@ object MerkleProverSuite extends SimpleIOSuite with Checkers {
   }
 
   test("Creating a proof fails when using a Leaf NOT in the tree") {
-    forall(nonEmptyStringListGen(2, 100)) { strings =>
+    forall(nonEmptyStringListGen(2, 100).map(_.distinct)) { strings =>
       for {
         leaves <- strings.map(_.asJson).traverse(MerkleNode.Leaf(_))
         tree   <- MerkleTree.create[IO, String](strings.tail)
@@ -49,7 +49,7 @@ object MerkleProverSuite extends SimpleIOSuite with Checkers {
   }
 
   test("Creating a proof fails when using a digest of a leaf NOT in the tree") {
-    forall(nonEmptyStringListGen(2, 100)) { strings =>
+    forall(nonEmptyStringListGen(2, 100).map(_.distinct)) { strings =>
       for {
         leaves <- strings.map(_.asJson).traverse(MerkleNode.Leaf(_))
         tree   <- MerkleTree.create[IO, String](strings.tail)
