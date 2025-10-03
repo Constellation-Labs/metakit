@@ -6,7 +6,7 @@ sealed abstract class JsonLogicOp(val tag: String) extends EnumEntry
 
 object JsonLogicOp extends Enum[JsonLogicOp] with CirceEnum[JsonLogicOp] {
   val values: IndexedSeq[JsonLogicOp] = findValues
-  val knownOperatorTags: Map[String, JsonLogicOp] = JsonLogicOp.values.map(op => (op.tag -> op)).toMap
+  val knownOperatorTags: Map[String, JsonLogicOp] = JsonLogicOp.values.map(op => op.tag -> op).toMap
 
   case object NoOp extends JsonLogicOp("noop")
   case object MissingNoneOp extends JsonLogicOp("missing")

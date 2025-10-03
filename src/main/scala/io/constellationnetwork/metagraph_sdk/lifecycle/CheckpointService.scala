@@ -14,7 +14,7 @@ import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 trait CheckpointService[F[_], S] {
   def get: F[Checkpoint[S]]
-  def set(checkpoint:  Checkpoint[S]): F[Boolean]
+  def set(checkpoint: Checkpoint[S]): F[Boolean]
   def evalModify[E](f: Checkpoint[S] => F[Either[E, Checkpoint[S]]]): F[Either[E, Checkpoint[S]]]
 }
 

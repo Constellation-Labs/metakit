@@ -60,30 +60,32 @@ object MerkleArbitraryLengthSuite extends IOSuite with Checkers {
       removeCount <- Gen.choose(0, Math.min(5, initialSize / 4))
     } yield (initialSize, updateCount, removeCount)
 
-    forall(genOps) { case (initialSize, updateCount, removeCount) =>
-      for {
-        initialLeaves <- (1 to initialSize).toList.traverse(i => MerkleNode.Leaf[IO](s"initial-$i".asJson))
-        producer      <- MerkleProducer.inMemory[IO](initialLeaves)
+    forall(genOps) {
+      case (initialSize, updateCount, removeCount) =>
+        for {
+          initialLeaves <- (1 to initialSize).toList.traverse(i => MerkleNode.Leaf[IO](s"initial-$i".asJson))
+          producer      <- MerkleProducer.inMemory[IO](initialLeaves)
 
-        // Update some indices
-        _ <- (0 until updateCount).toList.traverse { i =>
-          MerkleNode.Leaf[IO](s"updated-$i".asJson).flatMap(leaf => producer.update(i % initialSize, leaf))
-        }
-
-        // Remove some indices from the start
-        _ <- (0 until removeCount).toList.traverse { _ =>
-          producer.leaves.flatMap { currentLeaves =>
-            if (currentLeaves.nonEmpty) producer.remove(0)
-            else IO.unit
+          // Update some indices
+          _ <- (0 until updateCount).toList.traverse { i =>
+            MerkleNode.Leaf[IO](s"updated-$i".asJson).flatMap(leaf => producer.update(i % initialSize, leaf))
           }
-        }
 
-        // Build and verify
-        treeResult <- producer.build
-        leaves     <- producer.leaves
-        finalSize = initialSize - removeCount
-      } yield expect(treeResult.isRight || finalSize == 0) &&
-      expect(leaves.size == finalSize)
+          // Remove some indices from the start
+          _ <- (0 until removeCount).toList.traverse { _ =>
+            producer.leaves.flatMap { currentLeaves =>
+              if (currentLeaves.nonEmpty) producer.remove(0)
+              else IO.unit
+            }
+          }
+
+          // Build and verify
+          treeResult <- producer.build
+          leaves     <- producer.leaves
+          finalSize = initialSize - removeCount
+        } yield
+          expect(treeResult.isRight || finalSize == 0) &&
+          expect(leaves.size == finalSize)
     }
   }
 
@@ -97,8 +99,9 @@ object MerkleArbitraryLengthSuite extends IOSuite with Checkers {
           for {
             storedLeaves <- producer.leaves
             treeResult   <- producer.build
-          } yield expect(storedLeaves.size == size) &&
-          expect(treeResult.isRight)
+          } yield
+            expect(storedLeaves.size == size) &&
+            expect(treeResult.isRight)
         }
       } yield result
     }

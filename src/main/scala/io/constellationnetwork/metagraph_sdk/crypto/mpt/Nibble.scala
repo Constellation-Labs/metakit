@@ -66,8 +66,9 @@ object Nibble {
   def toBytes(nibbles: Seq[Nibble]): Array[Byte] =
     nibbles
       .grouped(2)
-      .collect { case Seq(high, low) =>
-        ((high.value << 4) | (low.value & 0x0f)).toByte
+      .collect {
+        case Seq(high, low) =>
+          ((high.value << 4) | (low.value & 0x0f)).toByte
       }
       .toArray
 
@@ -104,8 +105,7 @@ object Nibble {
 
   implicit val nibbleKeyEncoder: KeyEncoder[Nibble] = (key: Nibble) => "" + hexChars(key.value & 0x0f)
 
-  implicit val nibbleKeyDecoder: KeyDecoder[Nibble] = (key: String) =>
-    if (key.length == 1) validated(key.charAt(0)).toOption else None
+  implicit val nibbleKeyDecoder: KeyDecoder[Nibble] = (key: String) => if (key.length == 1) validated(key.charAt(0)).toOption else None
 }
 
 sealed trait InvalidNibble extends Throwable

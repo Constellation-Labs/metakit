@@ -89,10 +89,11 @@ object RefMapCollectionSuite extends SimpleIOSuite with Checkers {
     for {
       store  <- storeIO
       result <- store.getUnsafe(42).attempt
-    } yield result match {
-      case Left(e: NoSuchElementException) => expect(e.getMessage == s"Element not found. id=42")
-      case _                               => failure("Exception not caught")
-    }
+    } yield
+      result match {
+        case Left(e: NoSuchElementException) => expect(e.getMessage == s"Element not found. id=42")
+        case _                               => failure("Exception not caught")
+      }
   }
 
   test("dump returns all stored values") {

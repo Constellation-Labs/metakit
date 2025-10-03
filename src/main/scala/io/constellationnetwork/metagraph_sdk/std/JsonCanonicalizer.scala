@@ -126,7 +126,7 @@ private object TreeOrderedMap {
       def compare(a: String, b: String): Int = {
         val aBytes = a.getBytes("UTF-16BE")
         val bBytes = b.getBytes("UTF-16BE")
-        val minLength = aBytes.length min bBytes.length
+        val minLength = aBytes.length.min(bBytes.length)
 
         LazyList
           .range(0, minLength)
@@ -232,33 +232,33 @@ private class DoubleSerializerImpl[F[_]: MonadThrow] {
 
   def serialize(value: Double, ecmaMode: Boolean): F[String] = {
     case class FloatComponents(
-      e2:      Int,
-      m2:      Long,
-      sign:    Boolean,
-      even:    Boolean,
-      mv:      Long,
-      mp:      Long,
-      mm:      Long,
+      e2: Int,
+      m2: Long,
+      sign: Boolean,
+      even: Boolean,
+      mv: Long,
+      mp: Long,
+      mm: Long,
       mmShift: Int
     )
 
     case class DecimalBase(
-      dv:                Long,
-      dp:                Long,
-      dm:                Long,
-      e10:               Int,
+      dv: Long,
+      dp: Long,
+      dm: Long,
+      e10: Int,
       dmIsTrailingZeros: Boolean,
       dvIsTrailingZeros: Boolean
     )
 
     case class ZeroState(
-      dp:                Long,
-      dv:                Long,
-      dm:                Long,
-      removed:           Int,
+      dp: Long,
+      dv: Long,
+      dm: Long,
+      removed: Int,
       dmIsTrailingZeros: Boolean,
       dvIsTrailingZeros: Boolean,
-      lastRemovedDigit:  Int
+      lastRemovedDigit: Int
     )
 
     // Step 1: Decode IEEE-754 bits
@@ -401,11 +401,11 @@ private class DoubleSerializerImpl[F[_]: MonadThrow] {
   }
 
   private def formatScientific(
-    output:   Long,
-    olength:  Int,
-    exp:      Int,
+    output: Long,
+    olength: Int,
+    exp: Int,
     ecmaMode: Boolean,
-    sign:     Boolean
+    sign: Boolean
   ): F[String] = MonadThrow[F].pure {
     val result = new Array[Char](25)
     var index = 0
@@ -474,11 +474,11 @@ private class DoubleSerializerImpl[F[_]: MonadThrow] {
   }
 
   private def formatRegular(
-    output:   Long,
-    olength:  Int,
-    exp:      Int,
+    output: Long,
+    olength: Int,
+    exp: Int,
     ecmaMode: Boolean,
-    sign:     Boolean
+    sign: Boolean
   ): F[String] = MonadThrow[F].pure {
     val result = new Array[Char](25)
     var index = 0
@@ -585,10 +585,10 @@ private object DoubleSerializerImpl {
   }
 
   private def calculatePowSplit(
-    i:       Int,
-    pow:     BigInt,
+    i: Int,
+    pow: BigInt,
     pow5len: Int,
-    mask:    BigInt
+    mask: BigInt
   ): Vector[Int] =
     if (i < PosTableSize) {
       (0 until 4).toList.map { j =>
@@ -601,8 +601,8 @@ private object DoubleSerializerImpl {
     }
 
   private def calculatePowInvSplit(
-    i:       Int,
-    pow:     BigInt,
+    i: Int,
+    pow: BigInt,
     pow5len: Int,
     invMask: BigInt
   ): Vector[Int] =

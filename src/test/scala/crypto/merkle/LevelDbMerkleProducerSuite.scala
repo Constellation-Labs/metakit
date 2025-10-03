@@ -50,11 +50,10 @@ object LevelDbMerkleProducerSuite extends IOSuite with Checkers {
       for {
         initialLeaves <- strings.traverse(s => MerkleNode.Leaf[IO](s.asJson))
         randSuffix    <- IO(scala.util.Random.alphanumeric.take(10).mkString)
-        result <- LevelDbMerkleProducer.make[IO](tempPath.resolve(s"test1_$randSuffix"), initialLeaves).use {
-          producer =>
-            for {
-              leaves <- producer.leaves
-            } yield expect(leaves.size == 3) && expect(leaves == initialLeaves)
+        result <- LevelDbMerkleProducer.make[IO](tempPath.resolve(s"test1_$randSuffix"), initialLeaves).use { producer =>
+          for {
+            leaves <- producer.leaves
+          } yield expect(leaves.size == 3) && expect(leaves == initialLeaves)
         }
       } yield result
     }
@@ -66,27 +65,29 @@ object LevelDbMerkleProducerSuite extends IOSuite with Checkers {
       appendString   <- Gen.alphaStr.suchThat(_.nonEmpty)
     } yield (initialStrings, appendString)
 
-    forall(genPersist) { case (initialStrings, appendString) =>
-      for {
-        randSuffix <- IO(scala.util.Random.alphanumeric.take(10).mkString)
-        dbPath = tempPath.resolve(s"test2_$randSuffix")
-        initialLeaves <- initialStrings.traverse(s => MerkleNode.Leaf[IO](s.asJson))
-        thirdLeaf     <- MerkleNode.Leaf[IO](appendString.asJson)
+    forall(genPersist) {
+      case (initialStrings, appendString) =>
+        for {
+          randSuffix <- IO(scala.util.Random.alphanumeric.take(10).mkString)
+          dbPath = tempPath.resolve(s"test2_$randSuffix")
+          initialLeaves <- initialStrings.traverse(s => MerkleNode.Leaf[IO](s.asJson))
+          thirdLeaf     <- MerkleNode.Leaf[IO](appendString.asJson)
 
-        _ <- LevelDbMerkleProducer.make[IO](dbPath, initialLeaves).use { producer =>
-          for {
-            _      <- producer.append(List(thirdLeaf))
-            leaves <- producer.leaves
-          } yield expect(leaves.size == 3)
-        }
+          _ <- LevelDbMerkleProducer.make[IO](dbPath, initialLeaves).use { producer =>
+            for {
+              _      <- producer.append(List(thirdLeaf))
+              leaves <- producer.leaves
+            } yield expect(leaves.size == 3)
+          }
 
-        result <- LevelDbMerkleProducer.load[IO](dbPath).use { producer =>
-          for {
-            leaves <- producer.leaves
-          } yield expect(leaves.size == 3) &&
-          expect(leaves.map(_.data) == (initialStrings :+ appendString).map(_.asJson))
-        }
-      } yield result
+          result <- LevelDbMerkleProducer.load[IO](dbPath).use { producer =>
+            for {
+              leaves <- producer.leaves
+            } yield
+              expect(leaves.size == 3) &&
+              expect(leaves.map(_.data) == (initialStrings :+ appendString).map(_.asJson))
+          }
+        } yield result
     }
   }
 
@@ -95,11 +96,10 @@ object LevelDbMerkleProducerSuite extends IOSuite with Checkers {
       for {
         randSuffix    <- IO(scala.util.Random.alphanumeric.take(10).mkString)
         initialLeaves <- (1 to leafCount).toList.traverse(i => MerkleNode.Leaf[IO](i.asJson))
-        result <- LevelDbMerkleProducer.make[IO](tempPath.resolve(s"test3_$randSuffix"), initialLeaves).use {
-          producer =>
-            for {
-              result <- producer.build
-            } yield expect(result.isRight) && expect(result.toOption.get.leafDigestIndex.size == leafCount)
+        result <- LevelDbMerkleProducer.make[IO](tempPath.resolve(s"test3_$randSuffix"), initialLeaves).use { producer =>
+          for {
+            result <- producer.build
+          } yield expect(result.isRight) && expect(result.toOption.get.leafDigestIndex.size == leafCount)
         }
       } yield result
     }
@@ -113,19 +113,19 @@ object LevelDbMerkleProducerSuite extends IOSuite with Checkers {
       updateString <- Gen.alphaStr.suchThat(_.nonEmpty).suchThat(_ != strings(updateIdx))
     } yield (strings, updateIdx, updateString)
 
-    forall(genInput) { case (strings, updateIdx, updateString) =>
-      for {
-        randSuffix    <- IO(scala.util.Random.alphanumeric.take(10).mkString)
-        initialLeaves <- strings.traverse(s => MerkleNode.Leaf[IO](s.asJson))
-        updatedLeaf   <- MerkleNode.Leaf[IO](updateString.asJson)
-        result <- LevelDbMerkleProducer.make[IO](tempPath.resolve(s"test4_$randSuffix"), initialLeaves).use {
-          producer =>
+    forall(genInput) {
+      case (strings, updateIdx, updateString) =>
+        for {
+          randSuffix    <- IO(scala.util.Random.alphanumeric.take(10).mkString)
+          initialLeaves <- strings.traverse(s => MerkleNode.Leaf[IO](s.asJson))
+          updatedLeaf   <- MerkleNode.Leaf[IO](updateString.asJson)
+          result <- LevelDbMerkleProducer.make[IO](tempPath.resolve(s"test4_$randSuffix"), initialLeaves).use { producer =>
             for {
               updateResult <- producer.update(updateIdx, updatedLeaf)
               leaves       <- producer.leaves
             } yield expect(updateResult.isRight) && expect(leaves(updateIdx).data == updateString.asJson)
-        }
-      } yield result
+          }
+        } yield result
     }
   }
 
@@ -137,19 +137,20 @@ object LevelDbMerkleProducerSuite extends IOSuite with Checkers {
       updateString <- Gen.alphaStr.suchThat(_.nonEmpty)
     } yield (strings, invalidIdx, updateString)
 
-    forall(genInvalidUpdate) { case (strings, invalidIdx, updateString) =>
-      for {
-        randSuffix    <- IO(scala.util.Random.alphanumeric.take(10).mkString)
-        initialLeaves <- strings.traverse(s => MerkleNode.Leaf[IO](s.asJson))
-        xLeaf         <- MerkleNode.Leaf[IO](updateString.asJson)
-        result <- LevelDbMerkleProducer.make[IO](tempPath.resolve(s"test5_$randSuffix"), initialLeaves).use {
-          producer =>
+    forall(genInvalidUpdate) {
+      case (strings, invalidIdx, updateString) =>
+        for {
+          randSuffix    <- IO(scala.util.Random.alphanumeric.take(10).mkString)
+          initialLeaves <- strings.traverse(s => MerkleNode.Leaf[IO](s.asJson))
+          xLeaf         <- MerkleNode.Leaf[IO](updateString.asJson)
+          result <- LevelDbMerkleProducer.make[IO](tempPath.resolve(s"test5_$randSuffix"), initialLeaves).use { producer =>
             for {
               updateResult <- producer.update(invalidIdx, xLeaf)
-            } yield expect(updateResult.isLeft) &&
-            expect(updateResult.left.toOption.get.isInstanceOf[InvalidIndex])
-        }
-      } yield result
+            } yield
+              expect(updateResult.isLeft) &&
+              expect(updateResult.left.toOption.get.isInstanceOf[InvalidIndex])
+          }
+        } yield result
     }
   }
 
@@ -161,20 +162,21 @@ object LevelDbMerkleProducerSuite extends IOSuite with Checkers {
       appendStrings  <- Gen.listOfN(appendSize, Gen.alphaStr.suchThat(_.nonEmpty))
     } yield (initialStrings, appendStrings)
 
-    forall(genAppend) { case (initialStrings, appendStrings) =>
-      for {
-        randSuffix    <- IO(scala.util.Random.alphanumeric.take(10).mkString)
-        initialLeaves <- initialStrings.traverse(s => MerkleNode.Leaf[IO](s.asJson))
-        newLeaves     <- appendStrings.traverse(s => MerkleNode.Leaf[IO](s.asJson))
-        result <- LevelDbMerkleProducer.make[IO](tempPath.resolve(s"test6_$randSuffix"), initialLeaves).use {
-          producer =>
+    forall(genAppend) {
+      case (initialStrings, appendStrings) =>
+        for {
+          randSuffix    <- IO(scala.util.Random.alphanumeric.take(10).mkString)
+          initialLeaves <- initialStrings.traverse(s => MerkleNode.Leaf[IO](s.asJson))
+          newLeaves     <- appendStrings.traverse(s => MerkleNode.Leaf[IO](s.asJson))
+          result <- LevelDbMerkleProducer.make[IO](tempPath.resolve(s"test6_$randSuffix"), initialLeaves).use { producer =>
             for {
               _      <- producer.append(newLeaves)
               leaves <- producer.leaves
-            } yield expect(leaves.size == initialStrings.size + appendStrings.size) &&
-            expect(leaves.map(_.data) == (initialStrings ++ appendStrings).map(_.asJson))
-        }
-      } yield result
+            } yield
+              expect(leaves.size == initialStrings.size + appendStrings.size) &&
+              expect(leaves.map(_.data) == (initialStrings ++ appendStrings).map(_.asJson))
+          }
+        } yield result
     }
   }
 
@@ -186,20 +188,21 @@ object LevelDbMerkleProducerSuite extends IOSuite with Checkers {
       prependStrings <- Gen.listOfN(prependSize, Gen.alphaStr.suchThat(_.nonEmpty))
     } yield (initialStrings, prependStrings)
 
-    forall(genPrepend) { case (initialStrings, prependStrings) =>
-      for {
-        randSuffix    <- IO(scala.util.Random.alphanumeric.take(10).mkString)
-        initialLeaves <- initialStrings.traverse(s => MerkleNode.Leaf[IO](s.asJson))
-        newLeaves     <- prependStrings.traverse(s => MerkleNode.Leaf[IO](s.asJson))
-        result <- LevelDbMerkleProducer.make[IO](tempPath.resolve(s"test7_$randSuffix"), initialLeaves).use {
-          producer =>
+    forall(genPrepend) {
+      case (initialStrings, prependStrings) =>
+        for {
+          randSuffix    <- IO(scala.util.Random.alphanumeric.take(10).mkString)
+          initialLeaves <- initialStrings.traverse(s => MerkleNode.Leaf[IO](s.asJson))
+          newLeaves     <- prependStrings.traverse(s => MerkleNode.Leaf[IO](s.asJson))
+          result <- LevelDbMerkleProducer.make[IO](tempPath.resolve(s"test7_$randSuffix"), initialLeaves).use { producer =>
             for {
               _      <- producer.prepend(newLeaves)
               leaves <- producer.leaves
-            } yield expect(leaves.size == initialStrings.size + prependStrings.size) &&
-            expect(leaves.map(_.data) == (prependStrings ++ initialStrings).map(_.asJson))
-        }
-      } yield result
+            } yield
+              expect(leaves.size == initialStrings.size + prependStrings.size) &&
+              expect(leaves.map(_.data) == (prependStrings ++ initialStrings).map(_.asJson))
+          }
+        } yield result
     }
   }
 
@@ -210,21 +213,22 @@ object LevelDbMerkleProducerSuite extends IOSuite with Checkers {
       removeIdx <- Gen.choose(0, size - 1)
     } yield (strings, removeIdx)
 
-    forall(genRemove) { case (strings, removeIdx) =>
-      for {
-        randSuffix    <- IO(scala.util.Random.alphanumeric.take(10).mkString)
-        initialLeaves <- strings.traverse(s => MerkleNode.Leaf[IO](s.asJson))
-        expectedData = strings.patch(removeIdx, Nil, 1)
-        result <- LevelDbMerkleProducer.make[IO](tempPath.resolve(s"test8_$randSuffix"), initialLeaves).use {
-          producer =>
+    forall(genRemove) {
+      case (strings, removeIdx) =>
+        for {
+          randSuffix    <- IO(scala.util.Random.alphanumeric.take(10).mkString)
+          initialLeaves <- strings.traverse(s => MerkleNode.Leaf[IO](s.asJson))
+          expectedData = strings.patch(removeIdx, Nil, 1)
+          result <- LevelDbMerkleProducer.make[IO](tempPath.resolve(s"test8_$randSuffix"), initialLeaves).use { producer =>
             for {
               removeResult <- producer.remove(removeIdx)
               leaves       <- producer.leaves
-            } yield expect(removeResult.isRight) &&
-            expect(leaves.size == strings.size - 1) &&
-            expect(leaves.map(_.data) == expectedData.map(_.asJson))
-        }
-      } yield result
+            } yield
+              expect(removeResult.isRight) &&
+              expect(leaves.size == strings.size - 1) &&
+              expect(leaves.map(_.data) == expectedData.map(_.asJson))
+          }
+        } yield result
     }
   }
 
@@ -235,18 +239,19 @@ object LevelDbMerkleProducerSuite extends IOSuite with Checkers {
       invalidIdx <- Gen.choose(size + 1, size + 10)
     } yield (strings, invalidIdx)
 
-    forall(genInvalidRemove) { case (strings, invalidIdx) =>
-      for {
-        randSuffix    <- IO(scala.util.Random.alphanumeric.take(10).mkString)
-        initialLeaves <- strings.traverse(s => MerkleNode.Leaf[IO](s.asJson))
-        result <- LevelDbMerkleProducer.make[IO](tempPath.resolve(s"test9_$randSuffix"), initialLeaves).use {
-          producer =>
+    forall(genInvalidRemove) {
+      case (strings, invalidIdx) =>
+        for {
+          randSuffix    <- IO(scala.util.Random.alphanumeric.take(10).mkString)
+          initialLeaves <- strings.traverse(s => MerkleNode.Leaf[IO](s.asJson))
+          result <- LevelDbMerkleProducer.make[IO](tempPath.resolve(s"test9_$randSuffix"), initialLeaves).use { producer =>
             for {
               removeResult <- producer.remove(invalidIdx)
-            } yield expect(removeResult.isLeft) &&
-            expect(removeResult.left.toOption.get.isInstanceOf[InvalidIndex])
-        }
-      } yield result
+            } yield
+              expect(removeResult.isLeft) &&
+              expect(removeResult.left.toOption.get.isInstanceOf[InvalidIndex])
+          }
+        } yield result
     }
   }
 
@@ -256,8 +261,9 @@ object LevelDbMerkleProducerSuite extends IOSuite with Checkers {
       result <- LevelDbMerkleProducer.make[IO](tempPath.resolve(s"test10_$randSuffix"), List.empty).use { producer =>
         for {
           result <- producer.build
-        } yield expect(result.isLeft) &&
-        expect(result.left.toOption.get.isInstanceOf[TreeBuildError])
+        } yield
+          expect(result.isLeft) &&
+          expect(result.left.toOption.get.isInstanceOf[TreeBuildError])
       }
     } yield result
   }
@@ -267,16 +273,16 @@ object LevelDbMerkleProducerSuite extends IOSuite with Checkers {
       for {
         randSuffix    <- IO(scala.util.Random.alphanumeric.take(10).mkString)
         initialLeaves <- (1 to leafCount).toList.traverse(i => MerkleNode.Leaf[IO](i.asJson))
-        result <- LevelDbMerkleProducer.make[IO](tempPath.resolve(s"test11_$randSuffix"), initialLeaves).use {
-          producer =>
-            for {
-              _       <- producer.build
-              prover1 <- producer.getProver
-              prover2 <- producer.getProver
+        result <- LevelDbMerkleProducer.make[IO](tempPath.resolve(s"test11_$randSuffix"), initialLeaves).use { producer =>
+          for {
+            _       <- producer.build
+            prover1 <- producer.getProver
+            prover2 <- producer.getProver
 
-              proof1 <- prover1.attestIndex(0)
-              proof2 <- prover2.attestIndex(0)
-            } yield expect(proof1.isRight) &&
+            proof1 <- prover1.attestIndex(0)
+            proof2 <- prover2.attestIndex(0)
+          } yield
+            expect(proof1.isRight) &&
             expect(proof2.isRight) &&
             expect(proof1 == proof2)
         }
@@ -292,13 +298,13 @@ object LevelDbMerkleProducerSuite extends IOSuite with Checkers {
       updateString <- Gen.alphaStr.suchThat(_.nonEmpty).suchThat(_ != strings(updateIdx))
     } yield (strings, updateIdx, updateString)
 
-    forall(genUpdate) { case (strings, updateIdx, updateString) =>
-      for {
-        randSuffix    <- IO(scala.util.Random.alphanumeric.take(10).mkString)
-        initialLeaves <- strings.traverse(s => MerkleNode.Leaf[IO](s.asJson))
-        updatedLeaf   <- MerkleNode.Leaf[IO](updateString.asJson)
-        result <- LevelDbMerkleProducer.make[IO](tempPath.resolve(s"test12_$randSuffix"), initialLeaves).use {
-          producer =>
+    forall(genUpdate) {
+      case (strings, updateIdx, updateString) =>
+        for {
+          randSuffix    <- IO(scala.util.Random.alphanumeric.take(10).mkString)
+          initialLeaves <- strings.traverse(s => MerkleNode.Leaf[IO](s.asJson))
+          updatedLeaf   <- MerkleNode.Leaf[IO](updateString.asJson)
+          result <- LevelDbMerkleProducer.make[IO](tempPath.resolve(s"test12_$randSuffix"), initialLeaves).use { producer =>
             for {
               prover1 <- producer.getProver
               proof1  <- prover1.attestIndex(0)
@@ -307,11 +313,12 @@ object LevelDbMerkleProducerSuite extends IOSuite with Checkers {
 
               prover2 <- producer.getProver
               proof2  <- prover2.attestIndex(0)
-            } yield expect(proof1.isRight) &&
-            expect(proof2.isRight) &&
-            expect(proof1 != proof2)
-        }
-      } yield result
+            } yield
+              expect(proof1.isRight) &&
+              expect(proof2.isRight) &&
+              expect(proof1 != proof2)
+          }
+        } yield result
     }
   }
 
@@ -325,9 +332,10 @@ object LevelDbMerkleProducerSuite extends IOSuite with Checkers {
           for {
             _      <- producer.remove(removeIdx)
             leaves <- producer.leaves
-          } yield expect(leaves.size == leafCount - 1) &&
-          expect(!leaves.exists(_.data.asString.exists(_.contains(s"leaf-${removeIdx + 1}")))) &&
-          expect(leaves(removeIdx).data.asString.exists(_.contains(s"leaf-${removeIdx + 2}")))
+          } yield
+            expect(leaves.size == leafCount - 1) &&
+            expect(!leaves.exists(_.data.asString.exists(_.contains(s"leaf-${removeIdx + 1}")))) &&
+            expect(leaves(removeIdx).data.asString.exists(_.contains(s"leaf-${removeIdx + 2}")))
         }
       } yield result
     }

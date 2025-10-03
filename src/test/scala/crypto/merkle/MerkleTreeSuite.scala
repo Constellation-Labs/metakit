@@ -36,11 +36,12 @@ object MerkleTreeSuite extends SimpleIOSuite with Checkers {
       list2 <- Gen.nonEmptyListOf(Gen.alphaStr.suchThat(_.nonEmpty)).suchThat(_ != list1)
     } yield (list1, list2)
 
-    forall(distinctNonEmptyLists) { case (strings1, strings2) =>
-      for {
-        merkleTree1 <- MerkleTree.create[IO, String](strings1)
-        merkleTree2 <- MerkleTree.create[IO, String](strings2)
-      } yield expect(merkleTree1.asJson != merkleTree2.asJson)
+    forall(distinctNonEmptyLists) {
+      case (strings1, strings2) =>
+        for {
+          merkleTree1 <- MerkleTree.create[IO, String](strings1)
+          merkleTree2 <- MerkleTree.create[IO, String](strings2)
+        } yield expect(merkleTree1.asJson != merkleTree2.asJson)
     }
   }
 

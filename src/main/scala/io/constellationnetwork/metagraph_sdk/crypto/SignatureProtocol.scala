@@ -77,30 +77,29 @@ class SignedJsonProducer[F[_]: Async: SecurityProvider, A](serde: Either[A => F[
 class SignedJsonEvaluator[F[_]: Async: SecurityProvider, A](serde: Either[A => F[Array[Byte]], JsonBinaryCodec[F, A]]) {
 
   def inspect(signed: Signed[A]): F[Either[NonEmptySet[SignatureProof], NonEmptySet[SignatureProof]]] =
-    signed.proofs.toNonEmptyList.toList
-      .traverse { proof =>
-        serde match {
-          case Left(toBytes) =>
-            for {
-              bytes  <- toBytes(signed.value)
-              hash   <- Hash.fromBytes(bytes).pure[F]
-              result <- SignatureProtocol.verifier.confirm(hash, proof)
-            } yield proof -> result
+    signed.proofs.toNonEmptyList.toList.traverse { proof =>
+      serde match {
+        case Left(toBytes) =>
+          for {
+            bytes  <- toBytes(signed.value)
+            hash   <- Hash.fromBytes(bytes).pure[F]
+            result <- SignatureProtocol.verifier.confirm(hash, proof)
+          } yield proof -> result
 
-          case Right(codec) =>
-            for {
-              hash   <- JsonBinaryHasher[F].computeDigest(signed.value)(codec)
-              result <- SignatureProtocol.verifier.confirm(hash, proof)
-            } yield proof -> result
-        }
+        case Right(codec) =>
+          for {
+            hash   <- JsonBinaryHasher[F].computeDigest(signed.value)(codec)
+            result <- SignatureProtocol.verifier.confirm(hash, proof)
+          } yield proof -> result
       }
-      .map {
-        _.collect { case (proof, false) =>
+    }.map {
+      _.collect {
+        case (proof, false) =>
           proof
-        }.toNel
-          .map(_.toNes)
-          .toLeft(signed.proofs)
-      }
+      }.toNel
+        .map(_.toNes)
+        .toLeft(signed.proofs)
+    }
 }
 
 object SignatureProtocol {
@@ -125,14 +124,10 @@ object SignatureProtocol {
       Slf4jLogger.getLogger[F].error(err)(s"Failed to verify signature with id: ${proof.id.show}").as(false)
     }
 
-  def proveSigned[F[_]: Async: SecurityProvider, A: Encoder: Decoder](implicit
-    codec: JsonBinaryCodec[F, A]
-  ): SignedJsonProducer[F, A] =
+  def proveSigned[F[_]: Async: SecurityProvider, A: Encoder: Decoder](implicit codec: JsonBinaryCodec[F, A]): SignedJsonProducer[F, A] =
     new SignedJsonProducer[F, A](codec.asRight)
 
-  def verifySigned[F[_]: Async: SecurityProvider, A: Encoder: Decoder](implicit
-    codec: JsonBinaryCodec[F, A]
-  ): SignedJsonEvaluator[F, A] =
+  def verifySigned[F[_]: Async: SecurityProvider, A: Encoder: Decoder](implicit codec: JsonBinaryCodec[F, A]): SignedJsonEvaluator[F, A] =
     new SignedJsonEvaluator[F, A](codec.asRight)
 
   def customProveSigned[F[_]: Async: SecurityProvider, A](toBytes: A => F[Array[Byte]]): SignedJsonProducer[F, A] =

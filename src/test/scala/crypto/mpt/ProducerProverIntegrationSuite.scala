@@ -1,31 +1,29 @@
 package crypto.mpt
 
 import java.io.IOException
-import java.nio.file.{FileVisitResult, Files, Path, SimpleFileVisitor}
 import java.nio.file.attribute.BasicFileAttributes
+import java.nio.file.{FileVisitResult, Files, Path, SimpleFileVisitor}
 
 import cats.effect.{IO, Resource}
 import cats.syntax.all._
 
-import weaver._
-
 import io.constellationnetwork.metagraph_sdk.crypto.mpt.api.MerklePatriciaVerifier
-import io.constellationnetwork.metagraph_sdk.crypto.mpt.impl.{
-  InMemoryMerklePatriciaProducer,
-  LevelDbMerklePatriciaProducer
-}
+import io.constellationnetwork.metagraph_sdk.crypto.mpt.impl.{InMemoryMerklePatriciaProducer, LevelDbMerklePatriciaProducer}
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher.HasherOps
 import io.constellationnetwork.security.hash.Hash
 
 import io.circe.Json
 import io.circe.syntax._
+import weaver._
 
 object ProducerProverIntegrationSuite extends SimpleIOSuite {
 
   def testData: IO[Map[Hash, Json]] =
-    List("key1", "key2", "key3").zipWithIndex.traverse { case (key, idx) =>
-      key.computeDigest.map(hash => hash -> s"value${idx + 1}".asJson)
-    }.map(_.toMap)
+    List("key1", "key2", "key3").zipWithIndex.traverse {
+      case (key, idx) =>
+        key.computeDigest.map(hash => hash -> s"value${idx + 1}".asJson)
+    }
+      .map(_.toMap)
 
   def tempDbPath: Resource[IO, Path] =
     Resource.make(
@@ -67,12 +65,12 @@ object ProducerProverIntegrationSuite extends SimpleIOSuite {
 
         // Verify all proofs with the trie root
         trieResult <- producer.build
-        trie <- IO.fromEither(trieResult)
+        trie       <- IO.fromEither(trieResult)
         verifier = MerklePatriciaVerifier.make[IO](trie.rootNode.digest)
         verifyResults <- proofs.traverse {
           case (key, Right(proof)) =>
             verifier.confirm(proof).map(r => key -> r.isRight)
-          case (key, Left(err)) =>
+          case (key, _) =>
             IO.pure(key -> false)
         }
 
@@ -80,9 +78,9 @@ object ProducerProverIntegrationSuite extends SimpleIOSuite {
         _ <- expect(verifyResults.forall(_._2)).pure[IO]
 
         // Test non-existing key
-        nonExistingHash <- "non_existing".computeDigest
+        nonExistingHash  <- "non_existing".computeDigest
         nonExistingProof <- prover.attestDigest(nonExistingHash)
-        _ <- expect(nonExistingProof.isLeft).pure[IO]
+        _                <- expect(nonExistingProof.isLeft).pure[IO]
       } yield success
     }
   }
@@ -94,23 +92,23 @@ object ProducerProverIntegrationSuite extends SimpleIOSuite {
           for {
             // Add more data
             key4Hash <- "key4".computeDigest
-            _ <- producer.insert(Map(key4Hash -> "value4".asJson))
+            _        <- producer.insert(Map(key4Hash -> "value4".asJson))
 
             // Build trie
             trieResult <- producer.build
-            trie <- IO.fromEither(trieResult)
+            trie       <- IO.fromEither(trieResult)
 
             // Get prover from producer
             prover <- producer.getProver
 
             // Generate and verify proof
             proof <- prover.attestDigest(key4Hash)
-            _ <- expect(proof.isRight).pure[IO]
+            _     <- expect(proof.isRight).pure[IO]
 
             verifier = MerklePatriciaVerifier.make[IO](trie.rootNode.digest)
             verifyResult <- proof.traverse(p => verifier.confirm(p))
-            _ <- expect(verifyResult.isRight).pure[IO]
-            _ <- verifyResult.traverse(r => expect(r.isRight).pure[IO])
+            _            <- expect(verifyResult.isRight).pure[IO]
+            _            <- verifyResult.traverse(r => expect(r.isRight).pure[IO])
           } yield success
         }
       }
@@ -124,7 +122,7 @@ object ProducerProverIntegrationSuite extends SimpleIOSuite {
           for {
             // Build initial trie
             trieResult <- producer.build
-            trie <- IO.fromEither(trieResult)
+            trie       <- IO.fromEither(trieResult)
 
             // Get prover - should use cached trie
             prover <- producer.getProver
@@ -145,10 +143,10 @@ object ProducerProverIntegrationSuite extends SimpleIOSuite {
             result1 <- proof1.traverse(p => verifier.confirm(p))
             result2 <- proof2.traverse(p => verifier.confirm(p))
             result3 <- proof3.traverse(p => verifier.confirm(p))
-            _ <- expect(result1.isRight && result2.isRight && result3.isRight).pure[IO]
-            _ <- result1.traverse(r => expect(r.isRight).pure[IO])
-            _ <- result2.traverse(r => expect(r.isRight).pure[IO])
-            _ <- result3.traverse(r => expect(r.isRight).pure[IO])
+            _       <- expect(result1.isRight && result2.isRight && result3.isRight).pure[IO]
+            _       <- result1.traverse(r => expect(r.isRight).pure[IO])
+            _       <- result2.traverse(r => expect(r.isRight).pure[IO])
+            _       <- result3.traverse(r => expect(r.isRight).pure[IO])
           } yield success
         }
       }
@@ -161,14 +159,14 @@ object ProducerProverIntegrationSuite extends SimpleIOSuite {
         producer <- InMemoryMerklePatriciaProducer.make[IO]()
 
         // Insert initial data
-        _ <- producer.insert(data)
+        _     <- producer.insert(data)
         trie1 <- producer.build
         root1 = trie1.map(_.rootNode.digest)
 
         // Update existing entry
         key1Hash <- "key1".computeDigest
-        _ <- producer.update(key1Hash, "updated".asJson)
-        trie2 <- producer.build
+        _        <- producer.update(key1Hash, "updated".asJson)
+        trie2    <- producer.build
         root2 = trie2.map(_.rootNode.digest)
 
         // Roots should differ after update
@@ -176,16 +174,16 @@ object ProducerProverIntegrationSuite extends SimpleIOSuite {
 
         // Remove entry
         key2Hash <- "key2".computeDigest
-        _ <- producer.remove(List(key2Hash))
-        trie3 <- producer.build
+        _        <- producer.remove(List(key2Hash))
+        trie3    <- producer.build
         root3 = trie3.map(_.rootNode.digest)
 
         // Root should change again
         _ <- expect(root2 != root3).pure[IO]
 
         // Clear and rebuild
-        _ <- producer.clear
-        _ <- producer.insert(data)
+        _     <- producer.clear
+        _     <- producer.insert(data)
         trie4 <- producer.build
         root4 = trie4.map(_.rootNode.digest)
 
@@ -204,11 +202,11 @@ object ProducerProverIntegrationSuite extends SimpleIOSuite {
           // First session - create and populate
           firstSession <- LevelDbMerklePatriciaProducer.make[IO](dbPath, data).use { producer =>
             for {
-              _ <- producer.insert(Map(session1Hash -> "data1".asJson))
+              _          <- producer.insert(Map(session1Hash -> "data1".asJson))
               trieResult <- producer.build
-              trie <- IO.fromEither(trieResult)
-              prover <- producer.getProver
-              proof <- prover.attestDigest(session1Hash)
+              trie       <- IO.fromEither(trieResult)
+              prover     <- producer.getProver
+              proof      <- prover.attestDigest(session1Hash)
             } yield (proof, trie.rootNode.digest)
           }
 
@@ -216,12 +214,12 @@ object ProducerProverIntegrationSuite extends SimpleIOSuite {
           secondSession <- LevelDbMerklePatriciaProducer.load[IO](dbPath).use { producer =>
             for {
               entries <- producer.entries
-              _ <- expect(entries.contains(session1Hash)).pure[IO]
+              _       <- expect(entries.contains(session1Hash)).pure[IO]
 
               trieResult <- producer.build
-              trie <- IO.fromEither(trieResult)
-              prover <- producer.getProver
-              proof <- prover.attestDigest(session1Hash)
+              trie       <- IO.fromEither(trieResult)
+              prover     <- producer.getProver
+              proof      <- prover.attestDigest(session1Hash)
             } yield (proof, trie.rootNode.digest)
           }
 
@@ -238,7 +236,7 @@ object ProducerProverIntegrationSuite extends SimpleIOSuite {
           verifier = MerklePatriciaVerifier.make[IO](root1)
           result1 <- proof1.traverse(p => verifier.confirm(p))
           result2 <- proof2.traverse(p => verifier.confirm(p))
-          _ <- expect(result1.isRight && result2.isRight).pure[IO]
+          _       <- expect(result1.isRight && result2.isRight).pure[IO]
         } yield success
       }
     }

@@ -16,9 +16,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
   } yield (expr, data)
 
   private def staticTestRunner(
-    expr:      JsonLogicExpression,
-    data:      JsonLogicValue,
-    expected:  JsonLogicValue,
+    expr: JsonLogicExpression,
+    data: JsonLogicValue,
+    expected: JsonLogicValue,
     loggerOpt: Option[JsonLogicValue => F[Unit]] = None
   ): IO[Expectations] =
     JsonLogicEvaluator
@@ -56,8 +56,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         | { "a": 1, "b": 2 }
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, IntValue(1))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(1))
     }
   }
 
@@ -72,8 +73,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         | { "a": 1, "b": 2 }
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, IntValue(1))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(1))
     }
   }
 
@@ -88,8 +90,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         | { "a": 1, "b": 2 }
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, IntValue(26))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(26))
     }
   }
 
@@ -113,8 +116,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |}
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, StrValue("Fezzig"))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("Fezzig"))
     }
   }
 
@@ -129,8 +133,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |["zero", "one", "two"]
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, StrValue("one"))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("one"))
     }
   }
 
@@ -145,8 +150,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |{"to_get": "dynamic", "dynamic": "Got this value"}
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, StrValue("Got this value"))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("Got this value"))
     }
   }
 
@@ -167,8 +173,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |}
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -193,8 +200,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |}
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, StrValue("OK to proceed"))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("OK to proceed"))
     }
   }
 
@@ -212,8 +220,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |"Dolly"
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, StrValue("Hello, Dolly"))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("Hello, Dolly"))
     }
   }
 
@@ -228,8 +237,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(false))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(false))
     }
   }
 
@@ -244,8 +254,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |{"temp" : 37}
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -260,8 +271,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |{"temp" : 37}
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -276,8 +288,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |{"a":"apple", "c":"carrot"}
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, ArrayValue(List(StrValue("b"))))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, ArrayValue(List(StrValue("b"))))
     }
   }
 
@@ -292,8 +305,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |{"a":"apple", "b":"banana"}
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, ArrayValue(List()))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, ArrayValue(List()))
     }
   }
 
@@ -312,8 +326,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |{"a":"apple", "b":"banana"}
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, StrValue("OK to proceed"))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("OK to proceed"))
     }
   }
 
@@ -328,8 +343,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |{"a":"apple"}
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, ArrayValue(List()))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, ArrayValue(List()))
     }
   }
 
@@ -344,8 +360,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |{"a":"apple"}
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, ArrayValue(List(StrValue("b"), StrValue("c"))))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, ArrayValue(List(StrValue("b"), StrValue("c"))))
     }
   }
 
@@ -367,8 +384,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |{"first_name":"Bruce", "last_name":"Wayne"}
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, StrValue("We require first name, last name, and one phone number."))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("We require first name, last name, and one phone number."))
     }
   }
 
@@ -390,8 +408,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |{"first_name":"Bruce", "last_name":"Wayne"}
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, StrValue("We require first name, last name, and one phone number."))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("We require first name, last name, and one phone number."))
     }
   }
 
@@ -406,8 +425,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, StrValue("yes"))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("yes"))
     }
   }
 
@@ -422,8 +442,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, StrValue("no"))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("no"))
     }
   }
 
@@ -446,8 +467,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |{"temp":55}
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, StrValue("liquid"))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("liquid"))
     }
   }
 
@@ -462,8 +484,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -478,8 +501,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -494,8 +518,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -510,8 +535,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -526,8 +552,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(false))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(false))
     }
   }
 
@@ -542,8 +569,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -558,8 +586,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(false))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(false))
     }
   }
 
@@ -574,8 +603,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -590,8 +620,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(false))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(false))
     }
   }
 
@@ -606,8 +637,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(false))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(false))
     }
   }
 
@@ -622,8 +654,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(false))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(false))
     }
   }
 
@@ -638,8 +671,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -654,8 +688,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -670,8 +705,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -686,8 +722,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -702,8 +739,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -718,8 +756,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, StrValue("a"))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("a"))
     }
   }
 
@@ -734,8 +773,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, StrValue("a"))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("a"))
     }
   }
 
@@ -750,8 +790,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -766,8 +807,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(false))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(false))
     }
   }
 
@@ -782,8 +824,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, IntValue(3))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(3))
     }
   }
 
@@ -798,8 +841,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, StrValue(""))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue(""))
     }
   }
 
@@ -814,8 +858,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -830,8 +875,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -846,8 +892,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -862,8 +909,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -878,8 +926,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -894,8 +943,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(false))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(false))
     }
   }
 
@@ -910,8 +960,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(false))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(false))
     }
   }
 
@@ -926,8 +977,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -942,8 +994,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -958,8 +1011,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(false))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(false))
     }
   }
 
@@ -974,8 +1028,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, IntValue(3))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(3))
     }
   }
 
@@ -990,8 +1045,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, IntValue(1))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(1))
     }
   }
 
@@ -1006,8 +1062,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, IntValue(6))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(6))
     }
   }
 
@@ -1022,8 +1079,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, IntValue(10))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(10))
     }
   }
 
@@ -1038,8 +1096,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, FloatValue(3.14))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, FloatValue(3.14))
     }
   }
 
@@ -1054,8 +1113,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, IntValue(8))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(8))
     }
   }
 
@@ -1070,8 +1130,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, IntValue(32))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(32))
     }
   }
 
@@ -1086,8 +1147,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, IntValue(2))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(2))
     }
   }
 
@@ -1102,8 +1164,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, IntValue(-2))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(-2))
     }
   }
 
@@ -1118,8 +1181,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, IntValue(2))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(2))
     }
   }
 
@@ -1134,8 +1198,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, IntValue(2))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(2))
     }
   }
 
@@ -1150,8 +1215,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, IntValue(1))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(1))
     }
   }
 
@@ -1169,8 +1235,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |{"integers":[1,2,3,4,5]}
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, ArrayValue(List(IntValue(2), IntValue(4), IntValue(6), IntValue(8), IntValue(10))))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, ArrayValue(List(IntValue(2), IntValue(4), IntValue(6), IntValue(8), IntValue(10))))
     }
   }
 
@@ -1188,12 +1255,13 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |{"floats":[ 1.1, 2.2, 3.3, 4.4, 5.5 ]}
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(
-        expr,
-        data,
-        ArrayValue(List(FloatValue(2.2), FloatValue(4.4), FloatValue(6.6), FloatValue(8.8), FloatValue(11.0)))
-      )
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(
+          expr,
+          data,
+          ArrayValue(List(FloatValue(2.2), FloatValue(4.4), FloatValue(6.6), FloatValue(8.8), FloatValue(11.0)))
+        )
     }
   }
 
@@ -1211,8 +1279,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |{"integers":[1,2,3,4,5]}
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, ArrayValue(List(IntValue(1), IntValue(3), IntValue(5))))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, ArrayValue(List(IntValue(1), IntValue(3), IntValue(5))))
     }
   }
 
@@ -1231,8 +1300,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |{"integers":[1,2,3,4,5]}
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, IntValue(15))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(15))
     }
   }
 
@@ -1254,8 +1324,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |}
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, IntValue(20))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(20))
     }
   }
 
@@ -1270,8 +1341,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -1286,8 +1358,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -1302,8 +1375,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -1322,8 +1396,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |]}
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -1338,8 +1413,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, ArrayValue(List(IntValue(1), IntValue(2), IntValue(3), IntValue(4))))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, ArrayValue(List(IntValue(1), IntValue(2), IntValue(3), IntValue(4))))
     }
   }
 
@@ -1354,8 +1430,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, ArrayValue(List(IntValue(1), IntValue(2), IntValue(3), IntValue(4))))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, ArrayValue(List(IntValue(1), IntValue(2), IntValue(3), IntValue(4))))
     }
   }
 
@@ -1375,8 +1452,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |{"financing":true}
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr) flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, ArrayValue(List(StrValue("vin"), StrValue("apr"), StrValue("term"))))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, ArrayValue(List(StrValue("vin"), StrValue("apr"), StrValue("term"))))
     }
   }
 
@@ -1391,8 +1469,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -1407,8 +1486,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(true))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -1423,8 +1503,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, StrValue("I love pie"))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("I love pie"))
     }
   }
 
@@ -1439,8 +1520,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |{"filling":"apple", "temp":110}
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, StrValue("I love apple pie"))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("I love apple pie"))
     }
   }
 
@@ -1455,8 +1537,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, StrValue("logic"))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("logic"))
     }
   }
 
@@ -1471,8 +1554,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, StrValue("logic"))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("logic"))
     }
   }
 
@@ -1487,8 +1571,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, StrValue("son"))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("son"))
     }
   }
 
@@ -1503,8 +1588,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |null
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, StrValue("log"))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("log"))
     }
   }
 
@@ -1539,45 +1625,46 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         |}
         |""".stripMargin
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(
-        expr,
-        data,
-        ArrayValue(
-          List(
-            IntValue(1),
-            IntValue(2),
-            StrValue("fizz"),
-            IntValue(4),
-            StrValue("buzz"),
-            StrValue("fizz"),
-            IntValue(7),
-            IntValue(8),
-            StrValue("fizz"),
-            StrValue("buzz"),
-            IntValue(11),
-            StrValue("fizz"),
-            IntValue(13),
-            IntValue(14),
-            StrValue("fizzbuzz"),
-            IntValue(16),
-            IntValue(17),
-            StrValue("fizz"),
-            IntValue(19),
-            StrValue("buzz"),
-            StrValue("fizz"),
-            IntValue(22),
-            IntValue(23),
-            StrValue("fizz"),
-            StrValue("buzz"),
-            IntValue(26),
-            StrValue("fizz"),
-            IntValue(28),
-            IntValue(29),
-            StrValue("fizzbuzz")
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(
+          expr,
+          data,
+          ArrayValue(
+            List(
+              IntValue(1),
+              IntValue(2),
+              StrValue("fizz"),
+              IntValue(4),
+              StrValue("buzz"),
+              StrValue("fizz"),
+              IntValue(7),
+              IntValue(8),
+              StrValue("fizz"),
+              StrValue("buzz"),
+              IntValue(11),
+              StrValue("fizz"),
+              IntValue(13),
+              IntValue(14),
+              StrValue("fizzbuzz"),
+              IntValue(16),
+              IntValue(17),
+              StrValue("fizz"),
+              IntValue(19),
+              StrValue("buzz"),
+              StrValue("fizz"),
+              IntValue(22),
+              IntValue(23),
+              StrValue("fizz"),
+              StrValue("buzz"),
+              IntValue(26),
+              StrValue("fizz"),
+              IntValue(28),
+              IntValue(29),
+              StrValue("fizzbuzz")
+            )
           )
         )
-      )
     }
   }
 
@@ -1585,8 +1672,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
     val exprStr = """{"/":[10, 0]}"""
     val dataStr = """null"""
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      expectError(expr, data)
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        expectError(expr, data)
     }
   }
 
@@ -1594,8 +1682,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
     val exprStr = """{"/":[10.5, 0.0]}"""
     val dataStr = """null"""
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      expectError(expr, data)
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        expectError(expr, data)
     }
   }
 
@@ -1603,8 +1692,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
     val exprStr = """{"/":[10, 0.0]}"""
     val dataStr = """null"""
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      expectError(expr, data)
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        expectError(expr, data)
     }
   }
 
@@ -1612,8 +1702,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
     val exprStr = """{"%":[10, 0]}"""
     val dataStr = """null"""
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      expectError(expr, data)
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        expectError(expr, data)
     }
   }
 
@@ -1621,8 +1712,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
     val exprStr = """{"%":[10.5, 0.0]}"""
     val dataStr = """null"""
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      expectError(expr, data)
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        expectError(expr, data)
     }
   }
 
@@ -1630,8 +1722,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
     val exprStr = """{"var": -1}"""
     val dataStr = """["zero", "one", "two"]"""
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, NullValue)
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, NullValue)
     }
   }
 
@@ -1639,8 +1732,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
     val exprStr = """{"var": 5}"""
     val dataStr = """["zero", "one", "two"]"""
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, NullValue)
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, NullValue)
     }
   }
 
@@ -1648,8 +1742,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
     val exprStr = """{"==":[1, "not_a_number"]}"""
     val dataStr = """null"""
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, BoolValue(false))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(false))
     }
   }
 
@@ -1657,8 +1752,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
     val exprStr = """{"reduce":[[], {"+":[{"var":"current"}, {"var":"accumulator"}]}]}"""
     val dataStr = """null"""
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, NullValue)
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, NullValue)
     }
   }
 
@@ -1666,8 +1762,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
     val exprStr = """{"reduce":[[], {"+":[{"var":"current"}, {"var":"accumulator"}]}, 42]}"""
     val dataStr = """null"""
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, IntValue(42))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(42))
     }
   }
 
@@ -1675,8 +1772,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
     val exprStr = """{"reduce":[[1,2,3,4], {"+":[{"var":"current"}, {"var":"accumulator"}]}]}"""
     val dataStr = """null"""
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, IntValue(10)) // 1 + 2 + 3 + 4 = 10
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(10)) // 1 + 2 + 3 + 4 = 10
     }
   }
 
@@ -1684,8 +1782,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
     val exprStr = """{"reduce":[[42], {"+":[{"var":"current"}, {"var":"accumulator"}]}]}"""
     val dataStr = """null"""
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, IntValue(42))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(42))
     }
   }
 
@@ -1693,8 +1792,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
     val exprStr = """{"/":[10, 2]}"""
     val dataStr = """null"""
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, IntValue(5))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(5))
     }
   }
 
@@ -1702,8 +1802,9 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
     val exprStr = """{"%":[10, 3]}"""
     val dataStr = """null"""
 
-    parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-      staticTestRunner(expr, data, IntValue(1))
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(1))
     }
   }
 
@@ -1715,12 +1816,14 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
       ("""{"var": -1}""", """["first", "second"]""", NullValue)
     )
 
-    testCases.foldLeft(IO.pure(success)) { case (acc, (exprStr, dataStr, expected)) =>
-      acc.flatMap { prevResult =>
-        parseTestJson(exprStr, dataStr).flatMap { case (expr, data) =>
-          staticTestRunner(expr, data, expected).map(result => prevResult and result)
+    testCases.foldLeft(IO.pure(success)) {
+      case (acc, (exprStr, dataStr, expected)) =>
+        acc.flatMap { prevResult =>
+          parseTestJson(exprStr, dataStr).flatMap {
+            case (expr, data) =>
+              staticTestRunner(expr, data, expected).map(result => prevResult.and(result))
+          }
         }
-      }
     }
   }
 
@@ -1732,12 +1835,14 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
       ("""{"==":[123, "123abc"]}""", BoolValue(false))
     )
 
-    testCases.foldLeft(IO.pure(success)) { case (acc, (exprStr, expected)) =>
-      acc.flatMap { prevResult =>
-        parseTestJson(exprStr, "null").flatMap { case (expr, data) =>
-          staticTestRunner(expr, data, expected).map(result => prevResult and result)
+    testCases.foldLeft(IO.pure(success)) {
+      case (acc, (exprStr, expected)) =>
+        acc.flatMap { prevResult =>
+          parseTestJson(exprStr, "null").flatMap {
+            case (expr, data) =>
+              staticTestRunner(expr, data, expected).map(result => prevResult.and(result))
+          }
         }
-      }
     }
   }
 }

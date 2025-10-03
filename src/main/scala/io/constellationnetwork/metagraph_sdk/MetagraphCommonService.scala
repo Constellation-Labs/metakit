@@ -14,14 +14,14 @@ import org.http4s.circe.CirceEntityCodec.circeEntityDecoder
 
 abstract class MetagraphCommonService[F[
   _
-], TX <: DataUpdate, PUB <: DataOnChainState, PRV <: DataCalculatedState, Context](implicit
-  txEncoder:  Encoder[TX],
+], TX <: DataUpdate, PUB <: DataOnChainState, PRV <: DataCalculatedState, Context](
+  implicit txEncoder: Encoder[TX],
   pubEncoder: Encoder[PUB],
   prvEncoder: Encoder[PRV],
-  txDecoder:  Decoder[TX],
+  txDecoder: Decoder[TX],
   pubDecoder: Decoder[PUB],
   prvDecoder: Decoder[PRV],
-  async:      Async[F]
+  async: Async[F]
 ) extends DataApplicationSharedContextualOps[F, TX, PUB, PRV, Context] {
 
   implicit def dataUpdateEncoder: Encoder[DataUpdate] = txEncoder.contramap(_.asInstanceOf[TX])

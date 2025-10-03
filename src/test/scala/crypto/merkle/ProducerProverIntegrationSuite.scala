@@ -7,7 +7,7 @@ import cats.syntax.all._
 
 import io.constellationnetwork.metagraph_sdk.crypto.merkle.MerkleNode
 import io.constellationnetwork.metagraph_sdk.crypto.merkle.api.{MerkleProducer, MerkleProver, MerkleVerifier}
-import io.constellationnetwork.metagraph_sdk.crypto.merkle.impl.{CollectionMerkleProver, LevelDbMerkleProducer}
+import io.constellationnetwork.metagraph_sdk.crypto.merkle.impl.LevelDbMerkleProducer
 
 import io.circe.syntax._
 import org.scalacheck.Gen
@@ -84,73 +84,43 @@ object ProducerProverIntegrationSuite extends MutableIOSuite with Checkers {
       updateString   <- Gen.alphaStr.suchThat(s => s.nonEmpty && s != initialStrings(1))
     } yield (initialStrings, updateString)
 
-    forall(genUpdate) { case (initialStrings, updateString) =>
-      for {
-        randSuffix <- IO(scala.util.Random.alphanumeric.take(10).mkString)
-        dbPath = tempPath.resolve(s"test2_$randSuffix")
-        _             <- cleanDb(dbPath)
-        initialLeaves <- initialStrings.traverse(s => MerkleNode.Leaf[IO](s.asJson))
-        updatedLeaf   <- MerkleNode.Leaf[IO](updateString.asJson)
-        result <- LevelDbMerkleProducer.make[IO](dbPath, initialLeaves).use { producer =>
-          for {
-            prover1 <- producer.getProver
-            proof1  <- prover1.attestIndex(0)
-            tree1   <- producer.build
-            rootHash1 = tree1.toOption.get.rootNode.digest
+    forall(genUpdate) {
+      case (initialStrings, updateString) =>
+        for {
+          randSuffix <- IO(scala.util.Random.alphanumeric.take(10).mkString)
+          dbPath = tempPath.resolve(s"test2_$randSuffix")
+          _             <- cleanDb(dbPath)
+          initialLeaves <- initialStrings.traverse(s => MerkleNode.Leaf[IO](s.asJson))
+          updatedLeaf   <- MerkleNode.Leaf[IO](updateString.asJson)
+          result <- LevelDbMerkleProducer.make[IO](dbPath, initialLeaves).use { producer =>
+            for {
+              prover1 <- producer.getProver
+              proof1  <- prover1.attestIndex(0)
+              tree1   <- producer.build
+              rootHash1 = tree1.toOption.get.rootNode.digest
 
-            _ <- producer.update(1, updatedLeaf)
+              _ <- producer.update(1, updatedLeaf)
 
-            prover2 <- producer.getProver
-            proof2  <- prover2.attestIndex(0)
-            tree2   <- producer.build
-            rootHash2 = tree2.toOption.get.rootNode.digest
+              prover2 <- producer.getProver
+              proof2  <- prover2.attestIndex(0)
+              tree2   <- producer.build
+              rootHash2 = tree2.toOption.get.rootNode.digest
 
-            verifier1 = MerkleVerifier.make[IO](rootHash1)
-            verifier2 = MerkleVerifier.make[IO](rootHash2)
-            verify1 <- verifier1.confirm(proof1.toOption.get)
+              verifier1 = MerkleVerifier.make[IO](rootHash1)
+              verifier2 = MerkleVerifier.make[IO](rootHash2)
+              verify1 <- verifier1.confirm(proof1.toOption.get)
 
-            verify2 <- verifier2.confirm(proof2.toOption.get)
+              verify2 <- verifier2.confirm(proof2.toOption.get)
 
-            crossVerify <- verifier2.confirm(proof1.toOption.get)
-          } yield expect(rootHash1 != rootHash2) &&
-          expect(proof1 != proof2) &&
-          expect(verify1) &&
-          expect(verify2) &&
-          expect(!crossVerify)
-        }
-      } yield result
-    }
-  }
-
-  test("CollectionMerkleProver works with LevelDbProducer storage") { tempPath =>
-    forall(Gen.choose(5, 10)) { leafCount =>
-      for {
-        randSuffix <- IO(scala.util.Random.alphanumeric.take(10).mkString)
-        dbPath = tempPath.resolve(s"test3_$randSuffix")
-        _      <- cleanDb(dbPath)
-        leaves <- (1 to leafCount).toList.traverse(i => MerkleNode.Leaf[IO](s"leaf-$i".asJson))
-        result <- LevelDbMerkleProducer.make[IO](dbPath, leaves).use { producer =>
-          val collectionProver = CollectionMerkleProver.make[IO](producer.leavesStore)
-          val targetIdx = leafCount / 2
-
-          for {
-            tree <- producer.build
-            rootHash = tree.toOption.get.rootNode.digest
-
-            producerProver  <- producer.getProver
-            producerProof   <- producerProver.attestIndex(targetIdx)
-            collectionProof <- collectionProver.attestIndex(targetIdx)
-
-            verifier = MerkleVerifier.make[IO](rootHash)
-            verifyProducer   <- verifier.confirm(producerProof.toOption.get)
-            verifyCollection <- verifier.confirm(collectionProof.toOption.get)
-          } yield expect(producerProof.isRight) &&
-          expect(collectionProof.isRight) &&
-          expect(producerProof == collectionProof) &&
-          expect(verifyProducer) &&
-          expect(verifyCollection)
-        }
-      } yield result
+              crossVerify <- verifier2.confirm(proof1.toOption.get)
+            } yield
+              expect(rootHash1 != rootHash2) &&
+              expect(proof1 != proof2) &&
+              expect(verify1) &&
+              expect(verify2) &&
+              expect(!crossVerify)
+          }
+        } yield result
     }
   }
 
@@ -161,35 +131,37 @@ object ProducerProverIntegrationSuite extends MutableIOSuite with Checkers {
       last   <- Gen.alphaNumStr.suchThat(_.nonEmpty)
     } yield (first, middle, last)
 
-    forall(genAppendPrepend) { case (first, middle, last) =>
-      for {
-        randSuffix <- IO(scala.util.Random.alphanumeric.take(10).mkString)
-        dbPath = tempPath.resolve(s"test4_$randSuffix")
-        _             <- cleanDb(dbPath)
-        initialLeaves <- List(middle).traverse(s => MerkleNode.Leaf[IO](s.asJson))
-        firstLeaf     <- MerkleNode.Leaf[IO](first.asJson)
-        lastLeaf      <- MerkleNode.Leaf[IO](last.asJson)
-        result <- LevelDbMerkleProducer.make[IO](dbPath, initialLeaves).use { producer =>
-          for {
-            _ <- producer.prepend(List(firstLeaf))
-            _ <- producer.append(List(lastLeaf))
+    forall(genAppendPrepend) {
+      case (first, middle, last) =>
+        for {
+          randSuffix <- IO(scala.util.Random.alphanumeric.take(10).mkString)
+          dbPath = tempPath.resolve(s"test4_$randSuffix")
+          _             <- cleanDb(dbPath)
+          initialLeaves <- List(middle).traverse(s => MerkleNode.Leaf[IO](s.asJson))
+          firstLeaf     <- MerkleNode.Leaf[IO](first.asJson)
+          lastLeaf      <- MerkleNode.Leaf[IO](last.asJson)
+          result <- LevelDbMerkleProducer.make[IO](dbPath, initialLeaves).use { producer =>
+            for {
+              _ <- producer.prepend(List(firstLeaf))
+              _ <- producer.append(List(lastLeaf))
 
-            prover <- producer.getProver
-            tree   <- producer.build
-            rootHash = tree.toOption.get.rootNode.digest
+              prover <- producer.getProver
+              tree   <- producer.build
+              rootHash = tree.toOption.get.rootNode.digest
 
-            leaves <- producer.leaves
-            proofs <- (0 to 2).toList.traverse(prover.attestIndex)
+              leaves <- producer.leaves
+              proofs <- (0 to 2).toList.traverse(prover.attestIndex)
 
-            verifier = MerkleVerifier.make[IO](rootHash)
-            verifications <- proofs.traverse { proof =>
-              verifier.confirm(proof.toOption.get)
-            }
-          } yield expect(leaves.map(_.data) == List(first, middle, last).map(_.asJson)) &&
-          expect(proofs.forall(_.isRight)) &&
-          expect(verifications.forall(identity))
-        }
-      } yield result
+              verifier = MerkleVerifier.make[IO](rootHash)
+              verifications <- proofs.traverse { proof =>
+                verifier.confirm(proof.toOption.get)
+              }
+            } yield
+              expect(leaves.map(_.data) == List(first, middle, last).map(_.asJson)) &&
+              expect(proofs.forall(_.isRight)) &&
+              expect(verifications.forall(identity))
+          }
+        } yield result
     }
   }
 
@@ -219,9 +191,10 @@ object ProducerProverIntegrationSuite extends MutableIOSuite with Checkers {
             verifications <- proofs.traverse { proof =>
               verifier.confirm(proof.toOption.get)
             }
-          } yield expect(currentLeaves.size == expectedSize) &&
-          expect(proofs.forall(_.isRight)) &&
-          expect(verifications.forall(identity))
+          } yield
+            expect(currentLeaves.size == expectedSize) &&
+            expect(proofs.forall(_.isRight)) &&
+            expect(verifications.forall(identity))
         }
       } yield result
     }
@@ -246,9 +219,10 @@ object ProducerProverIntegrationSuite extends MutableIOSuite with Checkers {
             proof1 <- prover1.attestIndex(targetIdx)
             proof2 <- prover2.attestIndex(targetIdx)
             proof3 <- prover3.attestIndex(targetIdx)
-          } yield expect(proof1.isRight) &&
-          expect(proof1 == proof2) &&
-          expect(proof2 == proof3)
+          } yield
+            expect(proof1.isRight) &&
+            expect(proof1 == proof2) &&
+            expect(proof2 == proof3)
         }
       } yield result
     }
@@ -268,9 +242,10 @@ object ProducerProverIntegrationSuite extends MutableIOSuite with Checkers {
         }
 
         inMemoryTree <- inMemoryProducer.build
-      } yield expect(inMemoryTree.isRight) &&
-      expect(levelDbTree.isRight) &&
-      expect(inMemoryTree.toOption.get.rootNode.digest == levelDbTree.toOption.get.rootNode.digest)
+      } yield
+        expect(inMemoryTree.isRight) &&
+        expect(levelDbTree.isRight) &&
+        expect(inMemoryTree.toOption.get.rootNode.digest == levelDbTree.toOption.get.rootNode.digest)
     }
   }
 
@@ -299,11 +274,12 @@ object ProducerProverIntegrationSuite extends MutableIOSuite with Checkers {
           } yield (tree, loadedLeaves.size)
         }
 
-      } yield expect(tree1._1.isRight) &&
-      expect(tree2._1.isRight) &&
-      expect(tree1._2 == strings.size * 2) &&
-      expect(tree2._2 == strings.size * 2) &&
-      expect(tree1._1.toOption.get.rootNode.digest == tree2._1.toOption.get.rootNode.digest)
+      } yield
+        expect(tree1._1.isRight) &&
+        expect(tree2._1.isRight) &&
+        expect(tree1._2 == strings.size * 2) &&
+        expect(tree2._2 == strings.size * 2) &&
+        expect(tree1._1.toOption.get.rootNode.digest == tree2._1.toOption.get.rootNode.digest)
     }
   }
 }

@@ -107,10 +107,7 @@ object JsonLogicValue {
           .traverse(_.as[JsonLogicValue](decodeJsonLogicValue))
           .map(ArrayValue(_)),
       jsonObject = obj =>
-        obj.toMap
-          .map { case (k, v) => v.as[JsonLogicValue](decodeJsonLogicValue).map(k -> _) }
-          .toList
-          .sequence
+        obj.toMap.map { case (k, v) => v.as[JsonLogicValue](decodeJsonLogicValue).map(k -> _) }.toList.sequence
           .map(pair => MapValue(pair.toMap))
     )
   }
@@ -126,7 +123,7 @@ object JsonLogicCollection {
     Decoder.instance[JsonLogicCollection] { c =>
       c.as[JsonLogicValue].flatMap {
         case coll: JsonLogicCollection => Right(coll)
-        case other => Left(DecodingFailure(s"Expected a collection (map or array), but got $other", c.history))
+        case other                     => Left(DecodingFailure(s"Expected a collection (map or array), but got $other", c.history))
       }
     }
 }
@@ -160,7 +157,7 @@ object CoercedValue {
         elems match {
           case Nil           => Right(CoercedInt(0))
           case single :: Nil => coerceToPrimitive(single)
-          case _ => JsonLogicException(s"Cannot coerce multi-element array $elems to a single primitive").asLeft
+          case _             => JsonLogicException(s"Cannot coerce multi-element array $elems to a single primitive").asLeft
         }
       case MapValue(m) =>
         m.size match {
@@ -198,6 +195,6 @@ object CoercedValue {
       case (CoercedFloat(li), CoercedString(rs))  => safeParseBigDecimal(rs).exists(_ == li).asRight
       case (CoercedString(ls), CoercedFloat(ri))  => safeParseBigDecimal(ls).exists(_ == ri).asRight
       case (CoercedString(ls), CoercedString(rs)) => (ls == rs).asRight
-      case _ => JsonLogicException(s"Cannot compare coerced values $l and $r").asLeft
+      case _                                      => JsonLogicException(s"Cannot compare coerced values $l and $r").asLeft
     }
 }

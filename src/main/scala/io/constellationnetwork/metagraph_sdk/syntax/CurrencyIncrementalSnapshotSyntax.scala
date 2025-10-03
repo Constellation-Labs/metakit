@@ -17,8 +17,8 @@ import io.circe.{Decoder, Encoder}
 
 trait CurrencyIncrementalSnapshotSyntax {
 
-  implicit class CurrencyIncrementalSnapshotOps[F[_]: Sync](cis: CurrencyIncrementalSnapshot)(implicit
-    ue: Encoder[DataUpdate],
+  implicit class CurrencyIncrementalSnapshotOps[F[_]: Sync](cis: CurrencyIncrementalSnapshot)(
+    implicit ue: Encoder[DataUpdate],
     ud: Decoder[DataUpdate]
   ) {
 
@@ -35,13 +35,13 @@ trait CurrencyIncrementalSnapshotSyntax {
       Sync[F].fromOption(cis.dataApplication, new RuntimeException(s"Failed to access Data Application Part"))
 
     def getSignedUpdates[U <: DataUpdate: ClassTag]: F[List[Signed[U]]] =
-      getBlocks
-        .map {
-          _.flatMap { signDataBlock =>
-            DataUpdate.getDataUpdates(signDataBlock.dataTransactions.toList).collect { case Signed(u: U, p) =>
+      getBlocks.map {
+        _.flatMap { signDataBlock =>
+          DataUpdate.getDataUpdates(signDataBlock.dataTransactions.toList).collect {
+            case Signed(u: U, p) =>
               Signed(u, p)
-            }
           }
         }
+      }
   }
 }

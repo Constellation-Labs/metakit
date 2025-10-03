@@ -25,8 +25,7 @@ object JsonLogicExpression {
   }
 
   implicit val decodeOperatorArgs: Decoder[ArgParser] = Decoder.instance { cursor =>
-    cursor.as[List[JsonLogicExpression]].map(ArgParser) orElse
-    cursor.as[JsonLogicExpression].map(v => ArgParser(List(v)))
+    cursor.as[List[JsonLogicExpression]].map(ArgParser).orElse(cursor.as[JsonLogicExpression].map(v => ArgParser(List(v))))
   }
 
   implicit val encodeJsonLogicExpr: Encoder[JsonLogicExpression] = {

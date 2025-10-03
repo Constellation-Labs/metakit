@@ -78,10 +78,11 @@ object LevelDbCollectionSuite extends IOSuite with Checkers {
   test("getUnsafe throws an exception when the requested value does not exist") { store =>
     for {
       result <- store.getUnsafe(42).attempt
-    } yield result match {
-      case Left(e: NoSuchElementException) => expect(e.getMessage == s"Element not found. id=42")
-      case _                               => failure("Exception not caught")
-    }
+    } yield
+      result match {
+        case Left(e: NoSuchElementException) => expect(e.getMessage == s"Element not found. id=42")
+        case _                               => failure("Exception not caught")
+      }
   }
 
   test("getBatch retrieves a batch of key-value pairs and filters them correctly") { store =>

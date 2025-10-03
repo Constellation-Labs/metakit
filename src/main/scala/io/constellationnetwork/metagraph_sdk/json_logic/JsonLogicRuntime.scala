@@ -12,7 +12,7 @@ object JsonLogicRuntime {
 
     def apply[F[_]: Monad: JsonLogicSemantics](
       expr: JsonLogicExpression,
-      ctx:  Option[JsonLogicValue] = None
+      ctx: Option[JsonLogicValue] = None
     ): F[Either[JsonLogicException, JsonLogicValue]]
   }
 
@@ -20,7 +20,7 @@ object JsonLogicRuntime {
 
     override def apply[F[_]: Monad: JsonLogicSemantics](
       expr: JsonLogicExpression,
-      ctx:  Option[JsonLogicValue] = None
+      ctx: Option[JsonLogicValue] = None
     ): F[Either[JsonLogicException, JsonLogicValue]] = evaluate(expr, ctx)
   }
 
@@ -28,7 +28,7 @@ object JsonLogicRuntime {
 
     override def apply[F[_]: Monad: JsonLogicSemantics](
       expr: JsonLogicExpression,
-      ctx:  Option[JsonLogicValue] = None
+      ctx: Option[JsonLogicValue] = None
     ): F[Either[JsonLogicException, JsonLogicValue]] = interpret(expr, ctx)
   }
 
@@ -50,7 +50,7 @@ object JsonLogicRuntime {
 
   def evaluate[F[_]: Monad: JsonLogicSemantics](
     expr: JsonLogicExpression,
-    ctx:  Option[JsonLogicValue] = None
+    ctx: Option[JsonLogicValue] = None
   ): F[Either[JsonLogicException, JsonLogicValue]] = {
 
     def run: JsonLogicExpression => F[Either[JsonLogicException, JsonLogicValue]] = {
@@ -60,8 +60,8 @@ object JsonLogicRuntime {
         run(expr).flatMap {
           case Right(StrValue(name))                  => lookupVar(name, defaultOpt)(ctx)
           case Right(ArrayValue(StrValue(name) :: _)) => lookupVar(name, defaultOpt)(ctx)
-          case Right(v) => JsonLogicException(s"Got non-string input: $v").asLeft[JsonLogicValue].pure[F]
-          case Left(ex) => ex.asLeft[JsonLogicValue].pure[F]
+          case Right(v)                               => JsonLogicException(s"Got non-string input: $v").asLeft[JsonLogicValue].pure[F]
+          case Left(ex)                               => ex.asLeft[JsonLogicValue].pure[F]
         }
       case ArrayExpression(args) => args.traverse(run).map(_.sequence.map(ArrayValue(_)))
       case ApplyExpression(MapOp, List(arr: VarExpression, cb: JsonLogicExpression)) => callbackFunc(MapOp, arr, cb)
@@ -80,9 +80,9 @@ object JsonLogicRuntime {
     }
 
     def callbackFunc(
-      op:       JsonLogicOp,
-      arrExpr:  JsonLogicExpression,
-      cbExpr:   JsonLogicExpression,
+      op: JsonLogicOp,
+      arrExpr: JsonLogicExpression,
+      cbExpr: JsonLogicExpression,
       initExpr: Option[JsonLogicExpression] = None
     ): F[Either[JsonLogicException, JsonLogicValue]] =
       (for {
@@ -100,7 +100,7 @@ object JsonLogicRuntime {
 
   def interpret[F[_]: Monad: JsonLogicSemantics](
     expr: JsonLogicExpression,
-    ctx:  Option[JsonLogicValue] = None
+    ctx: Option[JsonLogicValue] = None
   ): F[Either[JsonLogicException, JsonLogicValue]] = {
 
     val initStack: Frame.Stack = List(Frame.Eval(expr, None))
@@ -134,11 +134,10 @@ object JsonLogicRuntime {
         }
 
       case Frame.Eval(VarExpression(Left(key), defaultOpt), contOpt) :: tail =>
-        lookupVar(key, defaultOpt)(ctx)
-          .map {
-            case Left(err)    => err.asLeft[JsonLogicValue].asRight[Frame.Stack]
-            case Right(value) => contOpt.continueOrTerminate(value, tail)
-          }
+        lookupVar(key, defaultOpt)(ctx).map {
+          case Left(err)    => err.asLeft[JsonLogicValue].asRight[Frame.Stack]
+          case Right(value) => contOpt.continueOrTerminate(value, tail)
+        }
 
       case Frame.Eval(VarExpression(Right(expr), defaultOpt), contOpt) :: tail =>
         // Create a continuation that will look up the variable after evaluating expr
@@ -226,8 +225,7 @@ object JsonLogicRuntime {
         }
 
       // Handle applying a value to callback operations
-      case Frame.ApplyValue(value, Continuation(op, _, _, parentContOpt, Some(cbExpr), _, _, _, _)) :: tail
-          if Frame.isCallbackOp(op) =>
+      case Frame.ApplyValue(value, Continuation(op, _, _, parentContOpt, Some(cbExpr), _, _, _, _)) :: tail if Frame.isCallbackOp(op) =>
         value match {
           case arr @ ArrayValue(_) =>
             JsonLogicSemantics[F]
@@ -319,15 +317,15 @@ object JsonLogicRuntime {
    * A continuation remembers an operator call with partially evaluated args.
    */
   final case class Continuation(
-    op:                  JsonLogicOp,
-    processed:           List[JsonLogicValue],
-    remaining:           List[JsonLogicExpression],
-    parent:              Option[Continuation],
-    callbackExpr:        Option[JsonLogicExpression],
-    defaultOpt:          Option[JsonLogicValue] = None,
-    isVarName:           Boolean = false,
+    op: JsonLogicOp,
+    processed: List[JsonLogicValue],
+    remaining: List[JsonLogicExpression],
+    parent: Option[Continuation],
+    callbackExpr: Option[JsonLogicExpression],
+    defaultOpt: Option[JsonLogicValue] = None,
+    isVarName: Boolean = false,
     isReduceWithoutInit: Boolean = false,
-    isArray:             Boolean = false
+    isArray: Boolean = false
   )
 
   object Frame {
@@ -352,7 +350,7 @@ object JsonLogicRuntime {
 
       def continueOrTerminate(
         value: JsonLogicValue,
-        tail:  Frame.Stack
+        tail: Frame.Stack
       ): Either[Frame.Stack, Either[JsonLogicException, JsonLogicValue]] =
         contOpt match {
           case Some(cont) => (Frame.ApplyValue(value, cont) :: tail).asLeft[Either[JsonLogicException, JsonLogicValue]]

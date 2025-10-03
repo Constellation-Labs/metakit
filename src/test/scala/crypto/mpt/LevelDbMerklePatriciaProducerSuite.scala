@@ -1,13 +1,11 @@
 package crypto.mpt
 
 import java.io.IOException
-import java.nio.file.{FileVisitResult, Files, Path, SimpleFileVisitor}
 import java.nio.file.attribute.BasicFileAttributes
+import java.nio.file.{FileVisitResult, Files, Path, SimpleFileVisitor}
 
 import cats.effect.{IO, Resource}
 import cats.syntax.all._
-
-import weaver._
 
 import io.constellationnetwork.metagraph_sdk.crypto.mpt.impl.LevelDbMerklePatriciaProducer
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher.HasherOps
@@ -15,13 +13,16 @@ import io.constellationnetwork.security.hash.Hash
 
 import io.circe.Json
 import io.circe.syntax._
+import weaver._
 
 object LevelDbMerklePatriciaProducerSuite extends SimpleIOSuite {
 
   def testData: IO[Map[Hash, Json]] =
-    List("key1", "key2", "key3").zipWithIndex.traverse { case (key, idx) =>
-      key.computeDigest.map(hash => hash -> s"value${idx + 1}".asJson)
-    }.map(_.toMap)
+    List("key1", "key2", "key3").zipWithIndex.traverse {
+      case (key, idx) =>
+        key.computeDigest.map(hash => hash -> s"value${idx + 1}".asJson)
+    }
+      .map(_.toMap)
 
   def tempDbPath: Resource[IO, Path] =
     Resource.make(
@@ -52,19 +53,19 @@ object LevelDbMerklePatriciaProducerSuite extends SimpleIOSuite {
           data <- testData
           // Initially empty
           entries1 <- producer.entries
-          _ <- expect(entries1.isEmpty).pure[IO]
+          _        <- expect(entries1.isEmpty).pure[IO]
 
           // Insert data
           insertResult <- producer.insert(data)
-          _ <- expect(insertResult.isRight).pure[IO]
+          _            <- expect(insertResult.isRight).pure[IO]
 
           // Check entries
           entries2 <- producer.entries
-          _ <- expect(entries2 == data).pure[IO]
+          _        <- expect(entries2 == data).pure[IO]
 
           // Build trie
           buildResult <- producer.build
-          _ <- expect(buildResult.isRight).pure[IO]
+          _           <- expect(buildResult.isRight).pure[IO]
         } yield success
       }
     }
@@ -78,11 +79,11 @@ object LevelDbMerklePatriciaProducerSuite extends SimpleIOSuite {
           for {
             // Check initial entries
             entries <- producer.entries
-            _ <- expect(entries == data).pure[IO]
+            _       <- expect(entries == data).pure[IO]
 
             // Build trie
             buildResult <- producer.build
-            _ <- expect(buildResult.isRight).pure[IO]
+            _           <- expect(buildResult.isRight).pure[IO]
           } yield success
         }
       } yield result
@@ -92,12 +93,12 @@ object LevelDbMerklePatriciaProducerSuite extends SimpleIOSuite {
   test("persist data across producer instances") { _ =>
     tempDbPath.use { dbPath =>
       for {
-        data <- testData
+        data     <- testData
         key4Hash <- "key4".computeDigest
         // First producer - insert data
         result1 <- LevelDbMerklePatriciaProducer.make[IO](dbPath, data).use { producer =>
           for {
-            _ <- producer.insert(Map(key4Hash -> "value4".asJson))
+            _       <- producer.insert(Map(key4Hash -> "value4".asJson))
             entries <- producer.entries
           } yield entries
         }
@@ -129,17 +130,17 @@ object LevelDbMerklePatriciaProducerSuite extends SimpleIOSuite {
   test("update existing entry in LevelDB") { _ =>
     tempDbPath.use { dbPath =>
       for {
-        data <- testData
+        data     <- testData
         key1Hash <- "key1".computeDigest
         result <- LevelDbMerklePatriciaProducer.make[IO](dbPath, data).use { producer =>
           for {
             // Update existing key
             updateResult <- producer.update(key1Hash, "updated_value1".asJson)
-            _ <- expect(updateResult.isRight).pure[IO]
+            _            <- expect(updateResult.isRight).pure[IO]
 
             // Check updated value
             entries <- producer.entries
-            _ <- expect(entries(key1Hash) == "updated_value1".asJson).pure[IO]
+            _       <- expect(entries(key1Hash) == "updated_value1".asJson).pure[IO]
           } yield success
         }
       } yield result
@@ -149,7 +150,7 @@ object LevelDbMerklePatriciaProducerSuite extends SimpleIOSuite {
   test("remove entries from LevelDB") { _ =>
     tempDbPath.use { dbPath =>
       for {
-        data <- testData
+        data     <- testData
         key1Hash <- "key1".computeDigest
         key2Hash <- "key2".computeDigest
         key3Hash <- "key3".computeDigest
@@ -157,12 +158,12 @@ object LevelDbMerklePatriciaProducerSuite extends SimpleIOSuite {
           for {
             // Remove some keys
             removeResult <- producer.remove(List(key1Hash, key3Hash))
-            _ <- expect(removeResult.isRight).pure[IO]
+            _            <- expect(removeResult.isRight).pure[IO]
 
             // Check remaining entries
             entries <- producer.entries
-            _ <- expect(entries.size == 1).pure[IO]
-            _ <- expect(entries.contains(key2Hash)).pure[IO]
+            _       <- expect(entries.size == 1).pure[IO]
+            _       <- expect(entries.contains(key2Hash)).pure[IO]
           } yield success
         }
       } yield result
@@ -180,11 +181,11 @@ object LevelDbMerklePatriciaProducerSuite extends SimpleIOSuite {
 
             // Check entries are empty
             entries <- producer.entries
-            _ <- expect(entries.isEmpty).pure[IO]
+            _       <- expect(entries.isEmpty).pure[IO]
 
             // Cannot build empty trie
             buildResult <- producer.build
-            _ <- expect(buildResult.isLeft).pure[IO]
+            _           <- expect(buildResult.isLeft).pure[IO]
           } yield success
         }
       } yield result
@@ -205,18 +206,18 @@ object LevelDbMerklePatriciaProducerSuite extends SimpleIOSuite {
             batch3Hash -> "value3".asJson
           )
           insertResult <- producer.insert(batchData)
-          _ <- expect(insertResult.isRight).pure[IO]
+          _            <- expect(insertResult.isRight).pure[IO]
 
           entries1 <- producer.entries
-          _ <- expect(entries1.size == 3).pure[IO]
+          _        <- expect(entries1.size == 3).pure[IO]
 
           // Batch remove
           removeResult <- producer.remove(List(batch1Hash, batch3Hash))
-          _ <- expect(removeResult.isRight).pure[IO]
+          _            <- expect(removeResult.isRight).pure[IO]
 
           entries2 <- producer.entries
-          _ <- expect(entries2.size == 1).pure[IO]
-          _ <- expect(entries2.contains(batch2Hash)).pure[IO]
+          _        <- expect(entries2.size == 1).pure[IO]
+          _        <- expect(entries2.contains(batch2Hash)).pure[IO]
         } yield success
       }
     }
@@ -225,26 +226,26 @@ object LevelDbMerklePatriciaProducerSuite extends SimpleIOSuite {
   test("build caches trie when clean") { _ =>
     tempDbPath.use { dbPath =>
       for {
-        data <- testData
+        data     <- testData
         key4Hash <- "key4".computeDigest
         result <- LevelDbMerklePatriciaProducer.make[IO](dbPath, data).use { producer =>
           for {
             // Build first time
             trie1 <- producer.build
-            _ <- expect(trie1.isRight).pure[IO]
+            _     <- expect(trie1.isRight).pure[IO]
 
             // Build again without changes - should use cache
             trie2 <- producer.build
-            _ <- expect(trie2.isRight).pure[IO]
-            _ <- expect(trie1 == trie2).pure[IO]
+            _     <- expect(trie2.isRight).pure[IO]
+            _     <- expect(trie1 == trie2).pure[IO]
 
             // Insert new data
             _ <- producer.insert(Map(key4Hash -> "value4".asJson))
 
             // Build after change - should rebuild
             trie3 <- producer.build
-            _ <- expect(trie3.isRight).pure[IO]
-            _ <- expect(trie1 != trie3).pure[IO]
+            _     <- expect(trie3.isRight).pure[IO]
+            _     <- expect(trie1 != trie3).pure[IO]
           } yield success
         }
       } yield result
@@ -254,7 +255,7 @@ object LevelDbMerklePatriciaProducerSuite extends SimpleIOSuite {
   test("getProver returns working prover") { _ =>
     tempDbPath.use { dbPath =>
       for {
-        data <- testData
+        data     <- testData
         key1Hash <- "key1".computeDigest
         result <- LevelDbMerklePatriciaProducer.make[IO](dbPath, data).use { producer =>
           for {
@@ -263,7 +264,7 @@ object LevelDbMerklePatriciaProducerSuite extends SimpleIOSuite {
 
             // Test attestation
             proof <- prover.attestDigest(key1Hash)
-            _ <- expect(proof.isRight).pure[IO]
+            _     <- expect(proof.isRight).pure[IO]
           } yield success
         }
       } yield result

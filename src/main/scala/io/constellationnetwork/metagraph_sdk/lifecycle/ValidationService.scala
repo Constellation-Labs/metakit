@@ -21,13 +21,13 @@ abstract class ValidationService[
   )(implicit ctx: L1NodeContext[F]): F[DataApplicationValidationErrorOr[Unit]]
 
   def validateSignedUpdate(
-    current:      DataState[PUB, PRV],
+    current: DataState[PUB, PRV],
     signedUpdate: Signed[TX]
   )(implicit context: L0NodeContext[F]): F[DataApplicationValidationErrorOr[Unit]]
 
   def validateDataParallel(
     current: DataState[PUB, PRV],
-    batch:   NonEmptyList[Signed[TX]]
+    batch: NonEmptyList[Signed[TX]]
   )(implicit ctx: L0NodeContext[F]): F[DataApplicationValidationErrorOr[Unit]] = {
     val validator = validateSignedUpdate(current, _)
 
@@ -38,7 +38,7 @@ abstract class ValidationService[
 
   def validateData(
     current: DataState[PUB, PRV],
-    batch:   NonEmptyList[Signed[TX]]
+    batch: NonEmptyList[Signed[TX]]
   )(implicit ctx: L0NodeContext[F]): F[DataApplicationValidationErrorOr[Unit]] = {
     val validator = validateSignedUpdate(current, _)
 

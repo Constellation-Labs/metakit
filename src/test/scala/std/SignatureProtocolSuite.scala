@@ -37,10 +37,11 @@ object SignatureProtocolSuite extends SimpleIOSuite with Checkers {
           keypair <- KeyPairGenerator.makeKeyPair[IO]
           producer = SignatureProtocol.proveSigned[IO, TestDataUpdate]
           signed <- producer.create(data, keypair)
-        } yield expect(signed.value == data) &&
-        expect(signed.proofs.size == 1) &&
-        expect(signed.proofs.head.id.hex.value.nonEmpty) &&
-        expect(signed.proofs.head.signature.value.value.nonEmpty)
+        } yield
+          expect(signed.value == data) &&
+          expect(signed.proofs.size == 1) &&
+          expect(signed.proofs.head.id.hex.value.nonEmpty) &&
+          expect(signed.proofs.head.signature.value.value.nonEmpty)
       }
     }
   }
@@ -55,10 +56,11 @@ object SignatureProtocolSuite extends SimpleIOSuite with Checkers {
           keypair <- KeyPairGenerator.makeKeyPair[IO]
           producer = SignatureProtocol.customProveSigned[IO, TestDataUpdate](customSerializer)
           signed <- producer.create(data, keypair)
-        } yield expect(signed.value == data) &&
-        expect(signed.proofs.size == 1) &&
-        expect(signed.proofs.head.id.hex.value.nonEmpty) &&
-        expect(signed.proofs.head.signature.value.value.nonEmpty)
+        } yield
+          expect(signed.value == data) &&
+          expect(signed.proofs.size == 1) &&
+          expect(signed.proofs.head.id.hex.value.nonEmpty) &&
+          expect(signed.proofs.head.signature.value.value.nonEmpty)
       }
     }
   }
@@ -85,10 +87,11 @@ object SignatureProtocolSuite extends SimpleIOSuite with Checkers {
           signed <- producer.create(data, keypair)
           evaluator = SignatureProtocol.verifySigned[IO, TestDataUpdate]
           result <- evaluator.inspect(signed)
-        } yield result match {
-          case Right(validProofs) => expect(validProofs.size == 1)
-          case Left(_)            => failure("Valid signature was incorrectly rejected")
-        }
+        } yield
+          result match {
+            case Right(validProofs) => expect(validProofs.size == 1)
+            case Left(_)            => failure("Valid signature was incorrectly rejected")
+          }
       }
     }
   }
@@ -104,10 +107,11 @@ object SignatureProtocolSuite extends SimpleIOSuite with Checkers {
           signedTampered = signed.copy(value = tamperedData)
           evaluator = SignatureProtocol.verifySigned[IO, TestDataUpdate]
           result <- evaluator.inspect(signedTampered)
-        } yield result match {
-          case Right(_)            => failure("Tampered data was incorrectly verified")
-          case Left(invalidProofs) => expect(invalidProofs.size == 1)
-        }
+        } yield
+          result match {
+            case Right(_)            => failure("Tampered data was incorrectly verified")
+            case Left(invalidProofs) => expect(invalidProofs.size == 1)
+          }
       }
     }
   }
@@ -123,10 +127,11 @@ object SignatureProtocolSuite extends SimpleIOSuite with Checkers {
           signed <- producer.create(data, keypair)
           evaluator = SignatureProtocol.customVerifySigned[IO, TestDataUpdate](customSerializer)
           result <- evaluator.inspect(signed)
-        } yield result match {
-          case Right(_) => success
-          case Left(_)  => failure("Valid signature was rejected")
-        }
+        } yield
+          result match {
+            case Right(_) => success
+            case Left(_)  => failure("Valid signature was rejected")
+          }
       }
     }
   }
@@ -144,12 +149,13 @@ object SignatureProtocolSuite extends SimpleIOSuite with Checkers {
 
           evaluator = SignatureProtocol.verifySigned[IO, TestDataUpdate]
           result <- evaluator.inspect(signedWithTwoProofs)
-        } yield result match {
-          case Right(validProofs) =>
-            expect(signedWithTwoProofs.proofs.size == 2) &&
-            expect(validProofs.size == 2)
-          case Left(_) => failure("Valid signatures were incorrectly rejected")
-        }
+        } yield
+          result match {
+            case Right(validProofs) =>
+              expect(signedWithTwoProofs.proofs.size == 2) &&
+              expect(validProofs.size == 2)
+            case Left(_) => failure("Valid signatures were incorrectly rejected")
+          }
       }
     }
   }
@@ -168,12 +174,13 @@ object SignatureProtocolSuite extends SimpleIOSuite with Checkers {
 
           evaluator = SignatureProtocol.verifySigned[IO, TestDataUpdate]
           result <- evaluator.inspect(signedWithMultipleProofs)
-        } yield result match {
-          case Right(validProofs) =>
-            expect(signedWithMultipleProofs.proofs.size == 3) &&
-            expect(validProofs.size == 3)
-          case Left(_) => failure("Valid signatures were incorrectly rejected")
-        }
+        } yield
+          result match {
+            case Right(validProofs) =>
+              expect(signedWithMultipleProofs.proofs.size == 3) &&
+              expect(validProofs.size == 3)
+            case Left(_) => failure("Valid signatures were incorrectly rejected")
+          }
       }
     }
   }
@@ -193,11 +200,12 @@ object SignatureProtocolSuite extends SimpleIOSuite with Checkers {
 
           evaluator = SignatureProtocol.verifySigned[IO, TestDataUpdate]
           result <- evaluator.inspect(signed3)
-        } yield result match {
-          case Right(validProofs) =>
-            expect(validProofs.size == 3)
-          case Left(_) => failure("Valid signatures were incorrectly rejected")
-        }
+        } yield
+          result match {
+            case Right(validProofs) =>
+              expect(validProofs.size == 3)
+            case Left(_) => failure("Valid signatures were incorrectly rejected")
+          }
       }
     }
   }

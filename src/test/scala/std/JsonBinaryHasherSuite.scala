@@ -10,7 +10,7 @@ import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher.HasherOps
 import io.constellationnetwork.metagraph_sdk.std.{JsonBinaryCodec, JsonBinaryHasher}
 import io.constellationnetwork.security.hash.Hash
 
-import io.circe.{parser, Decoder, Encoder, Json}
+import io.circe.{Decoder, Encoder, Json, parser}
 import shared.Generators._
 import shared.Models._
 import weaver.scalacheck.Checkers
@@ -58,16 +58,18 @@ object JsonBinaryHasherSuite extends SimpleIOSuite with Checkers {
 
   test("hashing should be deterministic") {
     forall { (testData: TestData) =>
-      hashTwice(testData).map { case (hash1, hash2) =>
-        expect(hash1 == hash2)
+      hashTwice(testData).map {
+        case (hash1, hash2) =>
+          expect(hash1 == hash2)
       }
     }
   }
 
   test("hashing should be deterministic for complex data") {
     forall { (testData: TestDataComplex) =>
-      hashTwice(testData).map { case (hash1, hash2) =>
-        expect(hash1 == hash2)
+      hashTwice(testData).map {
+        case (hash1, hash2) =>
+          expect(hash1 == hash2)
       }
     }
   }
@@ -77,8 +79,9 @@ object JsonBinaryHasherSuite extends SimpleIOSuite with Checkers {
       (for {
         hash1 <- data1.computeDigest
         hash2 <- data2.computeDigest
-      } yield (hash1, hash2)).map { case (hash1, hash2) =>
-        expect(data1 == data2 || hash1 != hash2)
+      } yield (hash1, hash2)).map {
+        case (hash1, hash2) =>
+          expect(data1 == data2 || hash1 != hash2)
       }
     }
   }
@@ -95,17 +98,19 @@ object JsonBinaryHasherSuite extends SimpleIOSuite with Checkers {
 
   test("hash should handle empty strings") {
     val emptyData = TestData("", 0)
-    hashTwice(emptyData).map { case (hash1, hash2) =>
-      expect(hash1 == hash2) &&
-      expect(hash1.toString.nonEmpty)
+    hashTwice(emptyData).map {
+      case (hash1, hash2) =>
+        expect(hash1 == hash2) &&
+        expect(hash1.toString.nonEmpty)
     }
   }
 
   test("hash should handle special characters") {
     val specialData = TestData("!@#$%^&*()", 123)
-    hashTwice(specialData).map { case (hash1, hash2) =>
-      expect(hash1 == hash2) &&
-      expect(hash1.toString.nonEmpty)
+    hashTwice(specialData).map {
+      case (hash1, hash2) =>
+        expect(hash1 == hash2) &&
+        expect(hash1.toString.nonEmpty)
     }
   }
 
@@ -127,8 +132,9 @@ object JsonBinaryHasherSuite extends SimpleIOSuite with Checkers {
 
   test("nested objects should produce consistent hashes") {
     forall { (testData: TestDataComplex) =>
-      hashTwice(testData).map { case (hash1, hash2) =>
-        expect(hash1 == hash2)
+      hashTwice(testData).map {
+        case (hash1, hash2) =>
+          expect(hash1 == hash2)
       }
     }
   }
@@ -145,16 +151,18 @@ object JsonBinaryHasherSuite extends SimpleIOSuite with Checkers {
 
         // Composition law
         composedHash     <- testData.computeDigest.map(f).map(g)
-        composedOnceHash <- testData.computeDigest.map(f andThen g)
-      } yield expect(normalHash == mappedHash) &&
-      expect(composedHash == composedOnceHash)
+        composedOnceHash <- testData.computeDigest.map(f.andThen(g))
+      } yield
+        expect(normalHash == mappedHash) &&
+        expect(composedHash == composedOnceHash)
     }
   }
 
   test("hash computation should complete within reasonable time") {
     forall { (testData: TestDataComplex) =>
-      Clock[IO].timed(testData.computeDigest).map { case (duration, _) =>
-        expect(duration < 1.second)
+      Clock[IO].timed(testData.computeDigest).map {
+        case (duration, _) =>
+          expect(duration < 1.second)
       }
     }
   }

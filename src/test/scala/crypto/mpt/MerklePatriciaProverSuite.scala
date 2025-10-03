@@ -18,13 +18,14 @@ object MerklePatriciaProverSuite extends SimpleIOSuite with Checkers {
   test("prover can produce an inclusion proof for a path in the trie") {
     forall(Gen.listOfN(32, Gen.long).flatMap { list =>
       Gen.choose(0, list.size - 1).map(index => (list, index))
-    }) { case (list, randomIndex) =>
-      for {
-        leafPairs <- list.traverse(el => el.computeDigest.map(_ -> el))
-        trie      <- MerklePatriciaTrie.make(leafPairs.toMap)
-        prover    <- MerklePatriciaProver.make(trie).pure[F]
-        proof     <- prover.attestDigest(leafPairs(randomIndex)._1).flatMap(IO.fromEither)
-      } yield expect(proof.witness.nonEmpty)
+    }) {
+      case (list, randomIndex) =>
+        for {
+          leafPairs <- list.traverse(el => el.computeDigest.map(_ -> el))
+          trie      <- MerklePatriciaTrie.make(leafPairs.toMap)
+          prover    <- MerklePatriciaProver.make(trie).pure[F]
+          proof     <- prover.attestDigest(leafPairs(randomIndex)._1).flatMap(IO.fromEither)
+        } yield expect(proof.witness.nonEmpty)
     }
   }
 

@@ -37,6 +37,8 @@ lazy val commonSettings = Seq(
 
 lazy val commonTestSettings = Seq(
   testFrameworks += new TestFramework("weaver.framework.CatsEffect"),
+  scalafmtOnCompile := true,
+  scalafixOnCompile := true,
   libraryDependencies ++= Seq(
     Libraries.weaverCats,
     Libraries.weaverDiscipline,

@@ -10,7 +10,7 @@ abstract class CombinerService[F[_]: Monad, TX <: DataUpdate, PUB <: DataOnChain
 
   def foldLeft(
     previous: DataState[PUB, PRV],
-    batch:    List[Signed[TX]]
+    batch: List[Signed[TX]]
   )(implicit ctx: L0NodeContext[F]): F[DataState[PUB, PRV]] =
     batch.foldLeftM(previous) { (acc, update) =>
       insert(acc, update)
@@ -18,6 +18,6 @@ abstract class CombinerService[F[_]: Monad, TX <: DataUpdate, PUB <: DataOnChain
 
   def insert(
     previous: DataState[PUB, PRV],
-    update:   Signed[TX]
+    update: Signed[TX]
   )(implicit ctx: L0NodeContext[F]): F[DataState[PUB, PRV]]
 }

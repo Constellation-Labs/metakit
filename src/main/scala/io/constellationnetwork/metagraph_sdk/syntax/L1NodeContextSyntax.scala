@@ -28,17 +28,15 @@ trait L1NodeContextSyntax {
         .value
 
     def getOnChainState[PUB <: DataOnChainState: Encoder: Decoder]: F[Either[DataApplicationValidationError, PUB]] =
-      EitherT(getLatestCurrencySnapshot)
-        .flatMapF { snapshot =>
-          snapshot.dataApplication
-            .toRight(L1Errors.L1CtxCouldNotGetLatestState: DataApplicationValidationError)
-            .traverse { part =>
-              part.onChainState
-                .fromBinary[PUB]
-                .map(_.leftMap(_ => L1Errors.L1CtxFailedToDecodeState: DataApplicationValidationError))
-            }
-        }
-        .value
+      EitherT(getLatestCurrencySnapshot).flatMapF { snapshot =>
+        snapshot.dataApplication
+          .toRight(L1Errors.L1CtxCouldNotGetLatestState: DataApplicationValidationError)
+          .traverse { part =>
+            part.onChainState
+              .fromBinary[PUB]
+              .map(_.leftMap(_ => L1Errors.L1CtxFailedToDecodeState: DataApplicationValidationError))
+          }
+      }.value
         .map(_.flatten)
 
     def getLatestCurrencySnapshot: F[Either[DataApplicationValidationError, CurrencyIncrementalSnapshot]] =

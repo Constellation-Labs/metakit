@@ -12,17 +12,17 @@ trait JsonLogicEvaluator[F[_]] {
   def evaluate(
     expr: JsonLogicExpression,
     data: JsonLogicValue,
-    ctx:  Option[JsonLogicValue]
+    ctx: Option[JsonLogicValue]
   ): F[JsonLogicValue]
 
   def evaluate(
     redex: (JsonLogicExpression, JsonLogicValue),
-    ctx:   Option[JsonLogicValue]
+    ctx: Option[JsonLogicValue]
   ): F[JsonLogicValue]
 
   def evaluateAll(
     redexList: List[(JsonLogicExpression, JsonLogicValue)],
-    ctx:       Option[JsonLogicValue]
+    ctx: Option[JsonLogicValue]
   ): F[List[JsonLogicValue]]
 }
 
@@ -37,7 +37,7 @@ object JsonLogicEvaluator {
     override def evaluate(
       expr: JsonLogicExpression,
       data: JsonLogicValue,
-      ctx:  Option[JsonLogicValue]
+      ctx: Option[JsonLogicValue]
     ): F[JsonLogicValue] = {
       lazy val evalFn: (JsonLogicExpression, Option[JsonLogicValue]) => F[Either[JsonLogicException, JsonLogicValue]] =
         (e, c) => strategy[F](e, c)(Monad[F], semantics)
@@ -53,16 +53,17 @@ object JsonLogicEvaluator {
 
     override def evaluate(
       redex: (JsonLogicExpression, JsonLogicValue),
-      ctx:   Option[JsonLogicValue] = None
+      ctx: Option[JsonLogicValue] = None
     ): F[JsonLogicValue] =
       evaluate(redex._1, redex._2, ctx)
 
     override def evaluateAll(
       redexList: List[(JsonLogicExpression, JsonLogicValue)],
-      ctx:       Option[JsonLogicValue] = None
+      ctx: Option[JsonLogicValue] = None
     ): F[List[JsonLogicValue]] =
-      redexList.traverse { case (expr, data) =>
-        evaluate(expr, data, ctx)
+      redexList.traverse {
+        case (expr, data) =>
+          evaluate(expr, data, ctx)
       }
   }
 
@@ -81,7 +82,7 @@ object JsonLogicEvaluator {
       override def evaluate(
         expr: JsonLogicExpression,
         data: JsonLogicValue,
-        ctx:  Option[JsonLogicValue]
+        ctx: Option[JsonLogicValue]
       ): F[JsonLogicValue] =
         for {
           _      <- logger(s"Evaluating expression: $expr")
@@ -91,16 +92,17 @@ object JsonLogicEvaluator {
 
       override def evaluate(
         redex: (JsonLogicExpression, JsonLogicValue),
-        ctx:   Option[JsonLogicValue] = None
+        ctx: Option[JsonLogicValue] = None
       ): F[JsonLogicValue] =
         evaluate(redex._1, redex._2, ctx)
 
       override def evaluateAll(
         redexList: List[(JsonLogicExpression, JsonLogicValue)],
-        ctx:       Option[JsonLogicValue] = None
+        ctx: Option[JsonLogicValue] = None
       ): F[List[JsonLogicValue]] =
-        redexList.traverse { case (expr, data) =>
-          evaluate(expr, data, ctx)
+        redexList.traverse {
+          case (expr, data) =>
+            evaluate(expr, data, ctx)
         }
     }
   }
