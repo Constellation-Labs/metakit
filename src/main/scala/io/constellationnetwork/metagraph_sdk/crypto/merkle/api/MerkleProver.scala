@@ -8,10 +8,7 @@ import cats.syntax.functor._
 import scala.annotation.tailrec
 
 import io.constellationnetwork.metagraph_sdk.crypto.merkle.MerkleInclusionProof.Side
-import io.constellationnetwork.metagraph_sdk.crypto.merkle.impl.CollectionMerkleProver
 import io.constellationnetwork.metagraph_sdk.crypto.merkle.{MerkleInclusionProof, MerkleNode, MerkleTree}
-import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher
-import io.constellationnetwork.metagraph_sdk.storage.CollectionReader
 import io.constellationnetwork.security.hash.Hash
 
 /**
@@ -66,8 +63,6 @@ object MerkleProver {
         proofByIndex(index)
 
       private def proofByIndex(index: Int): F[Either[MerkleProofError, MerkleInclusionProof]] = {
-        if (index < 0 || index >= tree.leafDigestIndex.size)
-          return InvalidLeafIndex(index, tree.leafDigestIndex.size).asLeft[MerkleInclusionProof].pure[F].widen
 
         @tailrec
         def countLeaves(nodes: List[MerkleNode], acc: Int = 0): Int =
@@ -84,10 +79,10 @@ object MerkleProver {
 
         @tailrec
         def findPath(
-          node:       MerkleNode,
-          targetIdx:  Int,
+          node: MerkleNode,
+          targetIdx: Int,
           currentIdx: Int,
-          acc:        List[(Hash, Side)]
+          acc: List[(Hash, Side)]
         ): Option[(MerkleNode.Leaf, List[(Hash, Side)])] =
           node match {
             case n: MerkleNode.Leaf =>
@@ -122,38 +117,29 @@ object MerkleProver {
               }
           }
 
-        findPath(tree.rootNode, index, 0, List.empty) match {
-          case Some((leaf, witness)) =>
-            MerkleInclusionProof(leaf.digest, witness).asRight[MerkleProofError].pure[F]
-          case None =>
-            // Could be invalid index or malformed tree structure
-            MalformedTreeStructure(s"Failed to generate proof for index $index. Tree may be corrupted or unbalanced.")
-              .asLeft[MerkleInclusionProof]
-              .pure[F]
-              .widen[Either[MerkleProofError, MerkleInclusionProof]]
+        if (index < 0 || index >= tree.leafDigestIndex.size) {
+          InvalidLeafIndex(index, tree.leafDigestIndex.size).asLeft[MerkleInclusionProof].pure[F].widen
+        } else {
+          findPath(tree.rootNode, index, 0, List.empty) match {
+            case Some((leaf, witness)) =>
+              MerkleInclusionProof(leaf.digest, witness).asRight[MerkleProofError].pure[F]
+            case None =>
+              // Could be invalid index or malformed tree structure
+              MalformedTreeStructure(s"Failed to generate proof for index $index. Tree may be corrupted or unbalanced.")
+                .asLeft[MerkleInclusionProof]
+                .pure[F]
+                .widen[Either[MerkleProofError, MerkleInclusionProof]]
+          }
         }
       }
     }
-
-  /**
-   * Create a storage-backed prover that rebuilds the tree for each proof.
-   *
-   * Use this for independent proof generation services that only read from storage.
-   *
-   * @param leavesStore Storage containing the leaf nodes
-   * @return A prover that generates proofs from storage
-   */
-  def fromStorage[F[_]: MonadThrow: JsonBinaryHasher](
-    leavesStore: CollectionReader[F, Int, MerkleNode.Leaf]
-  ): MerkleProver[F] =
-    CollectionMerkleProver.make(leavesStore)
 
   /**
    * Provides syntax extensions for more ergonomic proof generation*
    */
   object syntax {
 
-    implicit class MerkleLeafOps(val leaf: MerkleNode.Leaf) extends AnyVal {
+    implicit class MerkleLeafOps(private val leaf: MerkleNode.Leaf) extends AnyVal {
 
       /**
        * Generate a proof that this leaf exists in the tree
@@ -164,7 +150,7 @@ object MerkleProver {
         P.attestLeaf(leaf)
     }
 
-    implicit class MerkleDigestOps(val digest: Hash) extends AnyVal {
+    implicit class MerkleDigestOps(private val digest: Hash) extends AnyVal {
 
       /**
        * Generate a proof that this digest exists as a leaf in the tree

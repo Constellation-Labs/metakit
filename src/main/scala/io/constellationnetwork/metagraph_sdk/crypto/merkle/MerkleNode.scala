@@ -48,7 +48,7 @@ object MerkleNode {
   object Internal {
 
     def apply[F[_]: MonadThrow: JsonBinaryHasher](
-      left:  MerkleNode,
+      left: MerkleNode,
       right: Option[MerkleNode]
     ): F[Internal] = for {
       leftDigest  <- left.digest.pure[F]

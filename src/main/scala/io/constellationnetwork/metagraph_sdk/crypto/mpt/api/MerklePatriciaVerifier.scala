@@ -33,7 +33,7 @@ object MerklePatriciaVerifier {
         type Return = Either[MerklePatriciaVerificationError, Unit]
 
         def verifyLeaf(
-          nodeCommit:    MerklePatriciaCommitment.Leaf,
+          nodeCommit: MerklePatriciaCommitment.Leaf,
           currentDigest: Hash,
           remainingPath: Seq[Nibble]
         ): F[Either[Continue, Return]] =
@@ -44,13 +44,11 @@ object MerklePatriciaVerifier {
                 ().asRight[MerklePatriciaVerificationError].asRight[Continue]
               else InvalidNodeCommitment("Invalid leaf commitment or path mismatch").asLeft[Unit].asRight[Continue]
             }
-            .handleError(e =>
-              InvalidNodeCommitment(s"Hash computation error: ${e.getMessage}").asLeft[Unit].asRight[Continue]
-            )
+            .handleError(e => InvalidNodeCommitment(s"Hash computation error: ${e.getMessage}").asLeft[Unit].asRight[Continue])
 
         def verifyExtension(
-          nodeCommit:    MerklePatriciaCommitment.Extension,
-          tail:          List[MerklePatriciaCommitment],
+          nodeCommit: MerklePatriciaCommitment.Extension,
+          tail: List[MerklePatriciaCommitment],
           currentDigest: Hash,
           remainingPath: Seq[Nibble]
         ): F[Either[Continue, Return]] =
@@ -61,13 +59,11 @@ object MerklePatriciaVerifier {
                 (tail, nodeCommit.childDigest, remainingPath.drop(nodeCommit.shared.length)).asLeft[Return]
               else InvalidNodeCommitment("Invalid extension commitment").asLeft[Unit].asRight[Continue]
             }
-            .handleError(e =>
-              InvalidNodeCommitment(s"Hash computation error: ${e.getMessage}").asLeft[Unit].asRight[Continue]
-            )
+            .handleError(e => InvalidNodeCommitment(s"Hash computation error: ${e.getMessage}").asLeft[Unit].asRight[Continue])
 
         def verifyBranch(
-          nodeCommit:    MerklePatriciaCommitment.Branch,
-          tail:          List[MerklePatriciaCommitment],
+          nodeCommit: MerklePatriciaCommitment.Branch,
+          tail: List[MerklePatriciaCommitment],
           currentDigest: Hash,
           remainingPath: Seq[Nibble]
         ): F[Either[Continue, Return]] =
@@ -81,9 +77,7 @@ object MerklePatriciaVerifier {
                   else
                     InvalidNodeCommitment("Invalid branch commitment").asLeft[Unit].asRight[Continue]
                 }
-                .handleError(e =>
-                  InvalidNodeCommitment(s"Hash computation error: ${e.getMessage}").asLeft[Unit].asRight[Continue]
-                )
+                .handleError(e => InvalidNodeCommitment(s"Hash computation error: ${e.getMessage}").asLeft[Unit].asRight[Continue])
 
             case None =>
               MonadThrow[F].pure(
@@ -121,7 +115,7 @@ object MerklePatriciaVerifier {
    */
   object syntax {
 
-    implicit class MerklePatriciaProofOps(val proof: MerklePatriciaInclusionProof) extends AnyVal {
+    implicit class MerklePatriciaProofOps(private val proof: MerklePatriciaInclusionProof) extends AnyVal {
 
       /**
        * Confirm this proof is valid

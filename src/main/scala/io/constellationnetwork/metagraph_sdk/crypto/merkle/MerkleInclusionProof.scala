@@ -20,7 +20,7 @@ case class InvalidSide(value: Byte) extends MerkleProofError
  */
 final case class MerkleInclusionProof private (
   leafDigest: Hash,
-  witness:    Seq[(Hash, MerkleInclusionProof.Side)]
+  witness: Seq[(Hash, MerkleInclusionProof.Side)]
 )
 
 object MerkleInclusionProof {
@@ -43,7 +43,7 @@ object MerkleInclusionProof {
    */
   def create(
     leafDigest: Hash,
-    witness:    Seq[(Hash, Side)]
+    witness: Seq[(Hash, Side)]
   ): Validated[MerkleProofError, MerkleInclusionProof] =
     if (witness.isEmpty) {
       Validated.invalid(InvalidWitness("Witness path cannot be empty"))
@@ -71,11 +71,12 @@ object MerkleInclusionProof {
   implicit val proofEncoder: Encoder[MerkleInclusionProof] = (mp: MerkleInclusionProof) =>
     Json.obj(
       "leafDigest" -> mp.leafDigest.asJson,
-      "witness" -> mp.witness.map { case (digest, side) =>
-        Json.obj(
-          "digest" -> digest.asJson,
-          "side"   -> side.asJson
-        )
+      "witness" -> mp.witness.map {
+        case (digest, side) =>
+          Json.obj(
+            "digest" -> digest.asJson,
+            "side"   -> side.asJson
+          )
       }.asJson
     )
 
@@ -83,6 +84,6 @@ object MerkleInclusionProof {
     for {
       leafDigest <- c.downField("leafDigest").as[Hash]
       witness    <- c.downField("witness").as[Seq[(Hash, Side)]]
-      proof <- create(leafDigest, witness).toEither.leftMap(err => DecodingFailure(s"Invalid proof: $err", c.history))
+      proof      <- create(leafDigest, witness).toEither.leftMap(err => DecodingFailure(s"Invalid proof: $err", c.history))
     } yield proof
 }

@@ -6,7 +6,7 @@ import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder, HCursor, Json}
 
 final case class MerklePatriciaInclusionProof(
-  path:    Hash,
+  path: Hash,
   witness: List[MerklePatriciaCommitment]
 )
 

@@ -2,105 +2,69 @@ package io.constellationnetwork.metagraph_sdk.crypto.merkle.api
 
 import java.nio.file.Path
 
-import cats.effect.{Ref, Resource, Sync}
+import cats.MonadThrow
+import cats.effect.{Async, Resource, Sync}
 import cats.syntax.all._
 
-import io.constellationnetwork.metagraph_sdk.crypto.merkle.impl.{
-  InMemoryMerkleProducer,
-  LevelDbMerkleProducer,
-  SimpleMerkleProducer
-}
+import io.constellationnetwork.metagraph_sdk.crypto.merkle.impl.{InMemoryMerkleProducer, LevelDbMerkleProducer, StatelessMerkleProducer}
 import io.constellationnetwork.metagraph_sdk.crypto.merkle.{MerkleNode, MerkleTree}
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher
 
-/**
- * Type class for building and modifying Merkle trees
- */
 trait MerkleProducer[F[_]] {
+  def create(leaves: List[MerkleNode.Leaf]): F[MerkleTree]
 
-  /**
-   * Get current leaves in the tree
-   *
-   * @return List of leaf nodes
-   */
+  def append(
+    current: MerkleTree,
+    leaves: List[MerkleNode.Leaf]
+  ): F[MerkleTree]
+
+  def prepend(
+    current: MerkleTree,
+    leaves: List[MerkleNode.Leaf]
+  ): F[MerkleTree]
+
+  def update(
+    current: MerkleTree,
+    index: Int,
+    leaf: MerkleNode.Leaf
+  ): F[Either[MerkleProducerError, MerkleTree]]
+
+  def remove(
+    current: MerkleTree,
+    index: Int
+  ): F[Either[MerkleProducerError, MerkleTree]]
+
+  def getProver(tree: MerkleTree): F[MerkleProver[F]]
+}
+
+trait StatefulMerkleProducer[F[_]] {
   def leaves: F[List[MerkleNode.Leaf]]
-
-  /**
-   * Build a Merkle tree from current leaves
-   *
-   * @return Built Merkle tree or error
-   */
   def build: F[Either[TreeBuildError, MerkleTree]]
-
-  /**
-   * Update a leaf at a specific index
-   *
-   * @param index Index to update
-   * @param leaf New leaf node
-   * @return Unit if successful, error if index invalid
-   */
   def update(index: Int, leaf: MerkleNode.Leaf): F[Either[MerkleProducerError, Unit]]
-
-  /**
-   * Append leaves to the end of the tree
-   *
-   * @param leaves Leaves to append
-   */
   def append(leaves: List[MerkleNode.Leaf]): F[Unit]
-
-  /**
-   * Prepend leaves to the start of the tree
-   *
-   * @param leaves Leaves to prepend
-   */
   def prepend(leaves: List[MerkleNode.Leaf]): F[Unit]
-
-  /**
-   * Remove a leaf at a specific index
-   *
-   * @param index Index to remove
-   * @return Unit if successful, error if index invalid
-   */
   def remove(index: Int): F[Either[MerkleProducerError, Unit]]
+  def getProver: F[MerkleProver[F]]
 }
 
 object MerkleProducer {
   def apply[F[_]](implicit producer: MerkleProducer[F]): MerkleProducer[F] = producer
 
-  /**
-   * Create an in-memory cached producer instance
-   *
-   * @param initial Initial leaf nodes
-   * @return Producer with in-memory caching
-   */
-  def make[F[_]: Sync: JsonBinaryHasher](
-    initial: List[MerkleNode.Leaf]
-  ): F[MerkleProducer[F]] =
-    inMemory(initial)
+  def make[F[_]: JsonBinaryHasher: MonadThrow]: MerkleProducer[F] = stateless[F]
+
+  def stateless[F[_]: JsonBinaryHasher: MonadThrow]: MerkleProducer[F] =
+    new StatelessMerkleProducer[F]
 
   /**
-   * Create a simple producer instance
+   * Create an in-memory producer with caching support
    *
-   * @param initial Initial leaf nodes
-   * @return Simple producer without caching
-   */
-  def simple[F[_]: Sync: JsonBinaryHasher](
-    initial: List[MerkleNode.Leaf]
-  ): F[MerkleProducer[F]] =
-    Ref
-      .of[F, Vector[MerkleNode.Leaf]](Vector.from(initial))
-      .map(new SimpleMerkleProducer[F](_))
-
-  /**
-   * Create an in-memory cached producer instance
-   *
-   * @param initial Initial leaf nodes
-   * @return Producer with in-memory caching
+   * @param initial Initial leaves
+   * @return Producer with in-memory storage and caching
    */
   def inMemory[F[_]: Sync: JsonBinaryHasher](
-    initial: List[MerkleNode.Leaf]
-  ): F[MerkleProducer[F]] =
-    InMemoryMerkleProducer.make[F](initial).widen
+    initial: List[MerkleNode.Leaf] = List.empty
+  ): F[StatefulMerkleProducer[F]] =
+    InMemoryMerkleProducer.make[F](initial).widen[StatefulMerkleProducer[F]]
 
   /**
    * Create a LevelDB-backed persistent producer instance
@@ -109,11 +73,11 @@ object MerkleProducer {
    * @param initial Initial leaf nodes (only used if database is empty)
    * @return Producer with persistent storage
    */
-  def levelDb[F[_]: Sync: JsonBinaryHasher](
-    dbPath:  Path,
+  def levelDb[F[_]: Async: JsonBinaryHasher](
+    dbPath: Path,
     initial: List[MerkleNode.Leaf] = List.empty
-  ): Resource[F, LevelDbMerkleProducer[F]] =
-    LevelDbMerkleProducer.make(dbPath, initial)
+  ): Resource[F, StatefulMerkleProducer[F]] =
+    LevelDbMerkleProducer.make[F](dbPath, initial).widen[StatefulMerkleProducer[F]]
 
   /**
    * Load an existing LevelDB-backed producer instance
@@ -121,29 +85,10 @@ object MerkleProducer {
    * @param dbPath Path to the existing LevelDB database directory
    * @return Producer connected to existing persistent storage
    */
-  def loadLevelDb[F[_]: Sync: JsonBinaryHasher](
+  def loadLevelDb[F[_]: Async: JsonBinaryHasher](
     dbPath: Path
-  ): Resource[F, LevelDbMerkleProducer[F]] =
-    LevelDbMerkleProducer.load(dbPath)
-
-  /**
-   * Provides syntax extensions for more ergonomic tree building
-   *
-   * Import xyz.kd5ujc.accumulators.merkle.api.MerkleProducer.syntax._ to use these extensions
-   */
-  object syntax {
-
-    implicit class MerkleLeafOps(val leaves: List[MerkleNode.Leaf]) extends AnyVal {
-
-      /**
-       * Build a new Merkle tree from these leaves
-       *
-       * @return Built Merkle tree
-       */
-      def buildTree[F[_]: Sync: JsonBinaryHasher]: F[Either[TreeBuildError, MerkleTree]] =
-        make[F](leaves).flatMap(_.build)
-    }
-  }
+  ): Resource[F, StatefulMerkleProducer[F]] =
+    LevelDbMerkleProducer.load[F](dbPath).widen[StatefulMerkleProducer[F]]
 }
 
 sealed trait MerkleProducerError extends Throwable

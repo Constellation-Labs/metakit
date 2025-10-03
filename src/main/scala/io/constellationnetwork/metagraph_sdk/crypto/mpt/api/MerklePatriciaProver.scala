@@ -45,9 +45,7 @@ object MerklePatriciaProver {
                     .map(dataDigest => MerklePatriciaCommitment.Leaf(leaf.remaining, dataDigest) :: acc)
                     .map(commitments => commitments.asRight[MerklePatriciaProofError])
                     .map(_.asRight[Continue])
-                    .handleError(e =>
-                      ProofGenerationError(e.getMessage).asLeft[List[MerklePatriciaCommitment]].asRight[Continue]
-                    )
+                    .handleError(e => ProofGenerationError(e.getMessage).asLeft[List[MerklePatriciaCommitment]].asRight[Continue])
 
                 case extension: MerklePatriciaNode.Extension if remainingPath.startsWith(extension.shared) =>
                   MonadThrow[F].pure(
@@ -99,16 +97,14 @@ object MerklePatriciaProver {
    */
   object syntax {
 
-    implicit class MerklePatriciaDigestOps(val digest: Hash) extends AnyVal {
+    implicit class MerklePatriciaDigestOps(private val digest: Hash) extends AnyVal {
 
       /**
        * Generate a proof that this digest exists in the trie
        *
        * @return A proof of inclusion if the digest exists
        */
-      def attestInclusion[F[_]](implicit
-        P: MerklePatriciaProver[F]
-      ): F[Either[MerklePatriciaProofError, MerklePatriciaInclusionProof]] =
+      def attestInclusion[F[_]](implicit P: MerklePatriciaProver[F]): F[Either[MerklePatriciaProofError, MerklePatriciaInclusionProof]] =
         P.attestDigest(digest)
     }
   }

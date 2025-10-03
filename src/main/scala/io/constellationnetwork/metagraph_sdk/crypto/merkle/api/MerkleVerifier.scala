@@ -71,7 +71,7 @@ object MerkleVerifier {
    */
   object syntax {
 
-    implicit class MerkleVerifierOps(val proof: MerkleInclusionProof) extends AnyVal {
+    implicit class MerkleVerifierOps(private val proof: MerkleInclusionProof) extends AnyVal {
 
       /**
        * Confirm this proof is valid
@@ -82,7 +82,7 @@ object MerkleVerifier {
         V.confirm(proof)
     }
 
-    implicit class MerkleLeafOps(val leaf: MerkleNode.Leaf) extends AnyVal {
+    implicit class MerkleLeafOps(private val leaf: MerkleNode.Leaf) extends AnyVal {
 
       /**
        * Confirm this leaf exists in the tree

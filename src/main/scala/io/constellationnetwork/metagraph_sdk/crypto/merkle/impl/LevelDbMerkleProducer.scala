@@ -2,7 +2,7 @@ package io.constellationnetwork.metagraph_sdk.crypto.merkle.impl
 
 import java.nio.file.Path
 
-import cats.effect.{Ref, Resource, Sync}
+import cats.effect.{Async, Ref, Resource, Sync}
 import cats.syntax.all._
 
 import io.constellationnetwork.metagraph_sdk.crypto.merkle.api._
@@ -13,8 +13,8 @@ import io.constellationnetwork.metagraph_sdk.storage.impl.LevelDbCollection
 
 class LevelDbMerkleProducer[F[_]: Sync: JsonBinaryHasher](
   val leavesStore: Collection[F, Int, MerkleNode.Leaf],
-  stateRef:        Ref[F, LevelDbMerkleProducer.ProducerState]
-) extends MerkleProducer[F] {
+  stateRef: Ref[F, LevelDbMerkleProducer.ProducerState]
+) extends StatefulMerkleProducer[F] {
 
   /**
    * Get a prover using the current built tree if available.
@@ -39,8 +39,9 @@ class LevelDbMerkleProducer[F[_]: Sync: JsonBinaryHasher](
       val indices = (0 until state.leafCount).toList
       leavesStore
         .getBatch(indices)
-        .map(_.collect { case (_, Some(leaf)) =>
-          leaf
+        .map(_.collect {
+          case (_, Some(leaf)) =>
+            leaf
         })
     }
 
@@ -120,8 +121,9 @@ class LevelDbMerkleProducer[F[_]: Sync: JsonBinaryHasher](
           // Get all leaves after the removed index in a single batch
           leavesAfter <- leavesStore.getBatch(indicesToShift)
           // Prepare shifted leaves with new indices
-          shiftedLeaves = leavesAfter.collect { case (oldIdx, Some(leaf)) =>
-            (oldIdx - 1, leaf)
+          shiftedLeaves = leavesAfter.collect {
+            case (oldIdx, Some(leaf)) =>
+              (oldIdx - 1, leaf)
           }
           // Remove all old positions (including the target and positions that will shift)
           _ <- leavesStore.removeBatch(index :: indicesToShift)
@@ -149,13 +151,13 @@ class LevelDbMerkleProducer[F[_]: Sync: JsonBinaryHasher](
 object LevelDbMerkleProducer {
 
   case class ProducerState(
-    leafCount:    Int,
+    leafCount: Int,
     dirtyIndices: Set[Int],
-    currentRoot:  Option[MerkleTree]
+    currentRoot: Option[MerkleTree]
   )
 
-  def make[F[_]: Sync: JsonBinaryHasher](
-    dbPath:  Path,
+  def make[F[_]: Async: JsonBinaryHasher](
+    dbPath: Path,
     initial: List[MerkleNode.Leaf] = List.empty
   ): Resource[F, LevelDbMerkleProducer[F]] = for {
     leavesStore <- LevelDbCollection.make[F, Int, MerkleNode.Leaf](dbPath.resolve("leaves"))
@@ -188,7 +190,7 @@ object LevelDbMerkleProducer {
    * Load an existing LevelDB database without initializing
    * Fails if the database doesn't exist or is empty
    */
-  def load[F[_]: Sync: JsonBinaryHasher](
+  def load[F[_]: Async: JsonBinaryHasher](
     dbPath: Path
   ): Resource[F, LevelDbMerkleProducer[F]] = for {
     leavesStore <- LevelDbCollection.make[F, Int, MerkleNode.Leaf](dbPath.resolve("leaves"))

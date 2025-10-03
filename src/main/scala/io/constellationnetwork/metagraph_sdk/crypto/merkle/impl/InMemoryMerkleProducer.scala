@@ -15,8 +15,8 @@ import io.constellationnetwork.security.hash.Hash
  */
 class InMemoryMerkleProducer[F[_]: Sync: JsonBinaryHasher](
   stateRef: Ref[F, InMemoryMerkleProducer.ProducerState],
-  config:   InMemoryMerkleProducer.Config
-) extends MerkleProducer[F] {
+  config: InMemoryMerkleProducer.Config
+) extends StatefulMerkleProducer[F] {
 
   def leaves: F[List[MerkleNode.Leaf]] =
     stateRef.get.map(_.leaves.toList)
@@ -56,15 +56,14 @@ class InMemoryMerkleProducer[F[_]: Sync: JsonBinaryHasher](
       if (index < 0 || index >= state.leaves.size) {
         InvalidIndex(index, state.leaves.size).asLeft[Unit].pure[F].widen
       } else {
-        stateRef
-          .update { s =>
-            s.copy(
-              leaves = s.leaves.updated(index, leaf),
-              version = s.version + 1,
-              cachedTree = None, // Invalidate cache
-              dirtyIndices = s.dirtyIndices + index
-            )
-          }
+        stateRef.update { s =>
+          s.copy(
+            leaves = s.leaves.updated(index, leaf),
+            version = s.version + 1,
+            cachedTree = None, // Invalidate cache
+            dirtyIndices = s.dirtyIndices + index
+          )
+        }
           .map(_.asRight[MerkleProducerError])
       }
     }
@@ -103,34 +102,34 @@ class InMemoryMerkleProducer[F[_]: Sync: JsonBinaryHasher](
       if (index < 0 || index >= state.leaves.size) {
         InvalidIndex(index, state.leaves.size).asLeft[Unit].pure[F].widen
       } else {
-        stateRef
-          .update { s =>
-            // Remove shifts all subsequent indices
-            val affectedIndices = (index until s.leaves.size).toSet
+        stateRef.update { s =>
+          // Remove shifts all subsequent indices
+          val affectedIndices = (index until s.leaves.size).toSet
 
-            s.copy(
-              leaves = s.leaves.patch(index, Vector(), 1),
-              version = s.version + 1,
-              cachedTree = None,
-              dirtyIndices = if (config.trackDirtyIndices && affectedIndices.size < config.dirtyThreshold) {
-                affectedIndices
-              } else {
-                Set.empty // Too many affected indices, clear tracking
-              },
-              pathCache = {
-                // Remove invalidated paths from cache
-                val newCache = mutable.LinkedHashMap.empty[Int, InMemoryMerkleProducer.PathInfo]
-                s.pathCache.foreach { case (idx, path) =>
+          s.copy(
+            leaves = s.leaves.patch(index, Vector(), 1),
+            version = s.version + 1,
+            cachedTree = None,
+            dirtyIndices = if (config.trackDirtyIndices && affectedIndices.size < config.dirtyThreshold) {
+              affectedIndices
+            } else {
+              Set.empty // Too many affected indices, clear tracking
+            },
+            pathCache = {
+              // Remove invalidated paths from cache
+              val newCache = mutable.LinkedHashMap.empty[Int, InMemoryMerkleProducer.PathInfo]
+              s.pathCache.foreach {
+                case (idx, path) =>
                   if (idx < index) {
                     newCache(idx) = path // Keep paths before removed index
                   } else if (idx > index) {
                     newCache(idx - 1) = path // Shift paths after removed index
                   }
-                }
-                newCache
               }
-            )
-          }
+              newCache
+            }
+          )
+        }
           .map(_.asRight[MerkleProducerError])
       }
     }
@@ -142,19 +141,20 @@ class InMemoryMerkleProducer[F[_]: Sync: JsonBinaryHasher](
     }
 
   private def buildPathCache(
-    tree:     MerkleTree,
+    tree: MerkleTree,
     maxPaths: Int
   ): mutable.LinkedHashMap[Int, InMemoryMerkleProducer.PathInfo] = {
     val cache = mutable.LinkedHashMap.empty[Int, InMemoryMerkleProducer.PathInfo]
 
     // Cache paths for first N leaves (could be made smarter with access patterns)
-    tree.leafDigestIndex.take(maxPaths).foreach { case (digest, index) =>
-      // In a real implementation, we'd extract the actual path here
-      cache(index) = InMemoryMerkleProducer.PathInfo(
-        leafIndex = index,
-        leafDigest = digest,
-        pathToRoot = List.empty // Would be populated with actual path
-      )
+    tree.leafDigestIndex.take(maxPaths).foreach {
+      case (digest, index) =>
+        // In a real implementation, we'd extract the actual path here
+        cache(index) = InMemoryMerkleProducer.PathInfo(
+          leafIndex = index,
+          leafDigest = digest,
+          pathToRoot = List.empty // Would be populated with actual path
+        )
     }
 
     cache
@@ -165,29 +165,29 @@ object InMemoryMerkleProducer {
 
   case class Config(
     maxTreeSizeToCache: Int = 10000, // Don't cache trees larger than this
-    maxCachedPaths:     Int = 100, // Maximum number of paths to cache
-    enablePathCache:    Boolean = true, // Enable path caching
-    trackDirtyIndices:  Boolean = true, // Track which indices are dirty
-    dirtyThreshold:     Int = 1000 // Stop tracking if too many indices are dirty
+    maxCachedPaths: Int = 100, // Maximum number of paths to cache
+    enablePathCache: Boolean = true, // Enable path caching
+    trackDirtyIndices: Boolean = true, // Track which indices are dirty
+    dirtyThreshold: Int = 1000 // Stop tracking if too many indices are dirty
   )
 
   case class PathInfo(
-    leafIndex:  Int,
+    leafIndex: Int,
     leafDigest: Hash,
     pathToRoot: List[Hash]
   )
 
   case class ProducerState(
-    leaves:       Vector[MerkleNode.Leaf],
-    version:      Long, // Incremented on each modification
-    cachedTree:   Option[(Long, MerkleTree)], // (version, tree) tuple
+    leaves: Vector[MerkleNode.Leaf],
+    version: Long, // Incremented on each modification
+    cachedTree: Option[(Long, MerkleTree)], // (version, tree) tuple
     dirtyIndices: Set[Int], // Indices modified since last build
-    pathCache:    mutable.LinkedHashMap[Int, PathInfo] // LRU cache of paths
+    pathCache: mutable.LinkedHashMap[Int, PathInfo] // LRU cache of paths
   )
 
   def make[F[_]: Sync: JsonBinaryHasher](
     initialLeaves: List[MerkleNode.Leaf] = List.empty,
-    config:        Config = Config()
+    config: Config = Config()
   ): F[InMemoryMerkleProducer[F]] = {
     val initialState = ProducerState(
       leaves = Vector.from(initialLeaves),

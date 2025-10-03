@@ -33,11 +33,12 @@ class StatelessMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
           initialNode <- MerklePatriciaNode.Leaf[F](Nibble(hPath), hData.asJson)
           sortedTail = nel.tail.sortBy(_._1.value.length)
 
-          resultNode <- sortedTail.foldM[F, MerklePatriciaNode](initialNode) { case (acc, (path, value)) =>
-            insertEncoded(acc, Nibble(path), value.asJson).flatMap {
-              case Left(err)    => err.raiseError[F, MerklePatriciaNode]
-              case Right(value) => value.pure[F]
-            }
+          resultNode <- sortedTail.foldM[F, MerklePatriciaNode](initialNode) {
+            case (acc, (path, value)) =>
+              insertEncoded(acc, Nibble(path), value.asJson).flatMap {
+                case Left(err)    => err.raiseError[F, MerklePatriciaNode]
+                case Right(value) => value.pure[F]
+              }
           }
         } yield MerklePatriciaTrie(resultNode)
 
@@ -46,7 +47,7 @@ class StatelessMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
 
   def insert[A: Encoder](
     current: MerklePatriciaTrie,
-    data:    Map[Hash, A]
+    data: Map[Hash, A]
   ): F[Either[MerklePatriciaError, MerklePatriciaTrie]] =
     if (data.isEmpty) {
       current.asRight[MerklePatriciaError].pure[F]
@@ -67,7 +68,7 @@ class StatelessMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
 
   private def insertMultiple[A: Encoder](
     initialNode: MerklePatriciaNode,
-    entries:     List[(Hash, A)]
+    entries: List[(Hash, A)]
   ): F[Either[MerklePatriciaError, MerklePatriciaNode]] =
     entries.foldM(initialNode.asRight[MerklePatriciaError]) {
       case (Right(acc), (path, value)) =>
@@ -78,7 +79,7 @@ class StatelessMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
 
   private def removeMultiple(
     initialNode: MerklePatriciaNode,
-    paths:       List[Hash]
+    paths: List[Hash]
   ): F[Either[MerklePatriciaError, MerklePatriciaNode]] =
     paths.foldM(initialNode.asRight[MerklePatriciaError]) {
       case (Right(acc), path) =>
@@ -90,20 +91,20 @@ class StatelessMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
   sealed private trait InsertState
 
   private case class InsertContinue(
-    currentNode:  MerklePatriciaNode,
-    key:          Seq[Nibble],
+    currentNode: MerklePatriciaNode,
+    key: Seq[Nibble],
     updateParent: MerklePatriciaNode => F[Either[MerklePatriciaError, MerklePatriciaNode]]
   ) extends InsertState
   private case class InsertDone(node: Either[MerklePatriciaError, MerklePatriciaNode]) extends InsertState
 
   private def insertEncoded(
     currentNode: MerklePatriciaNode,
-    path:        Seq[Nibble],
-    data:        Json
+    path: Seq[Nibble],
+    data: Json
   ): F[Either[MerklePatriciaError, MerklePatriciaNode]] = {
     def insertForLeafNode(
-      leafNode:     MerklePatriciaNode.Leaf,
-      _key:         Seq[Nibble],
+      leafNode: MerklePatriciaNode.Leaf,
+      _key: Seq[Nibble],
       updateParent: MerklePatriciaNode => F[Either[MerklePatriciaError, MerklePatriciaNode]]
     ): F[Either[InsertState, Either[MerklePatriciaError, MerklePatriciaNode]]] =
       if (leafNode.remaining == _key) {
@@ -136,8 +137,8 @@ class StatelessMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
 
     def insertForExtensionNode(
       extensionNode: MerklePatriciaNode.Extension,
-      _key:          Seq[Nibble],
-      updateParent:  MerklePatriciaNode => F[Either[MerklePatriciaError, MerklePatriciaNode]]
+      _key: Seq[Nibble],
+      updateParent: MerklePatriciaNode => F[Either[MerklePatriciaError, MerklePatriciaNode]]
     ): F[Either[InsertState, Either[MerklePatriciaError, MerklePatriciaNode]]] = {
       val commonPrefix = Nibble.commonPrefix(extensionNode.shared, _key)
       val sharedRemaining = extensionNode.shared.drop(commonPrefix.length)
@@ -186,8 +187,8 @@ class StatelessMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
     }
 
     def insertForBranchNode(
-      branchNode:   MerklePatriciaNode.Branch,
-      _key:         Seq[Nibble],
+      branchNode: MerklePatriciaNode.Branch,
+      _key: Seq[Nibble],
       updateParent: MerklePatriciaNode => F[Either[MerklePatriciaError, MerklePatriciaNode]]
     ): F[Either[InsertState, Either[MerklePatriciaError, MerklePatriciaNode]]] =
       if (_key.isEmpty) {
@@ -245,19 +246,19 @@ class StatelessMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
   sealed private trait RemoveState
 
   private case class RemoveContinue(
-    currentNode:  MerklePatriciaNode,
-    key:          Seq[Nibble],
+    currentNode: MerklePatriciaNode,
+    key: Seq[Nibble],
     updateParent: Option[MerklePatriciaNode] => F[Either[MerklePatriciaError, Option[MerklePatriciaNode]]]
   ) extends RemoveState
   private case class RemoveDone(nodeOpt: Either[MerklePatriciaError, Option[MerklePatriciaNode]]) extends RemoveState
 
   private def removeEncoded(
     currentNode: MerklePatriciaNode,
-    path:        Seq[Nibble]
+    path: Seq[Nibble]
   ): F[Either[MerklePatriciaError, MerklePatriciaNode]] = {
     def removeForLeafNode(
-      leafNode:     MerklePatriciaNode.Leaf,
-      _key:         Seq[Nibble],
+      leafNode: MerklePatriciaNode.Leaf,
+      _key: Seq[Nibble],
       updateParent: Option[MerklePatriciaNode] => F[Either[MerklePatriciaError, Option[MerklePatriciaNode]]]
     ): F[Either[RemoveState, Either[MerklePatriciaError, Option[MerklePatriciaNode]]]] =
       if (leafNode.remaining == _key) {
@@ -268,8 +269,8 @@ class StatelessMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
 
     def removeForExtensionNode(
       extensionNode: MerklePatriciaNode.Extension,
-      _key:          Seq[Nibble],
-      updateParent:  Option[MerklePatriciaNode] => F[Either[MerklePatriciaError, Option[MerklePatriciaNode]]]
+      _key: Seq[Nibble],
+      updateParent: Option[MerklePatriciaNode] => F[Either[MerklePatriciaError, Option[MerklePatriciaNode]]]
     ): F[Either[RemoveState, Either[MerklePatriciaError, Option[MerklePatriciaNode]]]] = {
       val commonPrefix = Nibble.commonPrefix(extensionNode.shared, _key)
 
@@ -308,8 +309,8 @@ class StatelessMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
     }
 
     def removeForBranchNode(
-      branchNode:   MerklePatriciaNode.Branch,
-      _key:         Seq[Nibble],
+      branchNode: MerklePatriciaNode.Branch,
+      _key: Seq[Nibble],
       updateParent: Option[MerklePatriciaNode] => F[Either[MerklePatriciaError, Option[MerklePatriciaNode]]]
     ): F[Either[RemoveState, Either[MerklePatriciaError, Option[MerklePatriciaNode]]]] =
       if (_key.nonEmpty) {

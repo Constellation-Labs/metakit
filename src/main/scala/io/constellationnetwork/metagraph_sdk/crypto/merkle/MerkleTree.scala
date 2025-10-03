@@ -6,6 +6,8 @@ import cats.implicits.{toFlatMapOps, toFunctorOps, toTraverseOps}
 import cats.syntax.applicative._
 import cats.syntax.applicativeError._
 
+import scala.annotation.tailrec
+
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher
 import io.constellationnetwork.security.hash.Hash
 
@@ -13,9 +15,31 @@ import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder, HCursor, Json}
 
 final case class MerkleTree(
-  rootNode:        MerkleNode,
+  rootNode: MerkleNode,
   leafDigestIndex: Map[Hash, Int]
-)
+) {
+
+  /**
+   * Get current leaves in the tree
+   *
+   * @return List of leaf nodes
+   */
+  def leaves: List[MerkleNode.Leaf] = {
+    @tailrec
+    def collectLeaves(nodes: List[MerkleNode], acc: List[MerkleNode.Leaf]): List[MerkleNode.Leaf] =
+      nodes match {
+        case Nil                             => acc
+        case (leaf: MerkleNode.Leaf) :: rest => collectLeaves(rest, acc :+ leaf)
+        case (internal: MerkleNode.Internal) :: rest =>
+          internal.right match {
+            case Some(rightNode) => collectLeaves(internal.left :: rightNode :: rest, acc)
+            case None            => collectLeaves(internal.left :: rest, acc)
+          }
+      }
+
+    collectLeaves(List(rootNode), Nil)
+  }
+}
 
 object MerkleTree {
 
@@ -24,11 +48,12 @@ object MerkleTree {
       "rootNode" -> tree.rootNode.asJson,
       "leafDigestIndex" -> tree.leafDigestIndex.toList
         .sortBy(_._2)
-        .map { case (digest, index) =>
-          Json.obj(
-            "digest" -> digest.asJson,
-            "index"  -> index.asJson
-          )
+        .map {
+          case (digest, index) =>
+            Json.obj(
+              "digest" -> digest.asJson,
+              "index"  -> index.asJson
+            )
         }
         .asJson
     )

@@ -5,6 +5,7 @@ import cats.syntax.all._
 
 import io.constellationnetwork.metagraph_sdk.crypto.mpt.MerklePatriciaTrie
 import io.constellationnetwork.metagraph_sdk.crypto.mpt.api._
+import io.constellationnetwork.metagraph_sdk.crypto.mpt.impl.InMemoryMerklePatriciaProducer.TrieCache
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher
 import io.constellationnetwork.security.hash.Hash
 
@@ -14,8 +15,6 @@ import io.circe.{Encoder, Json}
 class InMemoryMerklePatriciaProducer[F[_]: Sync: JsonBinaryHasher](
   stateRef: Ref[F, InMemoryMerklePatriciaProducer.ProducerState]
 ) extends StatefulMerklePatriciaProducer[F] {
-
-  import InMemoryMerklePatriciaProducer._
 
   def getProver: F[MerklePatriciaProver[F]] =
     stateRef.get.flatMap { state =>
@@ -45,12 +44,16 @@ class InMemoryMerklePatriciaProducer[F[_]: Sync: JsonBinaryHasher](
             MerklePatriciaTrie.make[F, Json](state.entries).attempt.flatMap {
               case Right(trie) =>
                 val shouldCache = state.dirtyKeys.size <= 100
-                stateRef.update(_.copy(
-                  currentTrie = Some(trie),
-                  dirtyKeys = Set.empty,
-                  version = state.version + 1,
-                  trieCache = if (shouldCache) Some(TrieCache(trie, state.version + 1)) else None
-                )).as(trie.asRight[MerklePatriciaError])
+                stateRef
+                  .update(
+                    _.copy(
+                      currentTrie = Some(trie),
+                      dirtyKeys = Set.empty,
+                      version = state.version + 1,
+                      trieCache = if (shouldCache) Some(TrieCache(trie, state.version + 1)) else None
+                    )
+                  )
+                  .as(trie.asRight[MerklePatriciaError])
               case Left(e) =>
                 OperationError(e.getMessage).asLeft[MerklePatriciaTrie].pure[F].widen
             }
@@ -70,7 +73,8 @@ class InMemoryMerklePatriciaProducer[F[_]: Sync: JsonBinaryHasher](
           dirtyKeys = state.dirtyKeys ++ newKeys,
           currentTrie = None
         )
-      }.as(().asRight[MerklePatriciaError])
+      }
+        .as(().asRight[MerklePatriciaError])
     }
 
   def update[A: Encoder](key: Hash, value: A): F[Either[MerklePatriciaError, Unit]] =
@@ -84,7 +88,8 @@ class InMemoryMerklePatriciaProducer[F[_]: Sync: JsonBinaryHasher](
             dirtyKeys = s.dirtyKeys + key,
             currentTrie = None
           )
-        }.as(().asRight[MerklePatriciaError])
+        }
+          .as(().asRight[MerklePatriciaError])
       }
     }
 
@@ -103,46 +108,22 @@ class InMemoryMerklePatriciaProducer[F[_]: Sync: JsonBinaryHasher](
               dirtyKeys = s.dirtyKeys ++ existing.toSet,
               currentTrie = None
             )
-          }.as(().asRight[MerklePatriciaError])
+          }
+            .as(().asRight[MerklePatriciaError])
         }
       }
     }
 
-
   def clear: F[Unit] =
-    stateRef.update(_.copy(
-      entries = Map.empty,
-      currentTrie = None,
-      dirtyKeys = Set.empty,
-      version = 0L,
-      trieCache = None
-    ))
-
-  def create[A: Encoder](data: Map[Hash, A]): F[MerklePatriciaTrie] =
-    for {
-      _ <- clear
-      _ <- insert(data)
-      result <- build
-      trie <- result.liftTo[F]
-    } yield trie
-
-  def insert[A: Encoder](
-    current: MerklePatriciaTrie,
-    data:    Map[Hash, A]
-  ): F[Either[MerklePatriciaError, MerklePatriciaTrie]] =
-    for {
-      _ <- insert(data)
-      result <- build
-    } yield result
-
-  def remove(
-    current: MerklePatriciaTrie,
-    keys:    List[Hash]
-  ): F[Either[MerklePatriciaError, MerklePatriciaTrie]] =
-    for {
-      _ <- remove(keys)
-      result <- build
-    } yield result
+    stateRef.update(
+      _.copy(
+        entries = Map.empty,
+        currentTrie = None,
+        dirtyKeys = Set.empty,
+        version = 0L,
+        trieCache = None
+      )
+    )
 
   def getProver(trie: MerklePatriciaTrie): F[MerklePatriciaProver[F]] =
     MerklePatriciaProver.make[F](trie).pure[F]
