@@ -7,7 +7,7 @@ import cats.syntax.traverse._
 
 import scala.collection.immutable.ArraySeq
 
-import io.constellationnetwork.security.hash.Hash
+import io.constellationnetwork.security.hex.Hex
 
 import io.circe._
 import io.circe.syntax.EncoderOps
@@ -29,8 +29,8 @@ object Nibble {
     case _                         => None
   }
 
-  def apply(digest: Hash): Seq[Nibble] =
-    digest.value.view.map(unsafe).to(ArraySeq)
+  def apply(hex: Hex): Seq[Nibble] =
+    hex.value.view.map(unsafe).to(ArraySeq)
 
   def apply(bytes: Array[Byte]): Seq[Nibble] =
     bytes.view.flatMap(apply).to(ArraySeq)

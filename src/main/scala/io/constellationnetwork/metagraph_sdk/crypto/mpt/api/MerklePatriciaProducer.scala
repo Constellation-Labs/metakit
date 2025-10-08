@@ -13,32 +13,32 @@ import io.constellationnetwork.metagraph_sdk.crypto.mpt.impl.{
   StatelessMerklePatriciaProducer
 }
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher
-import io.constellationnetwork.security.hash.Hash
+import io.constellationnetwork.security.hex.Hex
 
 import io.circe.{Encoder, Json}
 
 trait MerklePatriciaProducer[F[_]] {
-  def create[A: Encoder](data: Map[Hash, A]): F[MerklePatriciaTrie]
+  def create[A: Encoder](data: Map[Hex, A]): F[MerklePatriciaTrie]
 
   def insert[A: Encoder](
     current: MerklePatriciaTrie,
-    data: Map[Hash, A]
+    data: Map[Hex, A]
   ): F[Either[MerklePatriciaError, MerklePatriciaTrie]]
 
   def remove(
     current: MerklePatriciaTrie,
-    keys: List[Hash]
+    keys: List[Hex]
   ): F[Either[MerklePatriciaError, MerklePatriciaTrie]]
 
   def getProver(trie: MerklePatriciaTrie): F[MerklePatriciaProver[F]]
 }
 
 trait StatefulMerklePatriciaProducer[F[_]] {
-  def entries: F[Map[Hash, Json]]
+  def entries: F[Map[Hex, Json]]
   def build: F[Either[MerklePatriciaError, MerklePatriciaTrie]]
-  def insert[A: Encoder](data: Map[Hash, A]): F[Either[MerklePatriciaError, Unit]]
-  def update[A: Encoder](key: Hash, value: A): F[Either[MerklePatriciaError, Unit]]
-  def remove(keys: List[Hash]): F[Either[MerklePatriciaError, Unit]]
+  def insert[A: Encoder](data: Map[Hex, A]): F[Either[MerklePatriciaError, Unit]]
+  def update[A: Encoder](key: Hex, value: A): F[Either[MerklePatriciaError, Unit]]
+  def remove(keys: List[Hex]): F[Either[MerklePatriciaError, Unit]]
   def clear: F[Unit]
   def getProver: F[MerklePatriciaProver[F]]
 }
@@ -58,7 +58,7 @@ object MerklePatriciaProducer {
    * @return Producer with in-memory storage and caching
    */
   def inMemory[F[_]: Sync: JsonBinaryHasher](
-    initial: Map[Hash, Json] = Map.empty
+    initial: Map[Hex, Json] = Map.empty
   ): F[StatefulMerklePatriciaProducer[F]] =
     InMemoryMerklePatriciaProducer.make[F](initial).widen[StatefulMerklePatriciaProducer[F]]
 
@@ -71,7 +71,7 @@ object MerklePatriciaProducer {
    */
   def levelDb[F[_]: Async: JsonBinaryHasher](
     dbPath: Path,
-    initial: Map[Hash, Json] = Map.empty
+    initial: Map[Hex, Json] = Map.empty
   ): Resource[F, StatefulMerklePatriciaProducer[F]] =
     LevelDbMerklePatriciaProducer.make[F](dbPath, initial).widen[StatefulMerklePatriciaProducer[F]]
 

@@ -7,17 +7,17 @@ import cats.syntax.functor._
 
 import io.constellationnetwork.metagraph_sdk.crypto.mpt._
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher
-import io.constellationnetwork.security.hash.Hash
+import io.constellationnetwork.security.hex.Hex
 
 trait MerklePatriciaProver[F[_]] {
 
   /**
-   * Generate a proof that a digest exists in the trie
+   * Generate a proof that a path exists in the trie
    *
-   * @param digest The digest to prove inclusion for
-   * @return A proof of inclusion if the digest exists, or an error
+   * @param path The path to prove inclusion for
+   * @return A proof of inclusion if the path exists, or an error
    */
-  def attestDigest(digest: Hash): F[Either[MerklePatriciaProofError, MerklePatriciaInclusionProof]]
+  def attestPath(path: Hex): F[Either[MerklePatriciaProofError, MerklePatriciaInclusionProof]]
 }
 
 object MerklePatriciaProver {
@@ -31,13 +31,13 @@ object MerklePatriciaProver {
   )(implicit producer: JsonBinaryHasher[F]): MerklePatriciaProver[F] =
     new MerklePatriciaProver[F] {
 
-      def attestDigest(digest: Hash): F[Either[MerklePatriciaProofError, MerklePatriciaInclusionProof]] = {
+      def attestPath(path: Hex): F[Either[MerklePatriciaProofError, MerklePatriciaInclusionProof]] = {
         type Continue = (MerklePatriciaNode, Seq[Nibble], List[MerklePatriciaCommitment])
         type Return = Either[MerklePatriciaProofError, List[MerklePatriciaCommitment]]
 
         MonadThrow[F]
-          .tailRecM[Continue, Return]((trie.rootNode, Nibble(digest), List.empty[MerklePatriciaCommitment])) {
-            case (currentNode, remainingPath, acc) =>
+          .tailRecM[Continue, Return]((trie.rootNode, Nibble(path), List.empty[MerklePatriciaCommitment])) {
+            case (currentNode, remainingPath: Seq[Nibble], acc) =>
               currentNode match {
                 case leaf: MerklePatriciaNode.Leaf if leaf.remaining == remainingPath =>
                   JsonBinaryHasher[F]
@@ -71,7 +71,7 @@ object MerklePatriciaProver {
 
                     case None =>
                       MonadThrow[F].pure(
-                        PathNotFound(s"Path not found: ${digest.toString}")
+                        PathNotFound(s"Path not found: ${path.value}")
                           .asLeft[List[MerklePatriciaCommitment]]
                           .asRight[Continue]
                       )
@@ -79,33 +79,31 @@ object MerklePatriciaProver {
 
                 case _ =>
                   MonadThrow[F].pure(
-                    InvalidNodeType(s"Unexpected node type encountered for path: ${digest.toString}")
+                    InvalidNodeType(s"Unexpected node type encountered for path: ${path.value}")
                       .asLeft[List[MerklePatriciaCommitment]]
                       .asRight[Continue]
                   )
               }
           }
-          .map(_.map(commitments => MerklePatriciaInclusionProof(digest, commitments)))
+          .map(_.map(commitments => MerklePatriciaInclusionProof(path, commitments)))
           .handleError(e => ProofGenerationError(e.getMessage).asLeft[MerklePatriciaInclusionProof])
       }
     }
 
   /**
    * Provides syntax extensions for more ergonomic proof generation
-   *
-   * Import xyz.kd5ujc.accumulators.mpt.api.MerklePatriciaProver.syntax._ to use these extensions
    */
   object syntax {
 
-    implicit class MerklePatriciaDigestOps(private val digest: Hash) extends AnyVal {
+    implicit class MerklePatriciaPathOps(private val path: Hex) extends AnyVal {
 
       /**
-       * Generate a proof that this digest exists in the trie
+       * Generate a proof that this path exists in the trie
        *
-       * @return A proof of inclusion if the digest exists
+       * @return A proof of inclusion if the path exists
        */
       def attestInclusion[F[_]](implicit P: MerklePatriciaProver[F]): F[Either[MerklePatriciaProofError, MerklePatriciaInclusionProof]] =
-        P.attestDigest(digest)
+        P.attestPath(path)
     }
   }
 }

@@ -10,13 +10,13 @@ import io.constellationnetwork.metagraph_sdk.crypto.mpt.api._
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher
 import io.constellationnetwork.metagraph_sdk.storage.Collection
 import io.constellationnetwork.metagraph_sdk.storage.impl.LevelDbCollection
-import io.constellationnetwork.security.hash.Hash
+import io.constellationnetwork.security.hex.Hex
 
 import io.circe.syntax._
 import io.circe.{Encoder, Json}
 
 class LevelDbMerklePatriciaProducer[F[_]: Sync: JsonBinaryHasher](
-  val entriesStore: Collection[F, Hash, Json],
+  val entriesStore: Collection[F, Hex, Json],
   metadataStore: Collection[F, String, Json],
   stateRef: Ref[F, LevelDbMerklePatriciaProducer.ProducerState]
 ) extends StatefulMerklePatriciaProducer[F] {
@@ -38,7 +38,7 @@ class LevelDbMerklePatriciaProducer[F[_]: Sync: JsonBinaryHasher](
       }
     }
 
-  def entries: F[Map[Hash, Json]] =
+  def entries: F[Map[Hex, Json]] =
     entriesStore.dump.map(_.toMap)
 
   def build: F[Either[MerklePatriciaError, MerklePatriciaTrie]] =
@@ -72,10 +72,9 @@ class LevelDbMerklePatriciaProducer[F[_]: Sync: JsonBinaryHasher](
       }
     }
 
-  def insert[A: Encoder](data: Map[Hash, A]): F[Either[MerklePatriciaError, Unit]] =
-    if (data.isEmpty) {
-      ().asRight[MerklePatriciaError].pure[F]
-    } else {
+  def insert[A: Encoder](data: Map[Hex, A]): F[Either[MerklePatriciaError, Unit]] =
+    if (data.isEmpty) ().asRight[MerklePatriciaError].pure[F]
+    else {
       val entries = data.map { case (k, v) => (k, v.asJson) }.toList
 
       (for {
@@ -94,7 +93,7 @@ class LevelDbMerklePatriciaProducer[F[_]: Sync: JsonBinaryHasher](
       }
     }
 
-  def update[A: Encoder](key: Hash, value: A): F[Either[MerklePatriciaError, Unit]] =
+  def update[A: Encoder](key: Hex, value: A): F[Either[MerklePatriciaError, Unit]] =
     for {
       exists <- entriesStore.contains(key)
       result <-
@@ -115,7 +114,7 @@ class LevelDbMerklePatriciaProducer[F[_]: Sync: JsonBinaryHasher](
         }
     } yield result
 
-  def remove(keys: List[Hash]): F[Either[MerklePatriciaError, Unit]] =
+  def remove(keys: List[Hex]): F[Either[MerklePatriciaError, Unit]] =
     if (keys.isEmpty) ().asRight[MerklePatriciaError].pure[F]
     else {
       (for {
@@ -166,15 +165,15 @@ object LevelDbMerklePatriciaProducer {
   case class ProducerState(
     entryCount: Int,
     currentTrie: Option[MerklePatriciaTrie],
-    dirtyKeys: Set[Hash],
+    dirtyKeys: Set[Hex],
     version: Long
   )
 
   def make[F[_]: Async: JsonBinaryHasher](
     dbPath: Path,
-    initial: Map[Hash, Json] = Map.empty
+    initial: Map[Hex, Json] = Map.empty
   ): Resource[F, LevelDbMerklePatriciaProducer[F]] = for {
-    entriesStore  <- LevelDbCollection.make[F, Hash, Json](dbPath.resolve("entries"))
+    entriesStore  <- LevelDbCollection.make[F, Hex, Json](dbPath.resolve("entries"))
     metadataStore <- LevelDbCollection.make[F, String, Json](dbPath.resolve("metadata"))
 
     producer <- Resource.eval {
@@ -208,7 +207,7 @@ object LevelDbMerklePatriciaProducer {
   def load[F[_]: Async: JsonBinaryHasher](
     dbPath: Path
   ): Resource[F, LevelDbMerklePatriciaProducer[F]] = for {
-    entriesStore  <- LevelDbCollection.make[F, Hash, Json](dbPath.resolve("entries"))
+    entriesStore  <- LevelDbCollection.make[F, Hex, Json](dbPath.resolve("entries"))
     metadataStore <- LevelDbCollection.make[F, String, Json](dbPath.resolve("metadata"))
 
     producer <- Resource.eval {

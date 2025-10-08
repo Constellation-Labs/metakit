@@ -7,7 +7,7 @@ import io.constellationnetwork.metagraph_sdk.crypto.mpt.MerklePatriciaTrie
 import io.constellationnetwork.metagraph_sdk.crypto.mpt.api._
 import io.constellationnetwork.metagraph_sdk.crypto.mpt.impl.InMemoryMerklePatriciaProducer.TrieCache
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher
-import io.constellationnetwork.security.hash.Hash
+import io.constellationnetwork.security.hex.Hex
 
 import io.circe.syntax._
 import io.circe.{Encoder, Json}
@@ -29,7 +29,7 @@ class InMemoryMerklePatriciaProducer[F[_]: Sync: JsonBinaryHasher](
       }
     }
 
-  def entries: F[Map[Hash, Json]] =
+  def entries: F[Map[Hex, Json]] =
     stateRef.get.map(_.entries)
 
   def build: F[Either[MerklePatriciaError, MerklePatriciaTrie]] =
@@ -61,10 +61,9 @@ class InMemoryMerklePatriciaProducer[F[_]: Sync: JsonBinaryHasher](
       }
     }
 
-  def insert[A: Encoder](data: Map[Hash, A]): F[Either[MerklePatriciaError, Unit]] =
-    if (data.isEmpty) {
-      ().asRight[MerklePatriciaError].pure[F]
-    } else {
+  def insert[A: Encoder](data: Map[Hex, A]): F[Either[MerklePatriciaError, Unit]] =
+    if (data.isEmpty) ().asRight[MerklePatriciaError].pure[F]
+    else {
       stateRef.update { state =>
         val jsonEntries = data.map { case (k, v) => k -> v.asJson }
         val newKeys = data.keySet
@@ -77,7 +76,7 @@ class InMemoryMerklePatriciaProducer[F[_]: Sync: JsonBinaryHasher](
         .as(().asRight[MerklePatriciaError])
     }
 
-  def update[A: Encoder](key: Hash, value: A): F[Either[MerklePatriciaError, Unit]] =
+  def update[A: Encoder](key: Hex, value: A): F[Either[MerklePatriciaError, Unit]] =
     stateRef.get.flatMap { state =>
       if (!state.entries.contains(key)) {
         OperationError(s"Key not found for update: $key").asLeft[Unit].pure[F].widen
@@ -93,7 +92,7 @@ class InMemoryMerklePatriciaProducer[F[_]: Sync: JsonBinaryHasher](
       }
     }
 
-  def remove(keys: List[Hash]): F[Either[MerklePatriciaError, Unit]] =
+  def remove(keys: List[Hex]): F[Either[MerklePatriciaError, Unit]] =
     if (keys.isEmpty) {
       ().asRight[MerklePatriciaError].pure[F]
     } else {
@@ -132,10 +131,10 @@ class InMemoryMerklePatriciaProducer[F[_]: Sync: JsonBinaryHasher](
 object InMemoryMerklePatriciaProducer {
 
   case class ProducerState(
-    entries: Map[Hash, Json],
+    entries: Map[Hex, Json],
     currentTrie: Option[MerklePatriciaTrie],
     version: Long,
-    dirtyKeys: Set[Hash],
+    dirtyKeys: Set[Hex],
     trieCache: Option[TrieCache]
   )
 
@@ -146,7 +145,7 @@ object InMemoryMerklePatriciaProducer {
   )
 
   def make[F[_]: Sync: JsonBinaryHasher](
-    initial: Map[Hash, Json] = Map.empty
+    initial: Map[Hex, Json] = Map.empty
   ): F[InMemoryMerklePatriciaProducer[F]] =
     for {
       stateRef <- Ref.of[F, ProducerState](

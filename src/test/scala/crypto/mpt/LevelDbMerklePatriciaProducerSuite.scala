@@ -9,7 +9,7 @@ import cats.syntax.all._
 
 import io.constellationnetwork.metagraph_sdk.crypto.mpt.impl.LevelDbMerklePatriciaProducer
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher.HasherOps
-import io.constellationnetwork.security.hash.Hash
+import io.constellationnetwork.security.hex.Hex
 
 import io.circe.Json
 import io.circe.syntax._
@@ -17,10 +17,10 @@ import weaver._
 
 object LevelDbMerklePatriciaProducerSuite extends SimpleIOSuite {
 
-  def testData: IO[Map[Hash, Json]] =
+  def testData: IO[Map[Hex, Json]] =
     List("key1", "key2", "key3").zipWithIndex.traverse {
       case (key, idx) =>
-        key.computeDigest.map(hash => hash -> s"value${idx + 1}".asJson)
+        key.computeDigest.map(hash => Hex(hash.value) -> s"value${idx + 1}".asJson)
     }
       .map(_.toMap)
 
@@ -94,7 +94,7 @@ object LevelDbMerklePatriciaProducerSuite extends SimpleIOSuite {
     tempDbPath.use { dbPath =>
       for {
         data     <- testData
-        key4Hash <- "key4".computeDigest
+        key4Hash <- "key4".computeDigest.map(hash => Hex(hash.value))
         // First producer - insert data
         result1 <- LevelDbMerklePatriciaProducer.make[IO](dbPath, data).use { producer =>
           for {
@@ -131,7 +131,7 @@ object LevelDbMerklePatriciaProducerSuite extends SimpleIOSuite {
     tempDbPath.use { dbPath =>
       for {
         data     <- testData
-        key1Hash <- "key1".computeDigest
+        key1Hash <- "key1".computeDigest.map(hash => Hex(hash.value))
         result <- LevelDbMerklePatriciaProducer.make[IO](dbPath, data).use { producer =>
           for {
             // Update existing key
@@ -151,9 +151,9 @@ object LevelDbMerklePatriciaProducerSuite extends SimpleIOSuite {
     tempDbPath.use { dbPath =>
       for {
         data     <- testData
-        key1Hash <- "key1".computeDigest
-        key2Hash <- "key2".computeDigest
-        key3Hash <- "key3".computeDigest
+        key1Hash <- "key1".computeDigest.map(hash => Hex(hash.value))
+        key2Hash <- "key2".computeDigest.map(hash => Hex(hash.value))
+        key3Hash <- "key3".computeDigest.map(hash => Hex(hash.value))
         result <- LevelDbMerklePatriciaProducer.make[IO](dbPath, data).use { producer =>
           for {
             // Remove some keys
@@ -196,9 +196,9 @@ object LevelDbMerklePatriciaProducerSuite extends SimpleIOSuite {
     tempDbPath.use { dbPath =>
       LevelDbMerklePatriciaProducer.make[IO](dbPath).use { producer =>
         for {
-          batch1Hash <- "batch1".computeDigest
-          batch2Hash <- "batch2".computeDigest
-          batch3Hash <- "batch3".computeDigest
+          batch1Hash <- "batch1".computeDigest.map(hash => Hex(hash.value))
+          batch2Hash <- "batch2".computeDigest.map(hash => Hex(hash.value))
+          batch3Hash <- "batch3".computeDigest.map(hash => Hex(hash.value))
           // Batch insert
           batchData = Map(
             batch1Hash -> "value1".asJson,
@@ -227,7 +227,7 @@ object LevelDbMerklePatriciaProducerSuite extends SimpleIOSuite {
     tempDbPath.use { dbPath =>
       for {
         data     <- testData
-        key4Hash <- "key4".computeDigest
+        key4Hash <- "key4".computeDigest.map(hash => Hex(hash.value))
         result <- LevelDbMerklePatriciaProducer.make[IO](dbPath, data).use { producer =>
           for {
             // Build first time
@@ -256,14 +256,14 @@ object LevelDbMerklePatriciaProducerSuite extends SimpleIOSuite {
     tempDbPath.use { dbPath =>
       for {
         data     <- testData
-        key1Hash <- "key1".computeDigest
+        key1Hash <- "key1".computeDigest.map(hash => Hex(hash.value))
         result <- LevelDbMerklePatriciaProducer.make[IO](dbPath, data).use { producer =>
           for {
             // Get prover (should build trie if needed)
             prover <- producer.getProver
 
             // Test attestation
-            proof <- prover.attestDigest(key1Hash)
+            proof <- prover.attestPath(key1Hash)
             _     <- expect(proof.isRight).pure[IO]
           } yield success
         }

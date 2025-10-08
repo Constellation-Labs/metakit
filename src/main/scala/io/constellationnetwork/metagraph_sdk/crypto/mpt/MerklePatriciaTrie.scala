@@ -6,7 +6,7 @@ import scala.annotation.tailrec
 
 import io.constellationnetwork.metagraph_sdk.crypto.mpt.api.MerklePatriciaProducer
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher
-import io.constellationnetwork.security.hash.Hash
+import io.constellationnetwork.security.hex.Hex
 
 import io.circe.syntax._
 import io.circe.{Decoder, Encoder, HCursor, Json}
@@ -24,7 +24,7 @@ object MerklePatriciaTrie {
   /**
    * Create a new MerklePatriciaTrie from a map of data using the stateless producer
    */
-  def make[F[_]: JsonBinaryHasher: MonadThrow, A: Encoder](data: Map[Hash, A]): F[MerklePatriciaTrie] =
+  def make[F[_]: JsonBinaryHasher: MonadThrow, A: Encoder](data: Map[Hex, A]): F[MerklePatriciaTrie] =
     MerklePatriciaProducer
       .stateless[F]
       .create(data)

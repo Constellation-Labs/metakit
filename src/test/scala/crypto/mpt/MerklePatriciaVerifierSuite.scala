@@ -8,6 +8,7 @@ import io.constellationnetwork.metagraph_sdk.crypto.mpt.MerklePatriciaTrie
 import io.constellationnetwork.metagraph_sdk.crypto.mpt.api.{MerklePatriciaProver, MerklePatriciaVerifier}
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher.HasherOps
 import io.constellationnetwork.security.hash.Hash
+import io.constellationnetwork.security.hex.Hex
 
 import org.scalacheck.Gen
 import weaver.SimpleIOSuite
@@ -21,11 +22,11 @@ object MerklePatriciaVerifierSuite extends SimpleIOSuite with Checkers {
     }) {
       case (list, randomIndex) =>
         for {
-          leafPairs    <- list.traverse(el => el.computeDigest.map(_ -> el))
+          leafPairs    <- list.traverse(el => el.computeDigest.map(hash => Hex(hash.value) -> el))
           trie         <- MerklePatriciaTrie.make(leafPairs.toMap)
           verifier     <- MerklePatriciaVerifier.make(trie.rootNode.digest).pure[F]
           prover       <- MerklePatriciaProver.make(trie).pure[F]
-          proof        <- prover.attestDigest(leafPairs(randomIndex)._1).flatMap(IO.fromEither(_))
+          proof        <- prover.attestPath(leafPairs(randomIndex)._1).flatMap(IO.fromEither(_))
           resultEither <- verifier.confirm(proof)
         } yield expect(proof.witness.nonEmpty && resultEither.isRight)
     }
@@ -37,13 +38,13 @@ object MerklePatriciaVerifierSuite extends SimpleIOSuite with Checkers {
     }) {
       case (list, randomIndex) =>
         for {
-          leafPairs <- list.traverse(el => el.computeDigest.map(_ -> el))
+          leafPairs <- list.traverse(el => el.computeDigest.map(hash => Hex(hash.value) -> el))
           trie      <- MerklePatriciaTrie.make(leafPairs.toMap)
           verifier <- MerklePatriciaVerifier
             .make(Hash("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"))
             .pure[F]
           prover       <- MerklePatriciaProver.make(trie).pure[F]
-          proof        <- prover.attestDigest(leafPairs(randomIndex)._1).flatMap(IO.fromEither(_))
+          proof        <- prover.attestPath(leafPairs(randomIndex)._1).flatMap(IO.fromEither(_))
           resultEither <- verifier.confirm(proof)
         } yield expect(resultEither.isLeft)
     }
@@ -55,7 +56,7 @@ object MerklePatriciaVerifierSuite extends SimpleIOSuite with Checkers {
 
     for {
       entries <- (1 to numEntries).toList.traverse { i =>
-        s"entry_$i".computeDigest.map(_ -> s"value_$i")
+        s"entry_$i".computeDigest.map(hash => Hex(hash.value) -> s"value_$i")
       }
       trie     <- MerklePatriciaTrie.make(entries.toMap)
       verifier <- MerklePatriciaVerifier.make(trie.rootNode.digest).pure[F]
@@ -64,9 +65,9 @@ object MerklePatriciaVerifierSuite extends SimpleIOSuite with Checkers {
       randomIndices = scala.util.Random.shuffle((0 until numEntries).toList).take(numProofsToVerify)
 
       verificationResults <- randomIndices.traverse { idx =>
-        val (digest, _) = entries(idx)
+        val (hex, _) = entries(idx)
         for {
-          proof        <- prover.attestDigest(digest).flatMap(IO.fromEither(_))
+          proof        <- prover.attestPath(hex).flatMap(IO.fromEither(_))
           resultEither <- verifier.confirm(proof)
         } yield resultEither.isRight
       }

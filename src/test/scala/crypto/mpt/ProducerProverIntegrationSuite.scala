@@ -10,7 +10,7 @@ import cats.syntax.all._
 import io.constellationnetwork.metagraph_sdk.crypto.mpt.api.MerklePatriciaVerifier
 import io.constellationnetwork.metagraph_sdk.crypto.mpt.impl.{InMemoryMerklePatriciaProducer, LevelDbMerklePatriciaProducer}
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher.HasherOps
-import io.constellationnetwork.security.hash.Hash
+import io.constellationnetwork.security.hex.Hex
 
 import io.circe.Json
 import io.circe.syntax._
@@ -18,10 +18,10 @@ import weaver._
 
 object ProducerProverIntegrationSuite extends SimpleIOSuite {
 
-  def testData: IO[Map[Hash, Json]] =
+  def testData: IO[Map[Hex, Json]] =
     List("key1", "key2", "key3").zipWithIndex.traverse {
       case (key, idx) =>
-        key.computeDigest.map(hash => hash -> s"value${idx + 1}".asJson)
+        key.computeDigest.map(hash => Hex(hash.value) -> s"value${idx + 1}".asJson)
     }
       .map(_.toMap)
 
@@ -60,7 +60,7 @@ object ProducerProverIntegrationSuite extends SimpleIOSuite {
 
         // Generate proofs for all keys
         proofs <- data.keys.toList.traverse { key =>
-          prover.attestDigest(key).map(key -> _)
+          prover.attestPath(key).map(key -> _)
         }
 
         // Verify all proofs with the trie root
@@ -78,8 +78,8 @@ object ProducerProverIntegrationSuite extends SimpleIOSuite {
         _ <- expect(verifyResults.forall(_._2)).pure[IO]
 
         // Test non-existing key
-        nonExistingHash  <- "non_existing".computeDigest
-        nonExistingProof <- prover.attestDigest(nonExistingHash)
+        nonExistingHash  <- "non_existing".computeDigest.map(hash => Hex(hash.value))
+        nonExistingProof <- prover.attestPath(nonExistingHash)
         _                <- expect(nonExistingProof.isLeft).pure[IO]
       } yield success
     }
@@ -91,7 +91,7 @@ object ProducerProverIntegrationSuite extends SimpleIOSuite {
         LevelDbMerklePatriciaProducer.make[IO](dbPath, data).use { producer =>
           for {
             // Add more data
-            key4Hash <- "key4".computeDigest
+            key4Hash <- "key4".computeDigest.map(hash => Hex(hash.value))
             _        <- producer.insert(Map(key4Hash -> "value4".asJson))
 
             // Build trie
@@ -102,7 +102,7 @@ object ProducerProverIntegrationSuite extends SimpleIOSuite {
             prover <- producer.getProver
 
             // Generate and verify proof
-            proof <- prover.attestDigest(key4Hash)
+            proof <- prover.attestPath(key4Hash)
             _     <- expect(proof.isRight).pure[IO]
 
             verifier = MerklePatriciaVerifier.make[IO](trie.rootNode.digest)
@@ -128,13 +128,13 @@ object ProducerProverIntegrationSuite extends SimpleIOSuite {
             prover <- producer.getProver
 
             // Generate multiple proofs - all should use same cached trie
-            key1Hash <- "key1".computeDigest
-            key2Hash <- "key2".computeDigest
-            key3Hash <- "key3".computeDigest
+            key1Hash <- "key1".computeDigest.map(hash => Hex(hash.value))
+            key2Hash <- "key2".computeDigest.map(hash => Hex(hash.value))
+            key3Hash <- "key3".computeDigest.map(hash => Hex(hash.value))
 
-            proof1 <- prover.attestDigest(key1Hash)
-            proof2 <- prover.attestDigest(key2Hash)
-            proof3 <- prover.attestDigest(key3Hash)
+            proof1 <- prover.attestPath(key1Hash)
+            proof2 <- prover.attestPath(key2Hash)
+            proof3 <- prover.attestPath(key3Hash)
 
             _ <- expect(proof1.isRight && proof2.isRight && proof3.isRight).pure[IO]
 
@@ -164,7 +164,7 @@ object ProducerProverIntegrationSuite extends SimpleIOSuite {
         root1 = trie1.map(_.rootNode.digest)
 
         // Update existing entry
-        key1Hash <- "key1".computeDigest
+        key1Hash <- "key1".computeDigest.map(hash => Hex(hash.value))
         _        <- producer.update(key1Hash, "updated".asJson)
         trie2    <- producer.build
         root2 = trie2.map(_.rootNode.digest)
@@ -173,7 +173,7 @@ object ProducerProverIntegrationSuite extends SimpleIOSuite {
         _ <- expect(root1 != root2).pure[IO]
 
         // Remove entry
-        key2Hash <- "key2".computeDigest
+        key2Hash <- "key2".computeDigest.map(hash => Hex(hash.value))
         _        <- producer.remove(List(key2Hash))
         trie3    <- producer.build
         root3 = trie3.map(_.rootNode.digest)
@@ -197,7 +197,7 @@ object ProducerProverIntegrationSuite extends SimpleIOSuite {
     testData.flatMap { data =>
       tempDbPath.use { dbPath =>
         for {
-          session1Hash <- "session1".computeDigest
+          session1Hash <- "session1".computeDigest.map(hash => Hex(hash.value))
 
           // First session - create and populate
           firstSession <- LevelDbMerklePatriciaProducer.make[IO](dbPath, data).use { producer =>
@@ -206,7 +206,7 @@ object ProducerProverIntegrationSuite extends SimpleIOSuite {
               trieResult <- producer.build
               trie       <- IO.fromEither(trieResult)
               prover     <- producer.getProver
-              proof      <- prover.attestDigest(session1Hash)
+              proof      <- prover.attestPath(session1Hash)
             } yield (proof, trie.rootNode.digest)
           }
 
@@ -219,7 +219,7 @@ object ProducerProverIntegrationSuite extends SimpleIOSuite {
               trieResult <- producer.build
               trie       <- IO.fromEither(trieResult)
               prover     <- producer.getProver
-              proof      <- prover.attestDigest(session1Hash)
+              proof      <- prover.attestPath(session1Hash)
             } yield (proof, trie.rootNode.digest)
           }
 

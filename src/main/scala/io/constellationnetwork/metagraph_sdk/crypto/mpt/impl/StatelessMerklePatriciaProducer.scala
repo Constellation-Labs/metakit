@@ -14,7 +14,7 @@ import io.constellationnetwork.metagraph_sdk.crypto.mpt.api.{
 }
 import io.constellationnetwork.metagraph_sdk.crypto.mpt.{MerklePatriciaNode, MerklePatriciaTrie, Nibble}
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher
-import io.constellationnetwork.security.hash.Hash
+import io.constellationnetwork.security.hex.Hex
 
 import io.circe.syntax._
 import io.circe.{Encoder, Json}
@@ -24,7 +24,7 @@ class StatelessMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
   def getProver(trie: MerklePatriciaTrie): F[MerklePatriciaProver[F]] =
     MerklePatriciaProver.make[F](trie).pure[F]
 
-  def create[A: Encoder](data: Map[Hash, A]): F[MerklePatriciaTrie] =
+  def create[A: Encoder](data: Map[Hex, A]): F[MerklePatriciaTrie] =
     NonEmptyList.fromList(data.toList) match {
       case Some(nel) =>
         val (hPath, hData) = nel.head
@@ -47,7 +47,7 @@ class StatelessMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
 
   def insert[A: Encoder](
     current: MerklePatriciaTrie,
-    data: Map[Hash, A]
+    data: Map[Hex, A]
   ): F[Either[MerklePatriciaError, MerklePatriciaTrie]] =
     if (data.isEmpty) {
       current.asRight[MerklePatriciaError].pure[F]
@@ -57,7 +57,7 @@ class StatelessMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
         .handleError(e => OperationError(e.getMessage).asLeft[MerklePatriciaTrie])
     }
 
-  def remove(current: MerklePatriciaTrie, data: List[Hash]): F[Either[MerklePatriciaError, MerklePatriciaTrie]] =
+  def remove(current: MerklePatriciaTrie, data: List[Hex]): F[Either[MerklePatriciaError, MerklePatriciaTrie]] =
     if (data.isEmpty) {
       current.asRight[MerklePatriciaError].pure[F]
     } else {
@@ -68,7 +68,7 @@ class StatelessMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
 
   private def insertMultiple[A: Encoder](
     initialNode: MerklePatriciaNode,
-    entries: List[(Hash, A)]
+    entries: List[(Hex, A)]
   ): F[Either[MerklePatriciaError, MerklePatriciaNode]] =
     entries.foldM(initialNode.asRight[MerklePatriciaError]) {
       case (Right(acc), (path, value)) =>
@@ -79,7 +79,7 @@ class StatelessMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
 
   private def removeMultiple(
     initialNode: MerklePatriciaNode,
-    paths: List[Hash]
+    paths: List[Hex]
   ): F[Either[MerklePatriciaError, MerklePatriciaNode]] =
     paths.foldM(initialNode.asRight[MerklePatriciaError]) {
       case (Right(acc), path) =>
