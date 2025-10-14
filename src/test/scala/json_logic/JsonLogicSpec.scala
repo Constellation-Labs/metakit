@@ -2118,6 +2118,61 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
     }
   }
 
+  test("simple count with var lookup") {
+    val exprStr = """{"count":[{"var":"options"}]}"""
+    val dataStr = """{"options": ["A", "B", "C"]}"""
+
+    for {
+      expr   <- IO.fromEither(parser.parse(exprStr).flatMap(_.as[JsonLogicExpression]))
+      data   <- IO.fromEither(parser.parse(dataStr).flatMap(_.as[JsonLogicValue]))
+      result <- JsonLogicEvaluator.tailRecursive[IO].evaluate(expr, data, None)
+    } yield expect(result == IntValue(3))
+  }
+
+  test("count inside and operation") {
+    val exprStr = """{"and":[true, {"count":[{"var":"options"}]}]}"""
+    val dataStr = """{"options": ["A", "B", "C"]}"""
+
+    for {
+      expr   <- IO.fromEither(parser.parse(exprStr).flatMap(_.as[JsonLogicExpression]))
+      data   <- IO.fromEither(parser.parse(dataStr).flatMap(_.as[JsonLogicValue]))
+      result <- JsonLogicEvaluator.tailRecursive[IO].evaluate(expr, data, None)
+    } yield expect(result == IntValue(3))
+  }
+
+  test("count with comparison") {
+    val exprStr = """{">":[{"count":[{"var":"options"}]}, 1]}"""
+    val dataStr = """{"options": ["A", "B", "C"]}"""
+
+    for {
+      expr   <- IO.fromEither(parser.parse(exprStr).flatMap(_.as[JsonLogicExpression]))
+      data   <- IO.fromEither(parser.parse(dataStr).flatMap(_.as[JsonLogicValue]))
+      result <- JsonLogicEvaluator.tailRecursive[IO].evaluate(expr, data, None)
+    } yield expect(result == BoolValue(true))
+  }
+
+  test("if with count in one branch - evaluates other branch") {
+    val exprStr = """
+      {"if":[
+        {"==":[{"var":"method"},"create"]},
+        {"and":[
+          {"exists":[{"var":"title"},{"var":"options"}]},
+          {">":[{"count":[{"var":"options"}]},1]}
+        ]},
+
+        {"==":[{"var":"method"},"vote"]},
+        {"var":"voter"}
+      ]}
+    """
+    val dataStr = """{"method": "vote", "voter": "Alice", "content": {"options": ["A", "B"]}}"""
+
+    for {
+      expr   <- IO.fromEither(parser.parse(exprStr).flatMap(_.as[JsonLogicExpression]))
+      data   <- IO.fromEither(parser.parse(dataStr).flatMap(_.as[JsonLogicValue]))
+      result <- JsonLogicEvaluator.tailRecursive[IO].evaluate(expr, data, None)
+    } yield expect(result == StrValue("Alice"))
+  }
+
   test("`length` can get the length of an array") {
     val exprStr =
       """
