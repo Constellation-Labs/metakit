@@ -41,12 +41,20 @@ object JsonLogicRuntime {
   ): F[Either[JsonLogicException, JsonLogicValue]] =
     JsonLogicSemantics[F]
       .getVar(key, ctx)
-      .map(_.orElse {
-        defaultOpt match {
-          case Some(d) => d.asRight[JsonLogicException]
-          case None    => NullValue.asRight[JsonLogicException]
-        }
-      })
+      .map {
+        case Right(NullValue) if key.nonEmpty =>
+          defaultOpt match {
+            case Some(d) => d.asRight[JsonLogicException]
+            case None    => NullValue.asRight[JsonLogicException]
+          }
+        case Right(value) =>
+          value.asRight[JsonLogicException]
+        case Left(_) =>
+          defaultOpt match {
+            case Some(d) => d.asRight[JsonLogicException]
+            case None    => NullValue.asRight[JsonLogicException]
+          }
+      }
 
   def evaluate[F[_]: Monad: JsonLogicSemantics](
     expr: JsonLogicExpression,
@@ -64,14 +72,21 @@ object JsonLogicRuntime {
           case Left(ex)                               => ex.asLeft[JsonLogicValue].pure[F]
         }
       case ArrayExpression(args) => args.traverse(run).map(_.sequence.map(ArrayValue(_)))
-      case ApplyExpression(MapOp, List(arr: VarExpression, cb: JsonLogicExpression)) => callbackFunc(MapOp, arr, cb)
-      case ApplyExpression(FilterOp, List(arr, cb: JsonLogicExpression))             => callbackFunc(FilterOp, arr, cb)
-      case ApplyExpression(ReduceOp, List(arr, cb: JsonLogicExpression))             => callbackFunc(ReduceOp, arr, cb)
+      case MapExpression(map) =>
+        map.toList.traverse { case (k, expr) => run(expr).map(_.map(k -> _)) }.map(_.sequence.map(pairs => MapValue(pairs.toMap)))
+      case ApplyExpression(MapOp, List(arr, cb: JsonLogicExpression))    => callbackFunc(MapOp, arr, cb)
+      case ApplyExpression(FilterOp, List(arr, cb: JsonLogicExpression)) => callbackFunc(FilterOp, arr, cb)
+      case ApplyExpression(ReduceOp, List(arr, cb: JsonLogicExpression)) => callbackFunc(ReduceOp, arr, cb)
       case ApplyExpression(ReduceOp, List(arr, cb: JsonLogicExpression, init)) =>
         callbackFunc(ReduceOp, arr, cb, init.some)
       case ApplyExpression(AllOp, List(arr, cb: JsonLogicExpression))  => callbackFunc(AllOp, arr, cb)
       case ApplyExpression(SomeOp, List(arr, cb: JsonLogicExpression)) => callbackFunc(SomeOp, arr, cb)
       case ApplyExpression(NoneOp, List(arr, cb: JsonLogicExpression)) => callbackFunc(NoneOp, arr, cb)
+      case ApplyExpression(CountOp, List(arr)) =>
+        run(arr).flatMap {
+          case Right(v) => JsonLogicSemantics[F].applyOp(CountOp)(List(v)); case Left(e) => e.asLeft[JsonLogicValue].pure[F]
+        }
+      case ApplyExpression(CountOp, List(arr, cb: JsonLogicExpression)) => callbackFunc(CountOp, arr, cb)
       case ApplyExpression(op, args) =>
         for {
           argValues <- args.traverse(run).map(_.sequence)
@@ -133,6 +148,27 @@ object JsonLogicRuntime {
           (Frame.Eval(args.head, Some(newCont)) :: tail).asLeft[Either[JsonLogicException, JsonLogicValue]].pure[F]
         }
 
+      case Frame.Eval(MapExpression(map), contOpt) :: tail =>
+        if (map.isEmpty) contOpt.continueOrTerminate(MapValue.empty, tail).pure[F]
+        else {
+          val pairs = map.toList
+          val (firstKey, firstExpr) = pairs.head
+          val remaining = pairs.tail
+          val newCont = Continuation(
+            JsonLogicOp.NoOp,
+            Nil,
+            remaining.map(_._2),
+            contOpt,
+            None,
+            None,
+            isVarName = false,
+            isReduceWithoutInit = false,
+            isArray = false,
+            mapKeys = List(firstKey) ++ remaining.map(_._1)
+          )
+          (Frame.Eval(firstExpr, Some(newCont)) :: tail).asLeft[Either[JsonLogicException, JsonLogicValue]].pure[F]
+        }
+
       case Frame.Eval(VarExpression(Left(key), defaultOpt), contOpt) :: tail =>
         lookupVar(key, defaultOpt)(ctx).map {
           case Left(err)    => err.asLeft[JsonLogicValue].asRight[Frame.Stack]
@@ -149,6 +185,10 @@ object JsonLogicRuntime {
         args match {
           case List(arrExpr, cb: JsonLogicExpression) =>
             val newCont = Continuation(op, Nil, Nil, contOpt, Some(cb))
+            (Frame.Eval(arrExpr, Some(newCont)) :: tail).asLeft[Either[JsonLogicException, JsonLogicValue]].pure[F]
+
+          case List(arrExpr) if op == CountOp =>
+            val newCont = Continuation(op, Nil, Nil, contOpt, None)
             (Frame.Eval(arrExpr, Some(newCont)) :: tail).asLeft[Either[JsonLogicException, JsonLogicValue]].pure[F]
 
           case _ =>
@@ -198,7 +238,7 @@ object JsonLogicRuntime {
       // Handle applying a value to an array continuation
       case Frame.ApplyValue(
             value,
-            cont @ Continuation(_, processed, remaining, parentContOpt, _, _, _, _, true)
+            cont @ Continuation(_, processed, remaining, parentContOpt, _, _, _, _, true, _)
           ) :: tail =>
         if (remaining.isEmpty) {
           // All array elements processed
@@ -210,8 +250,24 @@ object JsonLogicRuntime {
           (Frame.Eval(remaining.head, Some(newCont)) :: tail).asLeft[Either[JsonLogicException, JsonLogicValue]].pure[F]
         }
 
+      // Handle applying a value to a map continuation
+      case Frame.ApplyValue(
+            value,
+            cont @ Continuation(_, processed, remaining, parentContOpt, _, _, _, _, false, mapKeys)
+          ) :: tail if mapKeys.nonEmpty =>
+        val newProcessed = processed :+ value
+        if (remaining.isEmpty) {
+          // All map values processed - construct MapValue
+          val pairs = mapKeys.zip(newProcessed).toMap
+          parentContOpt.continueOrTerminate(MapValue(pairs), tail).pure[F]
+        } else {
+          // Process next map value
+          val newCont = cont.copy(processed = newProcessed, remaining = remaining.tail)
+          (Frame.Eval(remaining.head, Some(newCont)) :: tail).asLeft[Either[JsonLogicException, JsonLogicValue]].pure[F]
+        }
+
       // Handle applying a value to a varName continuation
-      case Frame.ApplyValue(value, Continuation(_, _, _, parentContOpt, _, defaultOpt, true, _, _)) :: tail =>
+      case Frame.ApplyValue(value, Continuation(_, _, _, parentContOpt, _, defaultOpt, true, _, _, _)) :: tail =>
         (value match {
           case StrValue(name) =>
             lookupVar(name, defaultOpt)(ctx)
@@ -224,8 +280,8 @@ object JsonLogicRuntime {
           case Right(result) => parentContOpt.continueOrTerminate(result, tail)
         }
 
-      // Handle applying a value to callback operations
-      case Frame.ApplyValue(value, Continuation(op, _, _, parentContOpt, Some(cbExpr), _, _, _, _)) :: tail if Frame.isCallbackOp(op) =>
+      // Handle applying a value to callback operations (with predicate)
+      case Frame.ApplyValue(value, Continuation(op, _, _, parentContOpt, Some(cbExpr), _, _, _, _, _)) :: tail if Frame.isCallbackOp(op) =>
         value match {
           case arr @ ArrayValue(_) =>
             JsonLogicSemantics[F]
@@ -242,10 +298,28 @@ object JsonLogicRuntime {
               .pure[F]
         }
 
+      // Handle applying a value to CountOp without callback (simple count)
+      case Frame.ApplyValue(value, Continuation(CountOp, _, _, parentContOpt, None, _, _, _, _, _)) :: tail =>
+        value match {
+          case arr @ ArrayValue(_) =>
+            JsonLogicSemantics[F]
+              .applyOp(CountOp)(List(arr))
+              .map {
+                case Left(err)  => err.asLeft[JsonLogicValue].asRight[Frame.Stack]
+                case Right(res) => parentContOpt.continueOrTerminate(res, tail)
+              }
+
+          case ex =>
+            JsonLogicException(s"Expected array value for count operation, got: $ex")
+              .asLeft[JsonLogicValue]
+              .asRight[Frame.Stack]
+              .pure[F]
+        }
+
       // Handle ReduceOp without explicit init value (uses first array element)
       case Frame.ApplyValue(
             ArrayValue(elements),
-            Continuation(ReduceOp, _, _, parentContOpt, Some(cbExpr), _, _, true, _)
+            Continuation(ReduceOp, _, _, parentContOpt, Some(cbExpr), _, _, true, _, _)
           ) :: tail =>
         if (elements.isEmpty) {
           parentContOpt.continueOrTerminate(NullValue, tail).pure[F]
@@ -263,7 +337,7 @@ object JsonLogicRuntime {
       // Handle ReduceOp with explicit init value
       case Frame.ApplyValue(
             arr @ ArrayValue(_),
-            Continuation(ReduceOp, List(init), Nil, parentContOpt, Some(cbExpr), _, _, false, _)
+            Continuation(ReduceOp, List(init), Nil, parentContOpt, Some(cbExpr), _, _, false, _, _)
           ) :: tail =>
         JsonLogicSemantics[F]
           .applyOp(ReduceOp)(List(arr, FunctionValue(cbExpr), init))
@@ -275,7 +349,7 @@ object JsonLogicRuntime {
       // Handle ReduceOp continuation (still processing arguments)
       case Frame.ApplyValue(
             value,
-            cont @ Continuation(ReduceOp, _, remaining, _, _, _, _, false, _)
+            cont @ Continuation(ReduceOp, _, remaining, _, _, _, _, false, _, _)
           ) :: tail if remaining.nonEmpty =>
         val newCont = cont.copy(processed = List(value), remaining = remaining.tail)
         (Frame.Eval(remaining.head, Some(newCont)) :: tail)
@@ -285,7 +359,7 @@ object JsonLogicRuntime {
       // Standard value application
       case Frame.ApplyValue(
             value,
-            Continuation(op, processed, remaining, parentContOpt, None, _, _, _, false)
+            Continuation(op, processed, remaining, parentContOpt, None, _, _, _, false, _)
           ) :: tail =>
         val newProcessed = processed :+ value
         if (remaining.isEmpty) {
@@ -325,14 +399,15 @@ object JsonLogicRuntime {
     defaultOpt: Option[JsonLogicValue] = None,
     isVarName: Boolean = false,
     isReduceWithoutInit: Boolean = false,
-    isArray: Boolean = false
+    isArray: Boolean = false,
+    mapKeys: List[String] = List.empty
   )
 
   object Frame {
     type Stack = List[Frame]
 
     val isCallbackOp: JsonLogicOp => Boolean =
-      List(MapOp, FilterOp, AllOp, SomeOp, NoneOp).contains(_)
+      List(MapOp, FilterOp, AllOp, SomeOp, NoneOp, CountOp).contains(_)
 
     final case class Eval(expr: JsonLogicExpression, contOpt: Option[Continuation]) extends Frame
 

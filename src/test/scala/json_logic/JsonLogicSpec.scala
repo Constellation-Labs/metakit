@@ -1845,4 +1845,276 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         }
     }
   }
+
+  test("MapExpression should decode object with nested expressions") {
+    val exprStr =
+      """
+        |{
+        |  "initiator": ["var", "machineId"],
+        |  "timestamp": 12345
+        |}
+        |""".stripMargin
+
+    val dataStr =
+      """
+        |{"machineId": "abc-123"}
+        |""".stripMargin
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(
+          expr,
+          data,
+          MapValue(Map("initiator" -> StrValue("abc-123"), "timestamp" -> IntValue(12345)))
+        )
+    }
+  }
+
+  test("MapExpression should evaluate nested expressions correctly") {
+    val exprStr =
+      """
+        |{
+        |  "sum": ["+", ["var", "a"], ["var", "b"]],
+        |  "product": ["*", ["var", "a"], ["var", "b"]],
+        |  "constant": 42
+        |}
+        |""".stripMargin
+
+    val dataStr =
+      """
+        |{"a": 5, "b": 3}
+        |""".stripMargin
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(
+          expr,
+          data,
+          MapValue(Map("sum" -> IntValue(8), "product" -> IntValue(15), "constant" -> IntValue(42)))
+        )
+    }
+  }
+
+  test("MapExpression should handle all constant values as ConstExpression(MapValue)") {
+    val exprStr =
+      """
+        |{
+        |  "name": "John",
+        |  "age": 30,
+        |  "active": true
+        |}
+        |""".stripMargin
+
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        // Should decode as ConstExpression(MapValue(...)) since no expressions present
+        staticTestRunner(
+          expr,
+          data,
+          MapValue(Map("name" -> StrValue("John"), "age" -> IntValue(30), "active" -> BoolValue(true)))
+        )
+    }
+  }
+
+  test("MapExpression should handle deeply nested expressions") {
+    val exprStr =
+      """
+        |{
+        |  "result": {
+        |    "value": ["+", 1, 2]
+        |  }
+        |}
+        |""".stripMargin
+
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, MapValue(Map("result" -> MapValue(Map("value" -> IntValue(3))))))
+    }
+  }
+
+  test("MapExpression should encode and decode round-trip correctly") {
+    val exprStr =
+      """
+        |{
+        |  "computed": ["var", "x"],
+        |  "static": 100
+        |}
+        |""".stripMargin
+
+    import io.circe.syntax._
+    import io.circe.parser
+
+    for {
+      expr <- IO.fromEither(parser.parse(exprStr).flatMap(_.as[JsonLogicExpression]))
+      json = expr.asJson
+      decoded <- IO.fromEither(json.as[JsonLogicExpression])
+    } yield expect(decoded == expr)
+  }
+
+  test("MapExpression should handle empty objects") {
+    val exprStr = """{}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, MapValue.empty)
+    }
+  }
+
+  test("MapExpression with mixed expression and constant fields") {
+    val exprStr =
+      """
+        |{
+        |  "userId": ["var", "uid"],
+        |  "action": "create",
+        |  "timestamp": ["var", "ts"],
+        |  "version": 1
+        |}
+        |""".stripMargin
+
+    val dataStr =
+      """
+        |{
+        |  "uid": "user-456",
+        |  "ts": 1609459200
+        |}
+        |""".stripMargin
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(
+          expr,
+          data,
+          MapValue(
+            Map(
+              "userId"    -> StrValue("user-456"),
+              "action"    -> StrValue("create"),
+              "timestamp" -> IntValue(1609459200),
+              "version"   -> IntValue(1)
+            )
+          )
+        )
+    }
+  }
+
+  test("`count` can count elements in an array") {
+    val exprStr =
+      """
+        |{"count": [[1, 2, 3, 4, 5]]}
+        |""".stripMargin
+
+    val dataStr =
+      """
+        |null
+        |""".stripMargin
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(5))
+    }
+  }
+
+  test("`count` can count elements from a variable array") {
+    val exprStr =
+      """
+        |{"count": [{"var": "items"}]}
+        |""".stripMargin
+
+    val dataStr =
+      """
+        |{"items": [10, 20, 30]}
+        |""".stripMargin
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(3))
+    }
+  }
+
+  test("`count` can count elements matching a predicate") {
+    val exprStr =
+      """
+        |{"count": [
+        |  [1, 2, 3, 4, 5],
+        |  {">":[{"var":""}, 2]}
+        |]}
+        |""".stripMargin
+
+    val dataStr =
+      """
+        |null
+        |""".stripMargin
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(3))
+    }
+  }
+
+  test("`count` can count elements in empty array") {
+    val exprStr =
+      """
+        |{"count": [[]]}
+        |""".stripMargin
+
+    val dataStr =
+      """
+        |null
+        |""".stripMargin
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(0))
+    }
+  }
+
+  test("`count` with predicate returns zero when no elements match") {
+    val exprStr =
+      """
+        |{"count": [
+        |  [1, 2, 3],
+        |  {">":[{"var":""}, 10]}
+        |]}
+        |""".stripMargin
+
+    val dataStr =
+      """
+        |null
+        |""".stripMargin
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(0))
+    }
+  }
+
+  test("`count` can count complex objects matching a predicate") {
+    val exprStr =
+      """
+        |{"count": [
+        |  {"var": "users"},
+        |  {"==":[{"var":"status"}, "active"]}
+        |]}
+        |""".stripMargin
+
+    val dataStr =
+      """
+        |{
+        |  "users": [
+        |    {"name": "Alice", "status": "active"},
+        |    {"name": "Bob", "status": "inactive"},
+        |    {"name": "Charlie", "status": "active"}
+        |  ]
+        |}
+        |""".stripMargin
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(2))
+    }
+  }
 }

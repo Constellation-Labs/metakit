@@ -37,7 +37,7 @@ object JsonLogicSemantics {
           case (_, Some(NullValue))                 => base.asRight[JsonLogicException]
           case (_, Some(_: JsonLogicPrimitive))     => base.asRight[JsonLogicException]
           case (ArrayValue(l), Some(ArrayValue(r))) => ArrayValue(l ++ r).asRight
-          case (MapValue(l), Some(MapValue(r)))     => MapValue(r ++ l).asRight
+          case (MapValue(l), Some(MapValue(r)))     => MapValue(l ++ r).asRight
           case (_, Some(ctx))                       => ctx.asRight[JsonLogicException]
         }
 
@@ -47,24 +47,20 @@ object JsonLogicSemantics {
         ): Either[JsonLogicException, JsonLogicValue] = parent match {
           case ArrayValue(elements) =>
             segment.toLongOption match {
-              case Some(idx) =>
-                if (idx >= 0 && idx < elements.length) {
-                  elements(idx.toInt).asRight
-                } else {
-                  JsonLogicException(s"Variable '$key' not found (array index $segment out of range)").asLeft
-                }
-              case None => JsonLogicException(s"Segment '$segment' is not a valid array index").asLeft
+              case Some(idx) if idx >= 0 && idx < elements.length =>
+                elements(idx.toInt).asRight
+              case _ =>
+                NullValue.asRight
             }
 
           case MapValue(m) =>
             m.get(segment) match {
               case Some(child) => child.asRight[JsonLogicException]
-              case None        => JsonLogicException(s"Variable '$key' not found (map key '$segment' missing)").asLeft
+              case None        => NullValue.asRight
             }
 
           case _ =>
-            JsonLogicException(s"Found a non-map/array while traversing '$segment' in dot-notation for key '$key'")
-              .asLeft[JsonLogicValue]
+            NullValue.asRight
         }
 
         if (key.isEmpty) ctx.getOrElse(vars).asRight[JsonLogicException].pure[F]
@@ -84,7 +80,7 @@ object JsonLogicSemantics {
         op match {
           case NoOp          => _ => JsonLogicException("Got unexpected NoOp!").asLeft[JsonLogicValue].pure[F]
           case MissingNoneOp => handleMissingNone
-          case ExistsOp      => handleMissingNone
+          case ExistsOp      => handleExists
           case MissingSomeOp => handleMissingSome
           case IfElseOp      => handleIfElseOp
           case EqOp          => handleEqOp
@@ -120,14 +116,30 @@ object JsonLogicSemantics {
           case MapKeysOp     => handleMapKeysOp
           case GetOp         => handleGetOp
           case IntersectOp   => handleIntersectOp
+          case CountOp       => handleCountOp
         }
 
       /** If 'key' is missing then Some('key') is returned, else if found return None */
       private def isFieldMissing(field: JsonLogicValue): F[Option[JsonLogicValue]] = field match {
-        case v @ StrValue(key)   => getVar(key).map(res => if (res.isLeft) v.some else None)
-        case v @ IntValue(key)   => getVar(key.toString).map(res => if (res.isLeft) v.some else None)
-        case v @ FloatValue(key) => getVar(key.toString).map(res => if (res.isLeft) v.some else None)
-        case v                   => v.some.pure[F]
+        case v @ StrValue(key) =>
+          getVar(key).map {
+            case Right(NullValue) => v.some // NullValue means field is missing
+            case Right(_)         => None // Field exists
+            case Left(_)          => v.some // Error also means missing
+          }
+        case v @ IntValue(key) =>
+          getVar(key.toString).map {
+            case Right(NullValue) => v.some
+            case Right(_)         => None
+            case Left(_)          => v.some
+          }
+        case v @ FloatValue(key) =>
+          getVar(key.toString).map {
+            case Right(NullValue) => v.some
+            case Right(_)         => None
+            case Left(_)          => v.some
+          }
+        case v => v.some.pure[F]
       }
 
       private def handleMissingNone(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] = {
@@ -136,6 +148,17 @@ object JsonLogicSemantics {
           list
             .traverseFilter(isFieldMissing)
             .map(l => (ArrayValue(l): JsonLogicValue).asRight[JsonLogicException])
+
+        args match {
+          case ArrayValue(arr) :: Nil => impl(arr)
+          case _                      => impl(args)
+        }
+      }
+
+      private def handleExists(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] = {
+
+        def impl(list: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] =
+          (BoolValue(!list.contains(NullValue)): JsonLogicValue).asRight[JsonLogicException].pure[F]
 
         args match {
           case ArrayValue(arr) :: Nil => impl(arr)
@@ -269,219 +292,226 @@ object JsonLogicSemantics {
           .asRight[JsonLogicException]
           .pure[F]
 
-      private def handleLt(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] =
-        (args match {
-          case NullValue :: NullValue :: Nil                          => BoolValue(false).asRight
-          case NullValue :: IntValue(i) :: Nil                        => BoolValue(0 < i).asRight
-          case IntValue(i) :: NullValue :: Nil                        => BoolValue(i < 0).asRight
-          case NullValue :: FloatValue(f) :: Nil                      => BoolValue(0 < f).asRight
-          case FloatValue(f) :: NullValue :: Nil                      => BoolValue(f < 0).asRight
-          case IntValue(l) :: IntValue(r) :: Nil                      => BoolValue(l < r).asRight
-          case IntValue(r) :: IntValue(g) :: IntValue(b) :: Nil       => BoolValue(r < g && g < b).asRight
-          case FloatValue(l) :: FloatValue(r) :: Nil                  => BoolValue(l < r).asRight
-          case FloatValue(r) :: FloatValue(g) :: FloatValue(b) :: Nil => BoolValue(r < g && g < b).asRight
-          case _ => JsonLogicException(s"Unexpected input for `${Lt.tag}' got $args").asLeft[JsonLogicValue]
-        }).pure[F]
+      private def handleLt(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] = {
+        import NumericOps._
 
-      private def handleLeq(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] =
-        (args match {
-          case NullValue :: NullValue :: Nil                          => BoolValue(true).asRight
-          case NullValue :: IntValue(i) :: Nil                        => BoolValue(0 <= i).asRight
-          case IntValue(i) :: NullValue :: Nil                        => BoolValue(i <= 0).asRight
-          case NullValue :: FloatValue(f) :: Nil                      => BoolValue(0 <= f).asRight
-          case FloatValue(f) :: NullValue :: Nil                      => BoolValue(f <= 0).asRight
-          case IntValue(l) :: IntValue(r) :: Nil                      => BoolValue(l <= r).asRight
-          case IntValue(r) :: IntValue(g) :: IntValue(b) :: Nil       => BoolValue(r <= g && g <= b).asRight
-          case FloatValue(l) :: FloatValue(r) :: Nil                  => BoolValue(l <= r).asRight
-          case FloatValue(r) :: FloatValue(g) :: FloatValue(b) :: Nil => BoolValue(r <= g && g <= b).asRight
-          case _ => JsonLogicException(s"Unexpected input for `${Leq.tag}' got $args").asLeft[JsonLogicValue]
-        }).pure[F]
+        def compareTwo(l: JsonLogicValue, r: JsonLogicValue): Either[JsonLogicException, Boolean] =
+          for {
+            ln <- promoteToNumeric(l)
+            rn <- promoteToNumeric(r)
+          } yield compareNumeric(ln, rn) < 0
 
-      private def handleGt(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] =
-        (args match {
-          case NullValue :: NullValue :: Nil         => BoolValue(false).asRight
-          case NullValue :: IntValue(i) :: Nil       => BoolValue(0 > i).asRight
-          case IntValue(i) :: NullValue :: Nil       => BoolValue(i > 0).asRight
-          case NullValue :: FloatValue(f) :: Nil     => BoolValue(0 > f).asRight
-          case FloatValue(f) :: NullValue :: Nil     => BoolValue(f > 0).asRight
-          case IntValue(l) :: IntValue(r) :: Nil     => BoolValue(l > r).asRight
-          case FloatValue(l) :: FloatValue(r) :: Nil => BoolValue(l > r).asRight
-          case _ => JsonLogicException(s"Unexpected input for `${Gt.tag}' got $args").asLeft[JsonLogicValue]
-        }).pure[F]
+        def compareThree(a: JsonLogicValue, b: JsonLogicValue, c: JsonLogicValue): Either[JsonLogicException, Boolean] =
+          for {
+            an <- promoteToNumeric(a)
+            bn <- promoteToNumeric(b)
+            cn <- promoteToNumeric(c)
+          } yield compareNumeric(an, bn) < 0 && compareNumeric(bn, cn) < 0
 
-      private def handleGeq(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] =
         (args match {
-          case NullValue :: NullValue :: Nil         => BoolValue(true).asRight
-          case NullValue :: IntValue(i) :: Nil       => BoolValue(0 >= i).asRight
-          case IntValue(i) :: NullValue :: Nil       => BoolValue(i >= 0).asRight
-          case NullValue :: FloatValue(f) :: Nil     => BoolValue(0 >= f).asRight
-          case FloatValue(f) :: NullValue :: Nil     => BoolValue(f >= 0).asRight
-          case IntValue(l) :: IntValue(r) :: Nil     => BoolValue(l >= r).asRight
-          case FloatValue(l) :: FloatValue(r) :: Nil => BoolValue(l >= r).asRight
-          case _ => JsonLogicException(s"Unexpected input for `${Geq.tag}' got $args").asLeft[JsonLogicValue]
+          case l :: r :: Nil      => compareTwo(l, r).map(BoolValue(_))
+          case a :: b :: c :: Nil => compareThree(a, b, c).map(BoolValue(_))
+          case _                  => JsonLogicException(s"Unexpected input for `${Lt.tag}' got $args").asLeft[JsonLogicValue]
         }).pure[F]
+      }
+
+      private def handleLeq(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] = {
+        import NumericOps._
+
+        def compareTwo(l: JsonLogicValue, r: JsonLogicValue): Either[JsonLogicException, Boolean] =
+          for {
+            ln <- promoteToNumeric(l)
+            rn <- promoteToNumeric(r)
+          } yield compareNumeric(ln, rn) <= 0
+
+        def compareThree(a: JsonLogicValue, b: JsonLogicValue, c: JsonLogicValue): Either[JsonLogicException, Boolean] =
+          for {
+            an <- promoteToNumeric(a)
+            bn <- promoteToNumeric(b)
+            cn <- promoteToNumeric(c)
+          } yield compareNumeric(an, bn) <= 0 && compareNumeric(bn, cn) <= 0
+
+        (args match {
+          case l :: r :: Nil      => compareTwo(l, r).map(BoolValue(_))
+          case a :: b :: c :: Nil => compareThree(a, b, c).map(BoolValue(_))
+          case _                  => JsonLogicException(s"Unexpected input for `${Leq.tag}' got $args").asLeft[JsonLogicValue]
+        }).pure[F]
+      }
+
+      private def handleGt(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] = {
+        import NumericOps._
+
+        def compareTwo(l: JsonLogicValue, r: JsonLogicValue): Either[JsonLogicException, Boolean] =
+          for {
+            ln <- promoteToNumeric(l)
+            rn <- promoteToNumeric(r)
+          } yield compareNumeric(ln, rn) > 0
+
+        (args match {
+          case l :: r :: Nil => compareTwo(l, r).map(BoolValue(_))
+          case _             => JsonLogicException(s"Unexpected input for `${Gt.tag}' got $args").asLeft[JsonLogicValue]
+        }).pure[F]
+      }
+
+      private def handleGeq(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] = {
+        import NumericOps._
+
+        def compareTwo(l: JsonLogicValue, r: JsonLogicValue): Either[JsonLogicException, Boolean] =
+          for {
+            ln <- promoteToNumeric(l)
+            rn <- promoteToNumeric(r)
+          } yield compareNumeric(ln, rn) >= 0
+
+        (args match {
+          case l :: r :: Nil => compareTwo(l, r).map(BoolValue(_))
+          case _             => JsonLogicException(s"Unexpected input for `${Geq.tag}' got $args").asLeft[JsonLogicValue]
+        }).pure[F]
+      }
 
       private def handleModuloOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] =
         (args match {
           case IntValue(_) :: IntValue(r) :: Nil if r == 0 =>
-            new JsonLogicException("Division by zero in modulo operation").asLeft[JsonLogicValue]
+            JsonLogicException("Division by zero in modulo operation").asLeft[JsonLogicValue]
           case FloatValue(_) :: FloatValue(r) :: Nil if r == 0 =>
-            new JsonLogicException("Division by zero in modulo operation").asLeft[JsonLogicValue]
-          case IntValue(l) :: IntValue(r) :: Nil     => IntValue(l % r).asRight
-          case FloatValue(l) :: FloatValue(r) :: Nil => FloatValue(l % r).asRight
+            JsonLogicException("Division by zero in modulo operation").asLeft[JsonLogicValue]
+          case IntValue(_) :: FloatValue(r) :: Nil if r == 0 =>
+            JsonLogicException("Division by zero in modulo operation").asLeft[JsonLogicValue]
+          case FloatValue(_) :: IntValue(r) :: Nil if r == 0 =>
+            JsonLogicException("Division by zero in modulo operation").asLeft[JsonLogicValue]
+          case IntValue(l) :: IntValue(r) :: Nil =>
+            IntValue(l % r).asRight
+          case FloatValue(l) :: FloatValue(r) :: Nil =>
+            FloatValue(l % r).asRight
+          case IntValue(l) :: FloatValue(r) :: Nil =>
+            FloatValue(BigDecimal(l) % r).asRight
+          case FloatValue(l) :: IntValue(r) :: Nil =>
+            FloatValue(l % BigDecimal(r)).asRight
           case _ => JsonLogicException(s"Unexpected input for `${ModuloOp.tag}' got $args").asLeft[JsonLogicValue]
         }).pure[F]
 
       private def handleMaxOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] = {
+        import NumericOps._
 
         def impl(list: List[JsonLogicValue]): Either[JsonLogicException, JsonLogicValue] =
-          list match {
-            case Nil => JsonLogicException(s"Unexpected input for `${MaxOp.tag}`: list cannot be empty").asLeft
+          if (list.isEmpty) {
+            JsonLogicException(s"Unexpected input for `${MaxOp.tag}`: list cannot be empty").asLeft
+          } else {
+            list.traverse(promoteToNumeric).map { numerics =>
+              val maxValue = numerics.map(_.toBigDecimal).max
+              val hasFloat = numerics.exists(_.isInstanceOf[FloatResult])
 
-            case intValues @ (_: IntValue) :: _ if list.forall(_.isInstanceOf[IntValue]) =>
-              IntValue(intValues.collect { case IntValue(i) => i }.max).asRight
-
-            case floatValues @ (_: FloatValue) :: _ if list.forall(_.isInstanceOf[FloatValue]) =>
-              FloatValue(floatValues.collect { case FloatValue(f) => f }.max).asRight
-
-            case _ =>
-              JsonLogicException(
-                s"Unexpected input for `${MaxOp.tag}`: all arguments must be IntValue or all FloatValue"
-              ).asLeft
+              if (!hasFloat && maxValue.isWhole && maxValue.isValidLong) {
+                IntValue(maxValue.toBigInt)
+              } else {
+                FloatValue(maxValue)
+              }
+            }
           }
 
-        args match {
-          case ArrayValue(arr) :: Nil => impl(arr).pure[F]
-          case _                      => impl(args).pure[F]
-        }
+        (args match {
+          case ArrayValue(arr) :: Nil => impl(arr)
+          case _                      => impl(args)
+        }).pure[F]
       }
 
       private def handleMinOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] = {
+        import NumericOps._
 
         def impl(list: List[JsonLogicValue]): Either[JsonLogicException, JsonLogicValue] =
-          list match {
-            case Nil => JsonLogicException(s"Unexpected input for `${MinOp.tag}`: list cannot be empty").asLeft
+          if (list.isEmpty) {
+            JsonLogicException(s"Unexpected input for `${MinOp.tag}`: list cannot be empty").asLeft
+          } else {
+            list.traverse(promoteToNumeric).map { numerics =>
+              val minValue = numerics.map(_.toBigDecimal).min
+              val hasFloat = numerics.exists(_.isInstanceOf[FloatResult])
 
-            case intValues @ (_: IntValue) :: _ if list.forall(_.isInstanceOf[IntValue]) =>
-              IntValue(intValues.collect { case IntValue(i) => i }.min).asRight
-
-            case floatValues @ (_: FloatValue) :: _ if list.forall(_.isInstanceOf[FloatValue]) =>
-              FloatValue(floatValues.collect { case FloatValue(f) => f }.min).asRight
-
-            case _ =>
-              JsonLogicException(
-                s"Unexpected input for `${MinOp.tag}`: all arguments must be IntValue or all FloatValue"
-              ).asLeft
+              if (!hasFloat && minValue.isWhole && minValue.isValidLong) {
+                IntValue(minValue.toBigInt)
+              } else {
+                FloatValue(minValue)
+              }
+            }
           }
 
-        args match {
-          case ArrayValue(arr) :: Nil => impl(arr).pure[F]
-          case _                      => impl(args).pure[F]
-        }
+        (args match {
+          case ArrayValue(arr) :: Nil => impl(arr)
+          case _                      => impl(args)
+        }).pure[F]
       }
 
       private def handleAddOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] = {
+        import NumericOps._
 
-        def implStr(str: String): Either[JsonLogicException, JsonLogicValue] =
-          Option(BigDecimal(str)) match {
-            case Some(num) =>
-              if (num.isValidInt) IntValue(num.toBigIntExact.get).asRight
-              else if (num.isValidLong) IntValue(num.toBigIntExact.get).asRight
-              else FloatValue(num).asRight
-            case None => JsonLogicException(s"Failed to decode number as IntValue or FloatValue").asLeft
+        def impl(list: List[JsonLogicValue]): Either[JsonLogicException, JsonLogicValue] =
+          if (list.isEmpty) {
+            JsonLogicException(s"Unexpected input for `${AddOp.tag}`: list cannot be empty").asLeft
+          } else if (list.size == 1 && list.head.isInstanceOf[StrValue]) {
+            // Special case: single string argument converts to number
+            promoteToNumeric(list.head).map(_.toJsonLogicValue)
+          } else {
+            reduceNumeric(list, _ + _, 0)
           }
 
-        def implList(list: List[JsonLogicValue]): Either[JsonLogicException, JsonLogicValue] =
-          list match {
-            case Nil => JsonLogicException(s"Unexpected input for `${AddOp.tag}`: list cannot be empty").asLeft
-
-            case NullValue :: Nil                     => IntValue(0).asRight
-            case NullValue :: NullValue :: Nil        => IntValue(0).asRight
-            case (int: IntValue) :: NullValue :: Nil  => int.asRight
-            case (fl: FloatValue) :: NullValue :: Nil => fl.asRight
-            case NullValue :: (int: IntValue) :: Nil  => int.asRight
-            case NullValue :: (fl: FloatValue) :: Nil => fl.asRight
-
-            case intValues @ (_: IntValue) :: _ if list.forall(_.isInstanceOf[IntValue]) =>
-              IntValue(intValues.collect { case IntValue(i) => i }.sum).asRight
-
-            case floatValues @ (_: FloatValue) :: _ if list.forall(_.isInstanceOf[FloatValue]) =>
-              FloatValue(floatValues.collect { case FloatValue(f) => f }.sum).asRight
-
-            case _ =>
-              JsonLogicException(
-                s"Unexpected input for `${AddOp.tag}`: all arguments must be IntValue or all FloatValue, got $list"
-              ).asLeft
-          }
-
-        args match {
-          case StrValue(str) :: Nil   => implStr(str).pure[F]
-          case ArrayValue(arr) :: Nil => implList(arr).pure[F]
-          case _                      => implList(args).pure[F]
-        }
+        (args match {
+          case ArrayValue(arr) :: Nil => impl(arr)
+          case _                      => impl(args)
+        }).pure[F]
       }
 
       private def handleTimesOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] = {
+        import NumericOps._
 
-        def impl(list: List[JsonLogicValue]): Either[JsonLogicException, JsonLogicValue] = list match {
-          case Nil =>
+        def impl(list: List[JsonLogicValue]): Either[JsonLogicException, JsonLogicValue] =
+          if (list.isEmpty) {
             JsonLogicException(s"Unexpected input for `${TimesOp.tag}`: list cannot be empty").asLeft
+          } else {
+            reduceNumeric(list, _ * _, 1)
+          }
 
-          case NullValue :: NullValue :: Nil     => IntValue(0).asRight
-          case IntValue(_) :: NullValue :: Nil   => IntValue(0).asRight
-          case NullValue :: IntValue(_) :: Nil   => IntValue(0).asRight
-          case FloatValue(_) :: NullValue :: Nil => FloatValue(0.0).asRight
-          case NullValue :: FloatValue(_) :: Nil => FloatValue(0.0).asRight
-
-          case intValues @ (_: IntValue) :: _ if list.forall(_.isInstanceOf[IntValue]) =>
-            IntValue(intValues.collect { case IntValue(i) => i }.product).asRight
-
-          case floatValues @ (_: FloatValue) :: _ if list.forall(_.isInstanceOf[FloatValue]) =>
-            FloatValue(floatValues.collect { case FloatValue(f) => f }.product).asRight
-
-          case _ if list.forall(v => v.isInstanceOf[IntValue] || v.isInstanceOf[FloatValue]) =>
-            FloatValue(
-              list.collect {
-                case iv: IntValue   => iv.asFloatValue.value
-                case fv: FloatValue => fv.value
-              }.product
-            ).asRight
-
-          case _ =>
-            JsonLogicException(
-              s"Unexpected input for `${TimesOp.tag}`: all arguments must be IntValue or all FloatValue. Got $list"
-            ).asLeft
-        }
-
-        args match {
-          case ArrayValue(arr) :: Nil => impl(arr).pure[F]
-          case _                      => impl(args).pure[F]
-        }
+        (args match {
+          case ArrayValue(arr) :: Nil => impl(arr)
+          case _                      => impl(args)
+        }).pure[F]
       }
 
-      private def handleMinusOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] =
+      private def handleMinusOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] = {
+        import NumericOps._
+
         (args match {
-          case NullValue :: NullValue :: Nil         => IntValue(0).asRight
-          case (int: IntValue) :: NullValue :: Nil   => int.asRight
-          case (fl: FloatValue) :: NullValue :: Nil  => fl.asRight
-          case NullValue :: IntValue(i) :: Nil       => IntValue(0 - i).asRight
-          case NullValue :: FloatValue(f) :: Nil     => FloatValue(0.0 - f).asRight
-          case IntValue(i) :: Nil                    => IntValue(-i).asRight
-          case IntValue(l) :: IntValue(r) :: Nil     => IntValue(l - r).asRight
-          case FloatValue(l) :: FloatValue(r) :: Nil => FloatValue(l - r).asRight
+          case v :: Nil =>
+            // Unary negation
+            promoteToNumeric(v).map { n =>
+              combineNumeric((a, _) => -a)(n, IntResult(0))
+            }
+          case l :: r :: Nil =>
+            // Binary subtraction
+            for {
+              ln <- promoteToNumeric(l)
+              rn <- promoteToNumeric(r)
+            } yield combineNumeric(_ - _)(ln, rn)
           case _ =>
-            JsonLogicException(s"Unexpected input for `${MinusOp.tag}' got $args")
-              .asLeft[JsonLogicValue]
+            JsonLogicException(s"Unexpected input for `${MinusOp.tag}' got $args").asLeft[JsonLogicValue]
         }).pure[F]
+      }
 
       private def handleDivOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] =
         (args match {
           case IntValue(_) :: IntValue(r) :: Nil if r == 0 =>
-            new JsonLogicException("Division by zero").asLeft[JsonLogicValue]
+            JsonLogicException("Division by zero").asLeft[JsonLogicValue]
           case FloatValue(_) :: FloatValue(r) :: Nil if r == 0 =>
-            new JsonLogicException("Division by zero").asLeft[JsonLogicValue]
-          case IntValue(l) :: IntValue(r) :: Nil     => IntValue(l / r).asRight
-          case FloatValue(l) :: FloatValue(r) :: Nil => FloatValue(l / r).asRight
+            JsonLogicException("Division by zero").asLeft[JsonLogicValue]
+          case IntValue(_) :: FloatValue(r) :: Nil if r == 0 =>
+            JsonLogicException("Division by zero").asLeft[JsonLogicValue]
+          case FloatValue(_) :: IntValue(r) :: Nil if r == 0 =>
+            JsonLogicException("Division by zero").asLeft[JsonLogicValue]
+          case IntValue(l) :: IntValue(r) :: Nil =>
+            IntValue(l / r).asRight
+          case FloatValue(l) :: FloatValue(r) :: Nil =>
+            FloatValue(l / r).asRight
+          case IntValue(l) :: FloatValue(r) :: Nil =>
+            FloatValue(BigDecimal(l) / r).asRight
+          case FloatValue(l) :: IntValue(r) :: Nil =>
+            FloatValue(l / BigDecimal(r)).asRight
           case _ => JsonLogicException(s"Unexpected input for `${DivOp.tag}' got $args").asLeft[JsonLogicValue]
         }).pure[F]
 
@@ -731,6 +761,30 @@ object JsonLogicSemantics {
           case MapValue(v) :: StrValue(k) :: Nil => implMap(v, k)
           case _ => JsonLogicException(s"Unexpected input to ${GetOp.tag}, got $args").asLeft[JsonLogicValue]
         }).pure[F]
+      }
+
+      private def handleCountOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] = {
+
+        def countSimple(arr: List[JsonLogicValue]): Either[JsonLogicException, JsonLogicValue] =
+          IntValue(arr.length).asRight[JsonLogicException]
+
+        def countWithPredicate(
+          arr: List[JsonLogicValue],
+          expr: JsonLogicExpression
+        ): F[Either[JsonLogicException, JsonLogicValue]] = (for {
+          listBools <- EitherT(
+            arr
+              .traverse(el => evaluationStrategy(expr, el.some).map(_.map(_.isTruthy)))
+              .map(_.sequence)
+          )
+          count = listBools.count(identity)
+        } yield IntValue(count): JsonLogicValue).value
+
+        args match {
+          case ArrayValue(arr) :: Nil                        => countSimple(arr).pure[F]
+          case ArrayValue(arr) :: FunctionValue(expr) :: Nil => countWithPredicate(arr, expr)
+          case _ => JsonLogicException(s"Unexpected input to ${CountOp.tag}, got $args").asLeft[JsonLogicValue].pure[F]
+        }
       }
     }
 

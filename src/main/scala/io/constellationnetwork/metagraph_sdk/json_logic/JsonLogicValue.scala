@@ -5,7 +5,6 @@ import cats.syntax.traverse._
 
 import scala.annotation.tailrec
 
-import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, DecodingFailure, Encoder, Json}
 
 sealed trait JsonLogicValue {
@@ -69,46 +68,40 @@ object JsonLogicValue {
     }
   }
 
-  implicit val encodeNullValue: Encoder[NullValue.type] = Encoder.encodeString.contramap(_ => "null")
-
-  implicit val decodeNullValue: Decoder[NullValue.type] = Decoder.decodeString.emap {
-    case "null" => Right(NullValue)
-    case other  => Left(s"Expected 'null', got '$other'")
+  implicit lazy val encodeJsonLogicValue: Encoder[JsonLogicValue] = Encoder.instance {
+    case NullValue         => Json.Null
+    case BoolValue(value)  => Json.fromBoolean(value)
+    case IntValue(value)   => Json.fromBigInt(value)
+    case FloatValue(value) => Json.fromBigDecimal(value)
+    case StrValue(value)   => Json.fromString(value)
+    case ArrayValue(value) => Json.fromValues(value.map(encodeJsonLogicValue(_)))
+    case MapValue(value)   => Json.obj(value.map { case (k, v) => k -> encodeJsonLogicValue(v) }.toSeq: _*)
+    case FunctionValue(_)  => Json.Null
   }
 
-  implicit val encodeJsonLogicValue: Encoder[JsonLogicValue] = Encoder.instance {
-    case NullValue        => NullValue.asJson
-    case bv: BoolValue    => bv.value.asJson
-    case iv: IntValue     => iv.value.asJson
-    case dv: FloatValue   => dv.value.asJson
-    case sv: StrValue     => sv.value.asJson
-    case av: ArrayValue   => Json.fromValues(av.value.map(encodeJsonLogicValue(_)))
-    case mv: MapValue     => Json.obj(mv.value.map { case (k, v) => k -> v.asJson(encodeJsonLogicValue) }.toSeq: _*)
-    case _: FunctionValue => Json.Null
-  }
-
-  implicit val decodeJsonLogicValue: Decoder[JsonLogicValue] = Decoder.instance { cursor =>
+  implicit lazy val decodeJsonLogicValue: Decoder[JsonLogicValue] = Decoder.instance { cursor =>
     cursor.value.fold(
       jsonNull = Right(NullValue),
-      jsonBoolean = bool => Right(BoolValue(bool)),
+      jsonBoolean = b => Right(BoolValue(b)),
       jsonNumber = num =>
         num.toBigDecimal match {
-          case Some(num) =>
-            num.toBigIntExact match {
-              case Some(bigInt) => Right(IntValue(bigInt))
-              case None         => Right(FloatValue(num))
+          case Some(decimal) =>
+            decimal.toBigIntExact match {
+              case Some(bi) => Right(IntValue(bi))
+              case None     => Right(FloatValue(decimal))
             }
-
           case None => Left(DecodingFailure(s"Failed to decode number: $num", cursor.history))
         },
-      jsonString = str => Right(StrValue(str)),
-      jsonArray = arr =>
-        arr.toList
-          .traverse(_.as[JsonLogicValue](decodeJsonLogicValue))
-          .map(ArrayValue(_)),
-      jsonObject = obj =>
-        obj.toMap.map { case (k, v) => v.as[JsonLogicValue](decodeJsonLogicValue).map(k -> _) }.toList.sequence
-          .map(pair => MapValue(pair.toMap))
+      jsonString = s => Right(StrValue(s)),
+      jsonArray = _ =>
+        cursor.as[List[Json]].flatMap { jsonList =>
+          jsonList.traverse(_.as[JsonLogicValue](decodeJsonLogicValue)).map(ArrayValue(_))
+        },
+      jsonObject = _ =>
+        cursor.as[Map[String, Json]].flatMap { jsonMap =>
+          jsonMap.toList.traverse { case (k, v) => v.as[JsonLogicValue](decodeJsonLogicValue).map(k -> _) }
+            .map(pairs => MapValue(pairs.toMap))
+        }
     )
   }
 }

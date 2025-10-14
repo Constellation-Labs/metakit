@@ -47,4 +47,5 @@ object JsonLogicOp extends Enum[JsonLogicOp] with CirceEnum[JsonLogicOp] {
   case object GetOp extends JsonLogicOp("get")
   case object ExistsOp extends JsonLogicOp("exists")
   case object IntersectOp extends JsonLogicOp("intersect")
+  case object CountOp extends JsonLogicOp("count")
 }
