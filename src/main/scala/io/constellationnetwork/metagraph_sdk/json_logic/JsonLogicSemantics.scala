@@ -117,6 +117,28 @@ object JsonLogicSemantics {
           case GetOp         => handleGetOp
           case IntersectOp   => handleIntersectOp
           case CountOp       => handleCountOp
+          case LengthOp      => handleLengthOp
+          case FindOp        => handleFindOp
+          case LowerOp       => handleLowerOp
+          case UpperOp       => handleUpperOp
+          case JoinOp        => handleJoinOp
+          case SplitOp       => handleSplitOp
+          case DefaultOp     => handleDefaultOp
+          case UniqueOp      => handleUniqueOp
+          case SliceOp       => handleSliceOp
+          case ReverseOp     => handleReverseOp
+          case FlattenOp     => handleFlattenOp
+          case TrimOp        => handleTrimOp
+          case StartsWithOp  => handleStartsWithOp
+          case EndsWithOp    => handleEndsWithOp
+          case AbsOp         => handleAbsOp
+          case RoundOp       => handleRoundOp
+          case FloorOp       => handleFloorOp
+          case CeilOp        => handleCeilOp
+          case PowOp         => handlePowOp
+          case HasOp         => handleHasOp
+          case EntriesOp     => handleEntriesOp
+          case TypeOfOp      => handleTypeOfOp
         }
 
       /** If 'key' is missing then Some('key') is returned, else if found return None */
@@ -786,6 +808,275 @@ object JsonLogicSemantics {
           case _ => JsonLogicException(s"Unexpected input to ${CountOp.tag}, got $args").asLeft[JsonLogicValue].pure[F]
         }
       }
+
+      private def handleLengthOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] =
+        (args match {
+          case ArrayValue(arr) :: Nil => IntValue(arr.length).asRight[JsonLogicException]
+          case StrValue(str) :: Nil   => IntValue(str.length).asRight[JsonLogicException]
+          case _                      => JsonLogicException(s"Unexpected input to ${LengthOp.tag}, got $args").asLeft[JsonLogicValue]
+        }).pure[F]
+
+      private def handleFindOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] = {
+
+        def impl(
+          arr: List[JsonLogicValue],
+          expr: JsonLogicExpression
+        ): F[Either[JsonLogicException, JsonLogicValue]] =
+          arr
+            .foldLeftM[F, Option[JsonLogicValue]](None) {
+              case (acc @ Some(_), _) => (acc: Option[JsonLogicValue]).pure[F]
+              case (None, el) =>
+                evaluationStrategy(expr, el.some).map {
+                  case Right(value) if value.isTruthy => Some(el)
+                  case _                              => None
+                }
+            }
+            .map {
+              case Some(value) => value.asRight[JsonLogicException]
+              case None        => NullValue.asRight[JsonLogicException]
+            }
+
+        args match {
+          case ArrayValue(arr) :: FunctionValue(expr) :: Nil => impl(arr, expr)
+          case _ => JsonLogicException(s"Unexpected input to ${FindOp.tag}, got $args").asLeft[JsonLogicValue].pure[F]
+        }
+      }
+
+      private def handleLowerOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] =
+        (args match {
+          case StrValue(str) :: Nil => StrValue(str.toLowerCase).asRight[JsonLogicException]
+          case _                    => JsonLogicException(s"Unexpected input to ${LowerOp.tag}, got $args").asLeft[JsonLogicValue]
+        }).pure[F]
+
+      private def handleUpperOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] =
+        (args match {
+          case StrValue(str) :: Nil => StrValue(str.toUpperCase).asRight[JsonLogicException]
+          case _                    => JsonLogicException(s"Unexpected input to ${UpperOp.tag}, got $args").asLeft[JsonLogicValue]
+        }).pure[F]
+
+      private def handleJoinOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] = {
+
+        def arrayToString(value: JsonLogicValue): String = value match {
+          case NullValue        => ""
+          case BoolValue(v)     => v.toString
+          case IntValue(v)      => v.toString
+          case FloatValue(v)    => v.toString
+          case StrValue(v)      => v
+          case ArrayValue(_)    => ""
+          case MapValue(_)      => ""
+          case FunctionValue(_) => ""
+        }
+
+        (args match {
+          case ArrayValue(arr) :: StrValue(separator) :: Nil =>
+            StrValue(arr.map(arrayToString).mkString(separator)).asRight[JsonLogicException]
+          case _ => JsonLogicException(s"Unexpected input to ${JoinOp.tag}, got $args").asLeft[JsonLogicValue]
+        }).pure[F]
+      }
+
+      private def handleSplitOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] =
+        (args match {
+          case StrValue(str) :: StrValue(separator) :: Nil =>
+            ArrayValue(str.split(java.util.regex.Pattern.quote(separator), -1).map(StrValue(_)).toList)
+              .asRight[JsonLogicException]
+          case _ => JsonLogicException(s"Unexpected input to ${SplitOp.tag}, got $args").asLeft[JsonLogicValue]
+        }).pure[F]
+
+      private def handleDefaultOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] =
+        args.collectFirst {
+          case v if v != NullValue && v.isTruthy => v
+        }
+          .getOrElse(NullValue)
+          .asRight[JsonLogicException]
+          .pure[F]
+
+      private def handleUniqueOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] =
+        (args match {
+          case ArrayValue(arr) :: Nil => ArrayValue(arr.distinct).asRight[JsonLogicException]
+          case _                      => JsonLogicException(s"Unexpected input to ${UniqueOp.tag}, got $args").asLeft[JsonLogicValue]
+        }).pure[F]
+
+      private def handleSliceOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] =
+        (args match {
+          case ArrayValue(arr) :: IntValue(start) :: Nil =>
+            val startIdx = if (start < 0) Math.max(0, arr.length + start.toInt) else start.toInt
+            ArrayValue(arr.drop(startIdx)).asRight[JsonLogicException]
+          case ArrayValue(arr) :: IntValue(start) :: IntValue(end) :: Nil =>
+            val startIdx = if (start < 0) Math.max(0, arr.length + start.toInt) else start.toInt
+            val endIdx = if (end < 0) Math.max(0, arr.length + end.toInt) else end.toInt
+            ArrayValue(arr.slice(startIdx, endIdx)).asRight[JsonLogicException]
+          case _ => JsonLogicException(s"Unexpected input to ${SliceOp.tag}, got $args").asLeft[JsonLogicValue]
+        }).pure[F]
+
+      private def handleReverseOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] =
+        (args match {
+          case ArrayValue(arr) :: Nil => ArrayValue(arr.reverse).asRight[JsonLogicException]
+          case _                      => JsonLogicException(s"Unexpected input to ${ReverseOp.tag}, got $args").asLeft[JsonLogicValue]
+        }).pure[F]
+
+      private def handleFlattenOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] =
+        (args match {
+          case ArrayValue(arr) :: Nil =>
+            val flattened = arr.flatMap {
+              case ArrayValue(inner) => inner
+              case other             => List(other)
+            }
+            ArrayValue(flattened).asRight[JsonLogicException]
+          case _ => JsonLogicException(s"Unexpected input to ${FlattenOp.tag}, got $args").asLeft[JsonLogicValue]
+        }).pure[F]
+
+      private def handleTrimOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] =
+        (args match {
+          case StrValue(str) :: Nil => StrValue(str.trim).asRight[JsonLogicException]
+          case _                    => JsonLogicException(s"Unexpected input to ${TrimOp.tag}, got $args").asLeft[JsonLogicValue]
+        }).pure[F]
+
+      private def handleStartsWithOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] =
+        (args match {
+          case StrValue(str) :: StrValue(prefix) :: Nil => BoolValue(str.startsWith(prefix)).asRight[JsonLogicException]
+          case _ => JsonLogicException(s"Unexpected input to ${StartsWithOp.tag}, got $args").asLeft[JsonLogicValue]
+        }).pure[F]
+
+      private def handleEndsWithOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] =
+        (args match {
+          case StrValue(str) :: StrValue(suffix) :: Nil => BoolValue(str.endsWith(suffix)).asRight[JsonLogicException]
+          case _ => JsonLogicException(s"Unexpected input to ${EndsWithOp.tag}, got $args").asLeft[JsonLogicValue]
+        }).pure[F]
+
+      private def handleAbsOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] = {
+        import NumericOps._
+
+        (args match {
+          case IntValue(v) :: Nil   => IntValue(v.abs).asRight[JsonLogicException]
+          case FloatValue(v) :: Nil => FloatValue(v.abs).asRight[JsonLogicException]
+          case v :: Nil =>
+            promoteToNumeric(v).map {
+              case IntResult(n)   => IntValue(n.abs)
+              case FloatResult(n) => FloatValue(n.abs)
+            }
+          case _ => JsonLogicException(s"Unexpected input to ${AbsOp.tag}, got $args").asLeft[JsonLogicValue]
+        }).pure[F]
+      }
+
+      private def handleRoundOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] = {
+        import NumericOps._
+
+        (args match {
+          case IntValue(v) :: Nil => IntValue(v).asRight[JsonLogicException]
+          case FloatValue(v) :: Nil =>
+            val rounded = v.setScale(0, BigDecimal.RoundingMode.HALF_UP)
+            if (rounded.isValidLong) IntValue(rounded.toBigInt).asRight
+            else FloatValue(rounded).asRight
+          case v :: Nil =>
+            promoteToNumeric(v).map {
+              case IntResult(n) => IntValue(n)
+              case FloatResult(n) =>
+                val rounded = n.setScale(0, BigDecimal.RoundingMode.HALF_UP)
+                if (rounded.isValidLong) IntValue(rounded.toBigInt) else FloatValue(rounded)
+            }
+          case _ => JsonLogicException(s"Unexpected input to ${RoundOp.tag}, got $args").asLeft[JsonLogicValue]
+        }).pure[F]
+      }
+
+      private def handleFloorOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] = {
+        import NumericOps._
+
+        (args match {
+          case IntValue(v) :: Nil => IntValue(v).asRight[JsonLogicException]
+          case FloatValue(v) :: Nil =>
+            val floored = v.setScale(0, BigDecimal.RoundingMode.FLOOR)
+            if (floored.isValidLong) IntValue(floored.toBigInt).asRight
+            else FloatValue(floored).asRight
+          case v :: Nil =>
+            promoteToNumeric(v).map {
+              case IntResult(n) => IntValue(n)
+              case FloatResult(n) =>
+                val floored = n.setScale(0, BigDecimal.RoundingMode.FLOOR)
+                if (floored.isValidLong) IntValue(floored.toBigInt) else FloatValue(floored)
+            }
+          case _ => JsonLogicException(s"Unexpected input to ${FloorOp.tag}, got $args").asLeft[JsonLogicValue]
+        }).pure[F]
+      }
+
+      private def handleCeilOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] = {
+        import NumericOps._
+
+        (args match {
+          case IntValue(v) :: Nil => IntValue(v).asRight[JsonLogicException]
+          case FloatValue(v) :: Nil =>
+            val ceiled = v.setScale(0, BigDecimal.RoundingMode.CEILING)
+            if (ceiled.isValidLong) IntValue(ceiled.toBigInt).asRight
+            else FloatValue(ceiled).asRight
+          case v :: Nil =>
+            promoteToNumeric(v).map {
+              case IntResult(n) => IntValue(n)
+              case FloatResult(n) =>
+                val ceiled = n.setScale(0, BigDecimal.RoundingMode.CEILING)
+                if (ceiled.isValidLong) IntValue(ceiled.toBigInt) else FloatValue(ceiled)
+            }
+          case _ => JsonLogicException(s"Unexpected input to ${CeilOp.tag}, got $args").asLeft[JsonLogicValue]
+        }).pure[F]
+      }
+
+      private def handlePowOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] = {
+        import NumericOps._
+
+        val maxSafeExponent = 999
+
+        (args match {
+          case IntValue(base) :: IntValue(exp) :: Nil if exp >= 0 && exp.isValidInt && exp <= maxSafeExponent =>
+            IntValue(base.pow(exp.toInt)).asRight[JsonLogicException]
+          case IntValue(_) :: IntValue(exp) :: Nil if exp > maxSafeExponent =>
+            JsonLogicException(
+              s"Exponent $exp exceeds maximum safe value $maxSafeExponent for integer exponentiation"
+            ).asLeft[JsonLogicValue]
+          case base :: exp :: Nil =>
+            for {
+              baseNum <- promoteToNumeric(base)
+              expNum  <- promoteToNumeric(exp)
+              result <- {
+                val expDouble = expNum.toBigDecimal.toDouble
+                if (expDouble.abs > maxSafeExponent) {
+                  JsonLogicException(
+                    s"Exponent magnitude ${expDouble.abs} exceeds maximum safe value $maxSafeExponent"
+                  ).asLeft[JsonLogicValue]
+                } else {
+                  val powResult = Math.pow(baseNum.toBigDecimal.toDouble, expDouble)
+                  if (powResult.isInfinity) {
+                    JsonLogicException(s"Power operation resulted in infinity").asLeft[JsonLogicValue]
+                  } else if (powResult.isNaN) {
+                    JsonLogicException(s"Power operation resulted in NaN").asLeft[JsonLogicValue]
+                  } else if (powResult.isWhole && powResult.isValidInt) {
+                    IntValue(BigInt(powResult.toInt)).asRight[JsonLogicException]
+                  } else {
+                    FloatValue(BigDecimal(powResult)).asRight[JsonLogicException]
+                  }
+                }
+              }
+            } yield result
+          case _ => JsonLogicException(s"Unexpected input to ${PowOp.tag}, got $args").asLeft[JsonLogicValue]
+        }).pure[F]
+      }
+
+      private def handleHasOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] =
+        (args match {
+          case MapValue(m) :: StrValue(key) :: Nil => BoolValue(m.contains(key)).asRight[JsonLogicException]
+          case _ => JsonLogicException(s"Unexpected input to ${HasOp.tag}, got $args").asLeft[JsonLogicValue]
+        }).pure[F]
+
+      private def handleEntriesOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] =
+        (args match {
+          case MapValue(m) :: Nil =>
+            val entries = m.toList.map { case (k, v) => ArrayValue(List(StrValue(k), v)) }
+            ArrayValue(entries).asRight[JsonLogicException]
+          case _ => JsonLogicException(s"Unexpected input to ${EntriesOp.tag}, got $args").asLeft[JsonLogicValue]
+        }).pure[F]
+
+      private def handleTypeOfOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] =
+        (args match {
+          case value :: Nil => StrValue(value.tag).asRight[JsonLogicException]
+          case _            => JsonLogicException(s"Unexpected input to ${TypeOfOp.tag}, got $args").asLeft[JsonLogicValue]
+        }).pure[F]
     }
 
   implicit class semanticOps[F[_]: Monad](sem: JsonLogicSemantics[F]) {

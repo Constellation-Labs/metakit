@@ -8,6 +8,8 @@ import io.constellationnetwork.metagraph_sdk.json_logic.JsonLogicOp._
 
 object JsonLogicRuntime {
 
+  private val callbackOps: Set[JsonLogicOp] = Set(MapOp, FilterOp, AllOp, SomeOp, NoneOp, CountOp, FindOp)
+
   trait EvaluationStrategy {
 
     def apply[F[_]: Monad: JsonLogicSemantics](
@@ -74,19 +76,15 @@ object JsonLogicRuntime {
       case ArrayExpression(args) => args.traverse(run).map(_.sequence.map(ArrayValue(_)))
       case MapExpression(map) =>
         map.toList.traverse { case (k, expr) => run(expr).map(_.map(k -> _)) }.map(_.sequence.map(pairs => MapValue(pairs.toMap)))
-      case ApplyExpression(MapOp, List(arr, cb: JsonLogicExpression))    => callbackFunc(MapOp, arr, cb)
-      case ApplyExpression(FilterOp, List(arr, cb: JsonLogicExpression)) => callbackFunc(FilterOp, arr, cb)
-      case ApplyExpression(ReduceOp, List(arr, cb: JsonLogicExpression)) => callbackFunc(ReduceOp, arr, cb)
       case ApplyExpression(ReduceOp, List(arr, cb: JsonLogicExpression, init)) =>
         callbackFunc(ReduceOp, arr, cb, init.some)
-      case ApplyExpression(AllOp, List(arr, cb: JsonLogicExpression))  => callbackFunc(AllOp, arr, cb)
-      case ApplyExpression(SomeOp, List(arr, cb: JsonLogicExpression)) => callbackFunc(SomeOp, arr, cb)
-      case ApplyExpression(NoneOp, List(arr, cb: JsonLogicExpression)) => callbackFunc(NoneOp, arr, cb)
+      case ApplyExpression(op, List(arr, cb: JsonLogicExpression)) if callbackOps.contains(op) =>
+        callbackFunc(op, arr, cb)
       case ApplyExpression(CountOp, List(arr)) =>
         run(arr).flatMap {
-          case Right(v) => JsonLogicSemantics[F].applyOp(CountOp)(List(v)); case Left(e) => e.asLeft[JsonLogicValue].pure[F]
+          case Right(v) => JsonLogicSemantics[F].applyOp(CountOp)(List(v))
+          case Left(e)  => e.asLeft[JsonLogicValue].pure[F]
         }
-      case ApplyExpression(CountOp, List(arr, cb: JsonLogicExpression)) => callbackFunc(CountOp, arr, cb)
       case ApplyExpression(op, args) =>
         for {
           argValues <- args.traverse(run).map(_.sequence)
@@ -406,8 +404,7 @@ object JsonLogicRuntime {
   object Frame {
     type Stack = List[Frame]
 
-    val isCallbackOp: JsonLogicOp => Boolean =
-      List(MapOp, FilterOp, AllOp, SomeOp, NoneOp, CountOp).contains(_)
+    val isCallbackOp: JsonLogicOp => Boolean = callbackOps.contains
 
     final case class Eval(expr: JsonLogicExpression, contOpt: Option[Continuation]) extends Frame
 

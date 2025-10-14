@@ -2117,4 +2117,757 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         staticTestRunner(expr, data, IntValue(2))
     }
   }
+
+  test("`length` can get the length of an array") {
+    val exprStr =
+      """
+        |{"length": [[1, 2, 3, 4, 5]]}
+        |""".stripMargin
+
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(5))
+    }
+  }
+
+  test("`length` can get the length of a string") {
+    val exprStr =
+      """
+        |{"length": ["hello"]}
+        |""".stripMargin
+
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(5))
+    }
+  }
+
+  test("`find` can find first element matching a predicate") {
+    val exprStr =
+      """
+        |{"find": [
+        |  [1, 2, 3, 4, 5],
+        |  {">":[{"var":""}, 3]}
+        |]}
+        |""".stripMargin
+
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(4))
+    }
+  }
+
+  test("`find` returns null when no element matches") {
+    val exprStr =
+      """
+        |{"find": [
+        |  [1, 2, 3],
+        |  {">":[{"var":""}, 10]}
+        |]}
+        |""".stripMargin
+
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, NullValue)
+    }
+  }
+
+  test("`lower` can convert string to lowercase") {
+    val exprStr =
+      """
+        |{"lower": ["HELLO WORLD"]}
+        |""".stripMargin
+
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("hello world"))
+    }
+  }
+
+  test("`upper` can convert string to uppercase") {
+    val exprStr =
+      """
+        |{"upper": ["hello world"]}
+        |""".stripMargin
+
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("HELLO WORLD"))
+    }
+  }
+
+  test("`join` can join array elements with separator") {
+    val exprStr =
+      """
+        |{"join": [["a", "b", "c"], ","]}
+        |""".stripMargin
+
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("a,b,c"))
+    }
+  }
+
+  test("`join` can join numeric array elements") {
+    val exprStr =
+      """
+        |{"join": [[1, 2, 3], "-"]}
+        |""".stripMargin
+
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("1-2-3"))
+    }
+  }
+
+  test("`split` can split string by separator") {
+    val exprStr =
+      """
+        |{"split": ["a,b,c", ","]}
+        |""".stripMargin
+
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, ArrayValue(List(StrValue("a"), StrValue("b"), StrValue("c"))))
+    }
+  }
+
+  test("`split` preserves empty strings") {
+    val exprStr =
+      """
+        |{"split": ["a,,c", ","]}
+        |""".stripMargin
+
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, ArrayValue(List(StrValue("a"), StrValue(""), StrValue("c"))))
+    }
+  }
+
+  test("`default` returns first non-null truthy value") {
+    val exprStr =
+      """
+        |{"default": [null, false, 0, "hello"]}
+        |""".stripMargin
+
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("hello"))
+    }
+  }
+
+  test("`default` returns null when all values are null or falsy") {
+    val exprStr =
+      """
+        |{"default": [null, false, 0]}
+        |""".stripMargin
+
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, NullValue)
+    }
+  }
+
+  test("new operations can compose together") {
+    val exprStr =
+      """
+        |{"length": {"split": [{"upper": [{"var": "name"}]}, " "]}}
+        |""".stripMargin
+
+    val dataStr =
+      """
+        |{"name": "john doe"}
+        |""".stripMargin
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(2))
+    }
+  }
+
+  test("`unique` can remove duplicate elements from an array") {
+    val exprStr = """{"unique": [[1, 2, 2, 3, 1, 4, 3]]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, ArrayValue(List(IntValue(1), IntValue(2), IntValue(3), IntValue(4))))
+    }
+  }
+
+  test("`unique` preserves order of first occurrence") {
+    val exprStr = """{"unique": [["a", "b", "a", "c", "b"]]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, ArrayValue(List(StrValue("a"), StrValue("b"), StrValue("c"))))
+    }
+  }
+
+  test("`unique` handles empty array") {
+    val exprStr = """{"unique": [[]]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, ArrayValue(List()))
+    }
+  }
+
+  test("`slice` can extract portion of array with start index") {
+    val exprStr = """{"slice": [[1, 2, 3, 4, 5], 2]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, ArrayValue(List(IntValue(3), IntValue(4), IntValue(5))))
+    }
+  }
+
+  test("`slice` can extract portion of array with start and end indices") {
+    val exprStr = """{"slice": [[1, 2, 3, 4, 5], 1, 4]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, ArrayValue(List(IntValue(2), IntValue(3), IntValue(4))))
+    }
+  }
+
+  test("`slice` supports negative start index") {
+    val exprStr = """{"slice": [[1, 2, 3, 4, 5], -2]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, ArrayValue(List(IntValue(4), IntValue(5))))
+    }
+  }
+
+  test("`slice` supports negative end index") {
+    val exprStr = """{"slice": [[1, 2, 3, 4, 5], 1, -1]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, ArrayValue(List(IntValue(2), IntValue(3), IntValue(4))))
+    }
+  }
+
+  test("`reverse` can reverse an array") {
+    val exprStr = """{"reverse": [[1, 2, 3, 4, 5]]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, ArrayValue(List(IntValue(5), IntValue(4), IntValue(3), IntValue(2), IntValue(1))))
+    }
+  }
+
+  test("`reverse` handles empty array") {
+    val exprStr = """{"reverse": [[]]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, ArrayValue(List()))
+    }
+  }
+
+  test("`flatten` can flatten nested arrays one level") {
+    val exprStr = """{"flatten": [[[1, 2], [3, 4], [5]]]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, ArrayValue(List(IntValue(1), IntValue(2), IntValue(3), IntValue(4), IntValue(5))))
+    }
+  }
+
+  test("`flatten` does not recursively flatten") {
+    val exprStr = """{"flatten": [[[1, [2, 3]], [4, 5]]]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(
+          expr,
+          data,
+          ArrayValue(List(IntValue(1), ArrayValue(List(IntValue(2), IntValue(3))), IntValue(4), IntValue(5)))
+        )
+    }
+  }
+
+  test("`flatten` handles array with non-array elements") {
+    val exprStr = """{"flatten": [[1, [2, 3], 4, [5]]]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, ArrayValue(List(IntValue(1), IntValue(2), IntValue(3), IntValue(4), IntValue(5))))
+    }
+  }
+
+  test("`trim` can remove leading and trailing whitespace") {
+    val exprStr = """{"trim": ["  hello world  "]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("hello world"))
+    }
+  }
+
+  test("`trim` handles string with no whitespace") {
+    val exprStr = """{"trim": ["hello"]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("hello"))
+    }
+  }
+
+  test("`trim` preserves internal whitespace") {
+    val exprStr = """{"trim": ["  hello   world  "]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("hello   world"))
+    }
+  }
+
+  test("`startsWith` returns true when string starts with prefix") {
+    val exprStr = """{"startsWith": ["hello world", "hello"]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
+    }
+  }
+
+  test("`startsWith` returns false when string does not start with prefix") {
+    val exprStr = """{"startsWith": ["hello world", "world"]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(false))
+    }
+  }
+
+  test("`startsWith` is case-sensitive") {
+    val exprStr = """{"startsWith": ["hello world", "Hello"]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(false))
+    }
+  }
+
+  test("`endsWith` returns true when string ends with suffix") {
+    val exprStr = """{"endsWith": ["hello world", "world"]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
+    }
+  }
+
+  test("`endsWith` returns false when string does not end with suffix") {
+    val exprStr = """{"endsWith": ["hello world", "hello"]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(false))
+    }
+  }
+
+  test("`endsWith` is case-sensitive") {
+    val exprStr = """{"endsWith": ["hello world", "World"]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(false))
+    }
+  }
+
+  test("`abs` can get absolute value of positive integer") {
+    val exprStr = """{"abs": [5]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(5))
+    }
+  }
+
+  test("`abs` can get absolute value of negative integer") {
+    val exprStr = """{"abs": [-5]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(5))
+    }
+  }
+
+  test("`abs` can get absolute value of negative float") {
+    val exprStr = """{"abs": [-3.14]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, FloatValue(3.14))
+    }
+  }
+
+  test("`round` can round float to nearest integer") {
+    val exprStr = """{"round": [3.6]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(4))
+    }
+  }
+
+  test("`round` uses HALF_UP rounding") {
+    val exprStr = """{"round": [2.5]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(3))
+    }
+  }
+
+  test("`round` handles negative numbers") {
+    val exprStr = """{"round": [-2.7]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(-3))
+    }
+  }
+
+  test("`floor` can get floor of positive float") {
+    val exprStr = """{"floor": [3.9]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(3))
+    }
+  }
+
+  test("`floor` can get floor of negative float") {
+    val exprStr = """{"floor": [-2.1]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(-3))
+    }
+  }
+
+  test("`ceil` can get ceiling of positive float") {
+    val exprStr = """{"ceil": [3.1]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(4))
+    }
+  }
+
+  test("`ceil` can get ceiling of negative float") {
+    val exprStr = """{"ceil": [-2.9]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(-2))
+    }
+  }
+
+  test("`pow` can compute power of two integers") {
+    val exprStr = """{"pow": [2, 3]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(8))
+    }
+  }
+
+  test("`pow` can compute power with float base") {
+    val exprStr = """{"pow": [2.5, 2]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, FloatValue(6.25))
+    }
+  }
+
+  test("`pow` can compute power with negative exponent") {
+    val exprStr = """{"pow": [2, -2]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, FloatValue(0.25))
+    }
+  }
+
+  test("`pow` handles zero exponent") {
+    val exprStr = """{"pow": [5, 0]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(1))
+    }
+  }
+
+  test("`has` returns true when map contains key") {
+    val exprStr = """{"has": [{"a": 1, "b": 2}, "a"]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
+    }
+  }
+
+  test("`has` returns false when map does not contain key") {
+    val exprStr = """{"has": [{"a": 1, "b": 2}, "c"]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(false))
+    }
+  }
+
+  test("`has` can check keys in variable map") {
+    val exprStr = """{"has": [{"var": "obj"}, "name"]}"""
+    val dataStr = """{"obj": {"name": "Alice", "age": 30}}"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
+    }
+  }
+
+  test("`entries` can convert map to array of key-value pairs") {
+    val exprStr = """{"entries": [{"a": 1, "b": 2}]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(
+          expr,
+          data,
+          ArrayValue(
+            List(
+              ArrayValue(List(StrValue("a"), IntValue(1))),
+              ArrayValue(List(StrValue("b"), IntValue(2)))
+            )
+          )
+        )
+    }
+  }
+
+  test("`entries` handles empty map") {
+    val exprStr = """{"entries": [{}]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, ArrayValue(List()))
+    }
+  }
+
+  test("`entries` can work with variable maps") {
+    val exprStr = """{"entries": [{"var": "data"}]}"""
+    val dataStr = """{"data": {"x": 10, "y": 20}}"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(
+          expr,
+          data,
+          ArrayValue(
+            List(
+              ArrayValue(List(StrValue("x"), IntValue(10))),
+              ArrayValue(List(StrValue("y"), IntValue(20)))
+            )
+          )
+        )
+    }
+  }
+
+  test("new array operations can compose together") {
+    val exprStr = """{"reverse": [{"unique": [{"flatten": [[[1, 2], [2, 3], [3, 4]]]}]}]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, ArrayValue(List(IntValue(4), IntValue(3), IntValue(2), IntValue(1))))
+    }
+  }
+
+  test("new string operations can compose together") {
+    val exprStr = """{"startsWith": [{"trim": [{"lower": ["  HELLO WORLD  "]}]}, "hello"]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
+    }
+  }
+
+  test("new math operations can compose together") {
+    val exprStr = """{"abs": [{"floor": [{"pow": [2.5, 2]}]}]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(6))
+    }
+  }
+
+  test("`typeof` returns correct type for null") {
+    val exprStr = """{"typeof": [null]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("null"))
+    }
+  }
+
+  test("`typeof` returns correct type for boolean") {
+    val exprStr = """{"typeof": [true]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("bool"))
+    }
+  }
+
+  test("`typeof` returns correct type for integer") {
+    val exprStr = """{"typeof": [42]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("int"))
+    }
+  }
+
+  test("`typeof` returns correct type for float") {
+    val exprStr = """{"typeof": [3.14]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("float"))
+    }
+  }
+
+  test("`typeof` returns correct type for string") {
+    val exprStr = """{"typeof": ["hello"]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("string"))
+    }
+  }
+
+  test("`typeof` returns correct type for array") {
+    val exprStr = """{"typeof": [[1, 2, 3]]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("array"))
+    }
+  }
+
+  test("`typeof` returns correct type for map") {
+    val exprStr = """{"typeof": [{"key": "value"}]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("map"))
+    }
+  }
+
+  test("`typeof` can work with variables") {
+    val exprStr = """{"typeof": [{"var": "data"}]}"""
+    val dataStr = """{"data": 123}"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("int"))
+    }
+  }
+
+  test("`typeof` can be used in type validation") {
+    val exprStr = """{"===": [{"typeof": [{"var": "age"}]}, "int"]}"""
+    val dataStr = """{"age": 30}"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
+    }
+  }
+
+  test("`typeof` can be used to distinguish int from float") {
+    val exprStr = """{"===": [{"typeof": [{"var": "value"}]}, "float"]}"""
+    val dataStr = """{"value": 3.14}"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
+    }
+  }
 }

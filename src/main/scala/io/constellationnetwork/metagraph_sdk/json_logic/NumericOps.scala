@@ -28,7 +28,7 @@ object NumericOps {
   /**
    * Promotes a JsonLogicValue to a numeric type, handling coercion
    */
-   @tailrec
+  @tailrec
   def promoteToNumeric(value: JsonLogicValue): Either[JsonLogicException, NumericResult] =
     value match {
       case IntValue(i)   => IntResult(i).asRight
@@ -39,7 +39,8 @@ object NumericOps {
         if (s.isEmpty) {
           IntResult(0).asRight
         } else {
-          Either.catchNonFatal(BigInt(s))
+          Either
+            .catchNonFatal(BigInt(s))
             .map(IntResult(_))
             .orElse(Either.catchNonFatal(BigDecimal(s)).map(FloatResult(_)))
             .leftMap(_ => JsonLogicException(s"Cannot convert string '$s' to number"))
@@ -76,8 +77,8 @@ object NumericOps {
         } else {
           FloatValue(result)
         }
-      case (IntResult(l), FloatResult(r))  => FloatValue(op(BigDecimal(l), r))
-      case (FloatResult(l), IntResult(r))  => FloatValue(op(l, BigDecimal(r)))
+      case (IntResult(l), FloatResult(r))   => FloatValue(op(BigDecimal(l), r))
+      case (FloatResult(l), IntResult(r))   => FloatValue(op(l, BigDecimal(r)))
       case (FloatResult(l), FloatResult(r)) => FloatValue(op(l, r))
     }
 
