@@ -1,3 +1,4 @@
+
 import Dependencies.*
 import sbt.*
 import sbt.Keys.*
@@ -8,6 +9,7 @@ ThisBuild / homepage := Some(url("https://github.com/Constellation-Labs/metakit"
 ThisBuild / licenses := List("Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0"))
 ThisBuild / sonatypeCredentialHost := "central.sonatype.com"
 ThisBuild / versionScheme := Some("early-semver")
+ThisBuild / git.gitUncommittedChanges := false
 
 ThisBuild / developers := List(
   Developer(
@@ -58,9 +60,16 @@ lazy val buildInfoSettings = Seq(
 )
 
 lazy val root = (project in file("."))
-  .enablePlugins(JmhPlugin)
   .settings(
     commonSettings,
     commonTestSettings,
     name := "metakit"
+  )
+
+lazy val benchmarks = (project in file("benchmarks"))
+  .enablePlugins(JmhPlugin)
+  .dependsOn(root)
+  .settings(
+    name := "metakit-benchmarks",
+    publish / skip := true
   )
