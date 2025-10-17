@@ -22,15 +22,43 @@ object EvaluationStrategyComparisonSuite extends SimpleIOSuite {
       expr <- IO.fromEither(parser.parse(exprStr).flatMap(_.as[JsonLogicExpression]))
       data <- IO.fromEither(parser.parse(dataStr).flatMap(_.as[JsonLogicValue]))
 
-      recursiveResult <- JsonLogicEvaluator.recursive[IO].evaluate(expr, data, None).attempt
-      tailRecResult   <- JsonLogicEvaluator.tailRecursive[IO].evaluate(expr, data, None).attempt
+      recursiveResult <- JsonLogicEvaluatorV2.recursive[IO].evaluate(expr, data, None).attempt
+      tailRecResult   <- JsonLogicEvaluatorV2.tailRecursive[IO].evaluate(expr, data, None).attempt
     } yield recursiveResult == tailRecResult
+
+  private def testBothStrategiesWithGas(
+    exprStr: String,
+    dataStr: String,
+    gasLimit: GasLimit = GasLimit.Default,
+    gasConfig: GasConfig = GasConfig.Default
+  ): IO[(EvaluationResult[JsonLogicValue], EvaluationResult[JsonLogicValue])] =
+    for {
+      expr <- IO.fromEither(parser.parse(exprStr).flatMap(_.as[JsonLogicExpression]))
+      data <- IO.fromEither(parser.parse(dataStr).flatMap(_.as[JsonLogicValue]))
+
+      recursiveResult <- JsonLogicEvaluatorV2.recursive[IO].evaluateWithGas(expr, data, None, gasLimit, gasConfig)
+      tailRecResult   <- JsonLogicEvaluatorV2.tailRecursive[IO].evaluateWithGas(expr, data, None, gasLimit, gasConfig)
+    } yield (recursiveResult, tailRecResult)
 
   test("simple if/else with lazy evaluation: both strategies should produce same result") {
     val exprStr = """{"if":[{"==":[{"var":"method"},"create"]}, "created", "other"]}"""
     val dataStr = """{"method": "create"}"""
 
     testBothStrategies(exprStr, dataStr).map(expect(_))
+  }
+
+  test("simple if/else with lazy evaluation: both strategies should have same gas cost") {
+    val exprStr = """{"if":[{"==":[{"var":"method"},"create"]}, "created", "other"]}"""
+    val dataStr = """{"method": "create"}"""
+
+    testBothStrategiesWithGas(exprStr, dataStr).map {
+      case (recursive, tailRec) =>
+        expect.all(
+          recursive.value == tailRec.value,
+          recursive.gasUsed == tailRec.gasUsed,
+          recursive.maxDepth == tailRec.maxDepth
+        )
+    }
   }
 
   test("if with count in unexecuted branch: both strategies should produce same result") {
@@ -51,6 +79,30 @@ object EvaluationStrategyComparisonSuite extends SimpleIOSuite {
     testBothStrategies(exprStr, dataStr).map(expect(_))
   }
 
+  test("if with count in unexecuted branch: both strategies should have same gas cost") {
+    val exprStr = """
+      {"if":[
+        {"==":[{"var":"method"},"create"]},
+        {"and":[
+          {"exists":[{"var":"title"},{"var":"options"}]},
+          {">":[{"count":[{"var":"options"}]},1]}
+        ]},
+
+        {"==":[{"var":"method"},"vote"]},
+        {"var":"voter"}
+      ]}
+    """
+    val dataStr = """{"method": "vote", "voter": "Alice", "content": {"options": ["A", "B"]}}"""
+
+    testBothStrategiesWithGas(exprStr, dataStr).map {
+      case (recursive, tailRec) =>
+        expect.all(
+          recursive.value == tailRec.value,
+          recursive.gasUsed == tailRec.gasUsed
+        )
+    }
+  }
+
   test("nested if/else: both strategies should produce same result") {
     val exprStr = """
       {"if" : [
@@ -66,6 +118,29 @@ object EvaluationStrategyComparisonSuite extends SimpleIOSuite {
     val dataStr = """{"temp":55}"""
 
     testBothStrategies(exprStr, dataStr).map(expect(_))
+  }
+
+  test("nested if/else: both strategies should have same gas cost") {
+    val exprStr = """
+      {"if" : [
+        {"<": [{"var":"temp"}, 0] },
+        "freezing",
+
+        {"<": [{"var":"temp"}, 100] },
+        "liquid",
+
+        "gas"
+      ]}
+    """
+    val dataStr = """{"temp":55}"""
+
+    testBothStrategiesWithGas(exprStr, dataStr).map {
+      case (recursive, tailRec) =>
+        expect.all(
+          recursive.value == tailRec.value,
+          recursive.gasUsed == tailRec.gasUsed
+        )
+    }
   }
 
   test("if without else clause: both strategies should return null") {
@@ -109,11 +184,57 @@ object EvaluationStrategyComparisonSuite extends SimpleIOSuite {
     testBothStrategies(exprStr, dataStr).map(expect(_))
   }
 
+  test("complex fizzbuzz with lazy evaluation: both strategies should have same gas cost") {
+    val exprStr = """
+      {
+        "map": [
+          { "var": "list" },
+          {
+            "if": [
+              { "==": [{ "%": [{ "var": "" }, 15] }, 0] },
+              "fizzbuzz",
+
+              { "==": [{ "%": [{ "var": "" }, 3] }, 0] },
+              "fizz",
+
+              { "==": [{ "%": [{ "var": "" }, 5] }, 0] },
+              "buzz",
+
+              { "var": "" }
+            ]
+          }
+        ]
+      }
+    """
+    val dataStr = """{"list": [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]}"""
+
+    testBothStrategiesWithGas(exprStr, dataStr).map {
+      case (recursive, tailRec) =>
+        expect.all(
+          recursive.value == tailRec.value,
+          recursive.gasUsed == tailRec.gasUsed
+        )
+    }
+  }
+
   test("count operation: both strategies should produce same result") {
     val exprStr = """{"count":[{"var":"options"}]}"""
     val dataStr = """{"options": ["A", "B", "C"]}"""
 
     testBothStrategies(exprStr, dataStr).map(expect(_))
+  }
+
+  test("count operation: both strategies should have same gas cost") {
+    val exprStr = """{"count":[{"var":"options"}]}"""
+    val dataStr = """{"options": ["A", "B", "C"]}"""
+
+    testBothStrategiesWithGas(exprStr, dataStr).map {
+      case (recursive, tailRec) =>
+        expect.all(
+          recursive.value == tailRec.value,
+          recursive.gasUsed == tailRec.gasUsed
+        )
+    }
   }
 
   test("count with predicate: both strategies should produce same result") {
@@ -126,6 +247,24 @@ object EvaluationStrategyComparisonSuite extends SimpleIOSuite {
     val dataStr = """null"""
 
     testBothStrategies(exprStr, dataStr).map(expect(_))
+  }
+
+  test("count with predicate: both strategies should have same gas cost") {
+    val exprStr = """
+      {"count": [
+        [1, 2, 3, 4, 5],
+        {">":[{"var":""}, 2]}
+      ]}
+    """
+    val dataStr = """null"""
+
+    testBothStrategiesWithGas(exprStr, dataStr).map {
+      case (recursive, tailRec) =>
+        expect.all(
+          recursive.value == tailRec.value,
+          recursive.gasUsed == tailRec.gasUsed
+        )
+    }
   }
 
   test("reduce operation: both strategies should produce same result") {
@@ -141,6 +280,25 @@ object EvaluationStrategyComparisonSuite extends SimpleIOSuite {
     testBothStrategies(exprStr, dataStr).map(expect(_))
   }
 
+  test("reduce operation: both strategies should have same gas cost") {
+    val exprStr = """
+      {"reduce":[
+        {"var":"integers"},
+        {"+":[{"var":"current"}, {"var":"accumulator"}]},
+        0
+      ]}
+    """
+    val dataStr = """{"integers":[1,2,3,4,5]}"""
+
+    testBothStrategiesWithGas(exprStr, dataStr).map {
+      case (recursive, tailRec) =>
+        expect.all(
+          recursive.value == tailRec.value,
+          recursive.gasUsed == tailRec.gasUsed
+        )
+    }
+  }
+
   test("map operation: both strategies should produce same result") {
     val exprStr = """
       {"map":[
@@ -151,5 +309,23 @@ object EvaluationStrategyComparisonSuite extends SimpleIOSuite {
     val dataStr = """{"integers":[1,2,3,4,5]}"""
 
     testBothStrategies(exprStr, dataStr).map(expect(_))
+  }
+
+  test("map operation: both strategies should have same gas cost") {
+    val exprStr = """
+      {"map":[
+        {"var":"integers"},
+        {"*":[{"var":""},2]}
+      ]}
+    """
+    val dataStr = """{"integers":[1,2,3,4,5]}"""
+
+    testBothStrategiesWithGas(exprStr, dataStr).map {
+      case (recursive, tailRec) =>
+        expect.all(
+          recursive.value == tailRec.value,
+          recursive.gasUsed == tailRec.gasUsed
+        )
+    }
   }
 }

@@ -214,12 +214,15 @@ object JsonLogicSemantics {
             .asLeft[JsonLogicValue]
             .pure[F]
         } else {
-          args
+          val selectedBranch = args
             .grouped(2)
-            .collectFirst { case List(cond, value) if cond.isTruthy => value }
-            .orElse(args.lastOption)
-            .toRight(JsonLogicException("failed during if/else evaluation"))
-            .pure[F]
+            .collectFirst { case List(cond, FunctionValue(branchExpr)) if cond.isTruthy => branchExpr }
+            .orElse(args.lastOption.collect { case FunctionValue(elseExpr) => elseExpr })
+
+          selectedBranch match {
+            case Some(branchExpr) => evaluationStrategy(branchExpr, None)
+            case None             => JsonLogicException("failed during if/else evaluation").asLeft[JsonLogicValue].pure[F]
+          }
         }
 
       private def handleEqOp(args: List[JsonLogicValue]): F[Either[JsonLogicException, JsonLogicValue]] = {

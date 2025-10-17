@@ -1,5 +1,6 @@
 package io.constellationnetwork.metagraph_sdk.json_logic
 
+import cats.Functor
 import cats.syntax.either._
 import cats.syntax.traverse._
 
@@ -67,6 +68,13 @@ object JsonLogicValue {
       case MapValue(map)    => map.contains(key)
     }
   }
+
+  implicit class JsonLogicValueOps[Result[_], A <: JsonLogicValue](r: Result[A])(implicit F: Functor[Result]) {
+    def widenToJsonLogicValue: Result[JsonLogicValue] = F.map(r)(identity: A => JsonLogicValue)
+  }
+
+  implicit def widenJsonLogicValue[Result[_], A <: JsonLogicValue](r: Result[A])(implicit F: Functor[Result]): Result[JsonLogicValue] =
+    F.map(r)(identity: A => JsonLogicValue)
 
   implicit lazy val encodeJsonLogicValue: Encoder[JsonLogicValue] = Encoder.instance {
     case NullValue         => Json.Null
