@@ -17,7 +17,7 @@ object EvaluationStrategyComparisonSuite extends SimpleIOSuite {
   private def testBothStrategies(
     exprStr: String,
     dataStr: String
-  ): IO[Boolean] = {
+  ): IO[Boolean] =
     for {
       expr <- IO.fromEither(parser.parse(exprStr).flatMap(_.as[JsonLogicExpression]))
       data <- IO.fromEither(parser.parse(dataStr).flatMap(_.as[JsonLogicValue]))
@@ -25,7 +25,6 @@ object EvaluationStrategyComparisonSuite extends SimpleIOSuite {
       recursiveResult <- JsonLogicEvaluator.recursive[IO].evaluate(expr, data, None).attempt
       tailRecResult   <- JsonLogicEvaluator.tailRecursive[IO].evaluate(expr, data, None).attempt
     } yield recursiveResult == tailRecResult
-  }
 
   test("simple if/else with lazy evaluation: both strategies should produce same result") {
     val exprStr = """{"if":[{"==":[{"var":"method"},"create"]}, "created", "other"]}"""
