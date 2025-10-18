@@ -25,19 +25,6 @@ object ComplexContractsSuite extends SimpleIOSuite with Checkers {
       .evaluate(expr, data, None)
       .map(actual => expect(actual == expected))
 
-  private def expectError(
-    expr: JsonLogicExpression,
-    data: JsonLogicValue
-  ): IO[Expectations] =
-    JsonLogicEvaluator
-      .tailRecursive[IO]
-      .evaluate(expr, data, None)
-      .attempt
-      .map {
-        case Left(_)  => success
-        case Right(_) => failure("Expected an error but evaluation succeeded")
-      }
-
   val escrowContractExpr: String =
     """
       |{"if":[

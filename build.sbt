@@ -11,6 +11,9 @@ ThisBuild / sonatypeCredentialHost := "central.sonatype.com"
 ThisBuild / versionScheme := Some("early-semver")
 ThisBuild / git.gitUncommittedChanges := false
 
+ThisBuild / semanticdbEnabled := true
+ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
+
 ThisBuild / developers := List(
   Developer(
     "constellation-contributors",
@@ -21,7 +24,6 @@ ThisBuild / developers := List(
 )
 
 ThisBuild / evictionErrorLevel := Level.Warn
-ThisBuild / scalafixDependencies += Libraries.organizeImports
 
 lazy val commonSettings = Seq(
   scalacOptions ++= List("-Ymacro-annotations", "-Yrangepos", "-Wconf:cat=unused:info", "-language:reflectiveCalls"),
@@ -29,7 +31,6 @@ lazy val commonSettings = Seq(
   libraryDependencies ++= Seq(
     CompilerPlugin.kindProjector,
     CompilerPlugin.betterMonadicFor,
-    CompilerPlugin.semanticDB,
     Libraries.tessellationSdk,
     Libraries.cats,
     Libraries.catsEffect,
