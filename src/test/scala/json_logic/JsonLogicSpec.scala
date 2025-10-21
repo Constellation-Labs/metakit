@@ -2,7 +2,8 @@ package json_logic
 
 import cats.effect.IO
 
-import io.constellationnetwork.metagraph_sdk.json_logic._
+import io.constellationnetwork.metagraph_sdk.json_logic.core._
+import io.constellationnetwork.metagraph_sdk.json_logic.runtime.JsonLogicEvaluator
 
 import io.circe.parser
 import weaver.scalacheck.Checkers
@@ -19,27 +20,27 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
     expr: JsonLogicExpression,
     data: JsonLogicValue,
     expected: JsonLogicValue,
-    loggerOpt: Option[JsonLogicValue => F[Unit]] = None
+    loggerOpt: Option[JsonLogicValue => IO[Unit]] = None
   ): IO[Expectations] =
     JsonLogicEvaluator
-      .tailRecursive[F]
+      .tailRecursive[IO]
       .evaluate(expr, data, None)
-      .flatTap { result =>
-        loggerOpt match {
-          case Some(logger) => logger(result)
-          case None         => IO.unit
-        }
+      .flatMap {
+        case Right(result) =>
+          loggerOpt match {
+            case Some(logger) => logger(result).as(expect(result == expected))
+            case None         => IO.pure(expect(result == expected))
+          }
+        case Left(ex) => IO.raiseError(ex)
       }
-      .map(actual => expect(actual == expected))
 
   private def expectError(
     expr: JsonLogicExpression,
     data: JsonLogicValue
   ): IO[Expectations] =
     JsonLogicEvaluator
-      .tailRecursive[F]
+      .tailRecursive[IO]
       .evaluate(expr, data, None)
-      .attempt
       .map {
         case Left(_)  => success
         case Right(_) => failure("Expected an error but evaluation succeeded")
@@ -2125,7 +2126,8 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
     for {
       expr   <- IO.fromEither(parser.parse(exprStr).flatMap(_.as[JsonLogicExpression]))
       data   <- IO.fromEither(parser.parse(dataStr).flatMap(_.as[JsonLogicValue]))
-      result <- JsonLogicEvaluator.tailRecursive[IO].evaluate(expr, data, None)
+      either <- JsonLogicEvaluator.tailRecursive[IO].evaluate(expr, data, None)
+      result <- IO.fromEither(either)
     } yield expect(result == IntValue(3))
   }
 
@@ -2136,7 +2138,8 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
     for {
       expr   <- IO.fromEither(parser.parse(exprStr).flatMap(_.as[JsonLogicExpression]))
       data   <- IO.fromEither(parser.parse(dataStr).flatMap(_.as[JsonLogicValue]))
-      result <- JsonLogicEvaluator.tailRecursive[IO].evaluate(expr, data, None)
+      either <- JsonLogicEvaluator.tailRecursive[IO].evaluate(expr, data, None)
+      result <- IO.fromEither(either)
     } yield expect(result == IntValue(3))
   }
 
@@ -2147,7 +2150,8 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
     for {
       expr   <- IO.fromEither(parser.parse(exprStr).flatMap(_.as[JsonLogicExpression]))
       data   <- IO.fromEither(parser.parse(dataStr).flatMap(_.as[JsonLogicValue]))
-      result <- JsonLogicEvaluator.tailRecursive[IO].evaluate(expr, data, None)
+      either <- JsonLogicEvaluator.tailRecursive[IO].evaluate(expr, data, None)
+      result <- IO.fromEither(either)
     } yield expect(result == BoolValue(true))
   }
 
@@ -2169,7 +2173,8 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
     for {
       expr   <- IO.fromEither(parser.parse(exprStr).flatMap(_.as[JsonLogicExpression]))
       data   <- IO.fromEither(parser.parse(dataStr).flatMap(_.as[JsonLogicValue]))
-      result <- JsonLogicEvaluator.tailRecursive[IO].evaluate(expr, data, None)
+      either <- JsonLogicEvaluator.tailRecursive[IO].evaluate(expr, data, None)
+      result <- IO.fromEither(either)
     } yield expect(result == StrValue("Alice"))
   }
 

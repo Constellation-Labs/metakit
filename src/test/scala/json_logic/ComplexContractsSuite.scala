@@ -2,7 +2,8 @@ package json_logic
 
 import cats.effect.IO
 
-import io.constellationnetwork.metagraph_sdk.json_logic._
+import io.constellationnetwork.metagraph_sdk.json_logic.core.{JsonLogicExpression, JsonLogicValue, StrValue}
+import io.constellationnetwork.metagraph_sdk.json_logic.runtime.JsonLogicEvaluator
 
 import io.circe.parser
 import weaver.scalacheck.Checkers
@@ -23,7 +24,8 @@ object ComplexContractsSuite extends SimpleIOSuite with Checkers {
     JsonLogicEvaluator
       .tailRecursive[IO]
       .evaluate(expr, data, None)
-      .map(actual => expect(actual == expected))
+      .map(_.map(actual => expect(actual == expected)))
+      .flatMap(IO.fromEither)
 
   private def expectError(
     expr: JsonLogicExpression,

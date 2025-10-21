@@ -1,7 +1,9 @@
-package io.constellationnetwork.metagraph_sdk.json_logic
+package io.constellationnetwork.metagraph_sdk.json_logic.gas
 
 import cats.syntax.all._
 import cats.{Monad, Show}
+
+import io.constellationnetwork.metagraph_sdk.json_logic.core.{JsonLogicException, JsonLogicValue}
 
 import derevo.circe.magnolia.{decoder, encoder}
 import derevo.derive
@@ -56,8 +58,8 @@ case class GasExhaustedException(
   required: GasCost,
   available: GasLimit
 ) extends JsonLogicException(
-  s"Gas exhausted: required ${required.amount}, available ${available.amount}"
-)
+      s"Gas exhausted: required ${required.amount}, available ${available.amount}"
+    )
 
 @derive(encoder, decoder)
 case class GasConfig(
@@ -174,11 +176,11 @@ object GasTracking {
     implicit class GasTrackingOps[F[_]: Monad](operation: F[Either[JsonLogicException, JsonLogicValue]]) {
 
       def withGas(
-                   costFn: GasConfig => GasCost,
-                   gasLimit: GasLimit,
-                   gasConfig: GasConfig,
-                   depth: Int
-                 )(costModifier: JsonLogicValue => GasCost = _ => GasCost.Zero): F[Either[JsonLogicException, (JsonLogicValue, GasCost, Int, Int)]] = {
+        costFn: GasConfig => GasCost,
+        gasLimit: GasLimit,
+        gasConfig: GasConfig,
+        depth: Int
+      )(costModifier: JsonLogicValue => GasCost = _ => GasCost.Zero): F[Either[JsonLogicException, (JsonLogicValue, GasCost, Int, Int)]] = {
         val baseCost = costFn(gasConfig) + gasConfig.depthPenalty(depth.toLong)
 
         gasLimit
@@ -197,10 +199,10 @@ object GasTracking {
     implicit class PreValidatedOps(args: List[JsonLogicValue]) {
 
       def validateThen[F[_]: Monad](
-                                     errorCheck: List[JsonLogicValue] => Option[JsonLogicException]
-                                   )(
-                                     operation: List[JsonLogicValue] => F[Either[JsonLogicException, JsonLogicValue]]
-                                   ): F[Either[JsonLogicException, JsonLogicValue]] =
+        errorCheck: List[JsonLogicValue] => Option[JsonLogicException]
+      )(
+        operation: List[JsonLogicValue] => F[Either[JsonLogicException, JsonLogicValue]]
+      ): F[Either[JsonLogicException, JsonLogicValue]] =
         errorCheck(args).fold(operation(args))(err => err.asLeft[JsonLogicValue].pure[F])
     }
   }

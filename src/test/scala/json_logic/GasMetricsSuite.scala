@@ -2,7 +2,7 @@ package json_logic
 
 import cats.effect.IO
 
-import io.constellationnetwork.metagraph_sdk.json_logic.{GasCost, GasMetrics}
+import io.constellationnetwork.metagraph_sdk.json_logic.gas.{GasCost, GasMetrics}
 
 import weaver.SimpleIOSuite
 
@@ -11,9 +11,7 @@ object GasMetricsSuite extends SimpleIOSuite {
   test("GasMetrics.zero has zero values") {
     val zero = GasMetrics.zero
     IO.pure(
-      expect(zero.cost == GasCost.Zero) and
-        expect(zero.depth == 0) and
-        expect(zero.opCount == 0)
+      expect(zero.cost == GasCost.Zero).and(expect(zero.depth == 0)).and(expect(zero.opCount == 0))
     )
   }
 
@@ -23,9 +21,7 @@ object GasMetricsSuite extends SimpleIOSuite {
     val metrics = GasMetrics.single(cost, depth)
 
     IO.pure(
-      expect(metrics.cost == cost) and
-        expect(metrics.depth == depth) and
-        expect(metrics.opCount == 1)
+      expect(metrics.cost == cost).and(expect(metrics.depth == depth)).and(expect(metrics.opCount == 1))
     )
   }
 
@@ -34,9 +30,7 @@ object GasMetricsSuite extends SimpleIOSuite {
     val metrics = GasMetrics.fromCost(cost)
 
     IO.pure(
-      expect(metrics.cost == cost) and
-        expect(metrics.depth == 0) and
-        expect(metrics.opCount == 0)
+      expect(metrics.cost == cost).and(expect(metrics.depth == 0)).and(expect(metrics.opCount == 0))
     )
   }
 
@@ -46,8 +40,7 @@ object GasMetricsSuite extends SimpleIOSuite {
     val combined = m1.combine(m2)
 
     IO.pure(
-      expect(combined.cost == GasCost(150)) and
-        expect(combined.opCount == 8)
+      expect(combined.cost == GasCost(150)).and(expect(combined.opCount == 8))
     )
   }
 
@@ -76,9 +69,9 @@ object GasMetricsSuite extends SimpleIOSuite {
     val rightAssoc = m1.combine(m2.combine(m3))
 
     IO.pure(
-      expect(leftAssoc.cost == rightAssoc.cost) and
-        expect(leftAssoc.depth == rightAssoc.depth) and
-        expect(leftAssoc.opCount == rightAssoc.opCount)
+      expect(leftAssoc.cost == rightAssoc.cost)
+        .and(expect(leftAssoc.depth == rightAssoc.depth))
+        .and(expect(leftAssoc.opCount == rightAssoc.opCount))
     )
   }
 
@@ -87,9 +80,7 @@ object GasMetricsSuite extends SimpleIOSuite {
     val combined = m.combine(GasMetrics.zero)
 
     IO.pure(
-      expect(combined.cost == m.cost) and
-        expect(combined.depth == m.depth) and
-        expect(combined.opCount == m.opCount)
+      expect(combined.cost == m.cost).and(expect(combined.depth == m.depth)).and(expect(combined.opCount == m.opCount))
     )
   }
 
@@ -98,9 +89,7 @@ object GasMetricsSuite extends SimpleIOSuite {
     val updated = m.withCost(GasCost(50))
 
     IO.pure(
-      expect(updated.cost == GasCost(150)) and
-        expect(updated.depth == 5) and
-        expect(updated.opCount == 2)
+      expect(updated.cost == GasCost(150)).and(expect(updated.depth == 5)).and(expect(updated.opCount == 2))
     )
   }
 
@@ -109,9 +98,7 @@ object GasMetricsSuite extends SimpleIOSuite {
     val updated = m.withDepth(7)
 
     IO.pure(
-      expect(updated.depth == 7) and
-        expect(updated.cost == GasCost(100)) and
-        expect(updated.opCount == 2)
+      expect(updated.depth == 7).and(expect(updated.cost == GasCost(100))).and(expect(updated.opCount == 2))
     )
   }
 
@@ -127,9 +114,7 @@ object GasMetricsSuite extends SimpleIOSuite {
     val updated = m.incrementOps
 
     IO.pure(
-      expect(updated.opCount == 3) and
-        expect(updated.cost == GasCost(100)) and
-        expect(updated.depth == 5)
+      expect(updated.opCount == 3).and(expect(updated.cost == GasCost(100))).and(expect(updated.depth == 5))
     )
   }
 
@@ -143,9 +128,7 @@ object GasMetricsSuite extends SimpleIOSuite {
       .incrementOps
 
     IO.pure(
-      expect(m.cost == GasCost(75)) and
-        expect(m.depth == 5) and
-        expect(m.opCount == 2)
+      expect(m.cost == GasCost(75)).and(expect(m.depth == 5)).and(expect(m.opCount == 2))
     )
   }
 
@@ -160,9 +143,7 @@ object GasMetricsSuite extends SimpleIOSuite {
     val combined = metrics.foldLeft(GasMetrics.zero)(_.combine(_))
 
     IO.pure(
-      expect(combined.cost == GasCost(100)) and
-        expect(combined.depth == 3) and
-        expect(combined.opCount == 4)
+      expect(combined.cost == GasCost(100)).and(expect(combined.depth == 3)).and(expect(combined.opCount == 4))
     )
   }
 
@@ -171,9 +152,7 @@ object GasMetricsSuite extends SimpleIOSuite {
     val shown = cats.Show[GasMetrics].show(m)
 
     IO.pure(
-      expect(shown.contains("100")) and
-        expect(shown.contains("5")) and
-        expect(shown.contains("3"))
+      expect(shown.contains("100")).and(expect(shown.contains("5"))).and(expect(shown.contains("3")))
     )
   }
 }

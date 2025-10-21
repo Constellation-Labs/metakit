@@ -1,4 +1,4 @@
-package io.constellationnetwork.metagraph_sdk.json_logic
+package io.constellationnetwork.metagraph_sdk.json_logic.core
 
 import enumeratum.{CirceEnum, _}
 

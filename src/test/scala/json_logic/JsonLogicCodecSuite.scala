@@ -2,7 +2,7 @@ package json_logic
 
 import cats.effect.IO
 
-import io.constellationnetwork.metagraph_sdk.json_logic._
+import io.constellationnetwork.metagraph_sdk.json_logic.core._
 
 import io.circe.syntax._
 import io.circe.{Decoder, Encoder}
@@ -12,29 +12,25 @@ object JsonLogicCodecSuite extends SimpleIOSuite {
 
   // Simulate a Transition-like structure from workchain
   case class MockTransition(
-    from:   String,
-    to:     String,
+    from: String,
+    to: String,
     effect: JsonLogicExpression
   )
 
   object MockTransition {
     // Simulate derevo-generated encoder/decoder
-    implicit val encoder: Encoder[MockTransition] = Encoder.forProduct3("from", "to", "effect")(t =>
-      (t.from, t.to, t.effect)
-    )
+    implicit val encoder: Encoder[MockTransition] = Encoder.forProduct3("from", "to", "effect")(t => (t.from, t.to, t.effect))
 
     implicit val decoder: Decoder[MockTransition] = Decoder.forProduct3("from", "to", "effect")(MockTransition.apply)
   }
 
   case class MockDefinition(
-    states:      Map[String, String],
+    states: Map[String, String],
     transitions: List[MockTransition]
   )
 
   object MockDefinition {
-    implicit val encoder: Encoder[MockDefinition] = Encoder.forProduct2("states", "transitions")(d =>
-      (d.states, d.transitions)
-    )
+    implicit val encoder: Encoder[MockDefinition] = Encoder.forProduct2("states", "transitions")(d => (d.states, d.transitions))
 
     implicit val decoder: Decoder[MockDefinition] = Decoder.forProduct2("states", "transitions")(MockDefinition.apply)
   }
@@ -46,7 +42,7 @@ object JsonLogicCodecSuite extends SimpleIOSuite {
           List(
             MapExpression(
               Map(
-                "childId"    -> ConstExpression(StrValue("test-child-id")),
+                "childId" -> ConstExpression(StrValue("test-child-id")),
                 "definition" -> MapExpression(
                   Map(
                     "states" -> MapExpression(
@@ -75,19 +71,18 @@ object JsonLogicCodecSuite extends SimpleIOSuite {
     for {
       json    <- IO.pure(original.asJson)
       decoded <- IO.fromEither(json.as[JsonLogicExpression])
-    } yield {
+    } yield
       decoded match {
         case MapExpression(m) =>
-          expect(m.contains("_spawn")) and
-            expect(m.contains("_triggers")) and
-            expect(m.contains("spawned")) and
-            expect(decoded == original)
+          expect(m.contains("_spawn"))
+            .and(expect(m.contains("_triggers")))
+            .and(expect(m.contains("spawned")))
+            .and(expect(decoded == original))
         case ConstExpression(_) =>
           failure("MapExpression was incorrectly decoded as ConstExpression")
         case other =>
           failure(s"MapExpression was decoded as unexpected type: ${other.getClass.getSimpleName}")
       }
-    }
   }
 
   test("MapExpression with mixed expression and constant fields should roundtrip") {
@@ -133,16 +128,13 @@ object JsonLogicCodecSuite extends SimpleIOSuite {
     for {
       json    <- IO.pure(original.asJson)
       decoded <- IO.fromEither(json.as[JsonLogicExpression])
-    } yield {
+    } yield
       decoded match {
         case MapExpression(m) =>
-          expect(m.contains("effect")) and
-            expect(m.contains("triggers")) and
-            expect(decoded == original)
+          expect(m.contains("effect")).and(expect(m.contains("triggers"))).and(expect(decoded == original))
         case _ =>
           failure(s"Expected MapExpression but got ${decoded.getClass.getSimpleName}")
       }
-    }
   }
 
   test("ArrayExpression with nested MapExpression should roundtrip") {
@@ -183,7 +175,7 @@ object JsonLogicCodecSuite extends SimpleIOSuite {
     for {
       json    <- IO.pure(original.asJson)
       decoded <- IO.fromEither(json.as[JsonLogicExpression])
-    } yield {
+    } yield
       decoded match {
         case ConstExpression(MapValue(_)) =>
           expect(decoded == original)
@@ -192,7 +184,6 @@ object JsonLogicCodecSuite extends SimpleIOSuite {
         case _ =>
           failure(s"Expected ConstExpression(MapValue) but got ${decoded.getClass.getSimpleName}")
       }
-    }
   }
 
   test("MapExpression vs ConstExpression(MapValue) distinction") {
@@ -228,7 +219,7 @@ object JsonLogicCodecSuite extends SimpleIOSuite {
         case _ => failure("ConstExpression(MapValue) should decode as ConstExpression or MapExpression")
       }
 
-      mapExprCheck and constCheck
+      mapExprCheck.and(constCheck)
     }
   }
 
@@ -263,13 +254,12 @@ object JsonLogicCodecSuite extends SimpleIOSuite {
     for {
       json    <- IO.pure(original.asJson)
       decoded <- IO.fromEither(json.as[JsonLogicExpression])
-    } yield {
+    } yield
       decoded match {
-        case MapExpression(m) if m.isEmpty         => success
+        case MapExpression(m) if m.isEmpty             => success
         case ConstExpression(MapValue(m)) if m.isEmpty => success
-        case _                                     => failure(s"Empty MapExpression should decode as empty map, got: $decoded")
+        case _                                         => failure(s"Empty MapExpression should decode as empty map, got: $decoded")
       }
-    }
   }
 
   test("MapExpression with all expression types should roundtrip") {
@@ -366,17 +356,17 @@ object JsonLogicCodecSuite extends SimpleIOSuite {
 
       // Decode it back (simulating retrieval from state)
       decodedTransition <- IO.fromEither(transitionJson.as[MockTransition])
-    } yield {
+    } yield
       decodedTransition.effect match {
         case MapExpression(m) =>
-          val hasSpawn    = m.contains("_spawn")
+          val hasSpawn = m.contains("_spawn")
           val hasTriggers = m.contains("_triggers")
-          val hasLevel    = m.contains("level")
+          val hasLevel = m.contains("level")
 
-          expect(hasSpawn, "Should preserve _spawn key") and
-            expect(hasTriggers, "Should preserve _triggers key") and
-            expect(hasLevel, "Should preserve level key") and
-            expect(decodedTransition.effect == spawnEffect, "Effect should match original")
+          expect(hasSpawn, "Should preserve _spawn key")
+            .and(expect(hasTriggers, "Should preserve _triggers key"))
+            .and(expect(hasLevel, "Should preserve level key"))
+            .and(expect(decodedTransition.effect == spawnEffect, "Effect should match original"))
 
         case ConstExpression(MapValue(_)) =>
           failure("MapExpression was incorrectly decoded as ConstExpression(MapValue)")
@@ -384,7 +374,6 @@ object JsonLogicCodecSuite extends SimpleIOSuite {
         case other =>
           failure(s"Effect was decoded as unexpected type: ${other.getClass.getSimpleName}")
       }
-    }
   }
 
   test("Definition with multiple transitions should preserve all MapExpression effects") {
@@ -428,30 +417,30 @@ object JsonLogicCodecSuite extends SimpleIOSuite {
     )
 
     for {
-      defJson       <- IO.pure(definition.asJson)
-      decodedDef    <- IO.fromEither(defJson.as[MockDefinition])
+      defJson    <- IO.pure(definition.asJson)
+      decodedDef <- IO.fromEither(defJson.as[MockDefinition])
       decodedTrans1 = decodedDef.transitions(0)
       decodedTrans2 = decodedDef.transitions(1)
     } yield {
       val trans1Check = decodedTrans1.effect match {
         case MapExpression(m) =>
-          expect(m.contains("status")) and expect(m.contains("progress"))
+          expect(m.contains("status")).and(expect(m.contains("progress")))
         case _ =>
           failure("Transition 1 effect should be MapExpression")
       }
 
       val trans2Check = decodedTrans2.effect match {
         case MapExpression(m) =>
-          expect(m.contains("_spawn"), "Transition 2 should preserve _spawn") and
-            expect(m.contains("_triggers")) and
-            expect(m.contains("spawned"))
+          expect(m.contains("_spawn"), "Transition 2 should preserve _spawn")
+            .and(expect(m.contains("_triggers")))
+            .and(expect(m.contains("spawned")))
         case ConstExpression(MapValue(_)) =>
           failure("Transition 2 effect should be MapExpression, not ConstExpression")
         case _ =>
           failure("Transition 2 effect should be MapExpression")
       }
 
-      trans1Check and trans2Check
+      trans1Check.and(trans2Check)
     }
   }
 }

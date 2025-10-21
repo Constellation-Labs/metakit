@@ -1,16 +1,19 @@
-package io.constellationnetwork.metagraph_sdk.json_logic
+package io.constellationnetwork.metagraph_sdk.json_logic.runtime
 
 import cats.Monad
 import cats.syntax.all._
 
-import io.constellationnetwork.metagraph_sdk.json_logic.ResultContext._
+import io.constellationnetwork.metagraph_sdk.json_logic.core._
+import io.constellationnetwork.metagraph_sdk.json_logic.semantics.JsonLogicSemantics
 
-object JsonLogicRuntimeV2 {
+import ResultContext._
+
+object JsonLogicRuntime {
 
   // Shared helper to determine if an argument at a given index is a callback
   private def isCallbackArg(op: JsonLogicOp, argIndex: Int): Boolean = op match {
-    case JsonLogicOp.MapOp | JsonLogicOp.FilterOp | JsonLogicOp.AllOp |
-         JsonLogicOp.SomeOp | JsonLogicOp.NoneOp | JsonLogicOp.FindOp | JsonLogicOp.CountOp =>
+    case JsonLogicOp.MapOp | JsonLogicOp.FilterOp | JsonLogicOp.AllOp | JsonLogicOp.SomeOp | JsonLogicOp.NoneOp | JsonLogicOp.FindOp |
+        JsonLogicOp.CountOp =>
       argIndex == 1
 
     case JsonLogicOp.ReduceOp =>
@@ -22,23 +25,47 @@ object JsonLogicRuntimeV2 {
 
   // Shared helper to extract the value from a Result[JsonLogicValue]
   private def extractValue[Result[_]](result: Result[JsonLogicValue]): JsonLogicValue = result match {
-    case v: JsonLogicValue => v
+    case v: JsonLogicValue      => v
     case (v: JsonLogicValue, _) => v
-    case _ => NullValue
+    case _                      => NullValue
   }
 
   // Shared helper to extract a list from Result[List[JsonLogicValue]]
   private def extractList[Result[_]](result: Result[List[JsonLogicValue]]): List[JsonLogicValue] = result match {
-    case list: List[_] => list.asInstanceOf[List[JsonLogicValue]]
+    case list: List[_]      => list.asInstanceOf[List[JsonLogicValue]]
     case (list: List[_], _) => list.asInstanceOf[List[JsonLogicValue]]
-    case _ => List.empty
+    case _                  => List.empty
   }
+
+  private def lookupVar[F[_]: Monad, Result[_]: ResultContext](
+    key: String,
+    defaultOpt: Option[JsonLogicValue],
+    currentCtx: Option[JsonLogicValue]
+  )(implicit sem: JsonLogicSemantics[F, Result]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
+    sem.getVar(key, currentCtx).map {
+      case Right(result) =>
+        val value = extractValue(result)
+        value match {
+          case NullValue if key.nonEmpty =>
+            defaultOpt match {
+              case Some(d) => d.pure[Result].asRight[JsonLogicException]
+              case None    => result.asRight[JsonLogicException]
+            }
+          case _ =>
+            result.asRight[JsonLogicException]
+        }
+      case Left(_) =>
+        defaultOpt match {
+          case Some(d) => d.pure[Result].asRight[JsonLogicException]
+          case None    => (NullValue: JsonLogicValue).pure[Result].asRight[JsonLogicException]
+        }
+    }
 
   // Direct recursive evaluation (may cause stack overflow on deep expressions??)
   def evaluateDirect[F[_]: Monad, Result[_]: ResultContext](
     program: JsonLogicExpression,
     ctx: Option[JsonLogicValue]
-  )(implicit sem: JsonLogicSemanticsV2[F, Result]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
+  )(implicit sem: JsonLogicSemantics[F, Result]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
 
     def evaluateExpression(
       expr: JsonLogicExpression,
@@ -47,14 +74,18 @@ object JsonLogicRuntimeV2 {
       case ConstExpression(value) =>
         value.pure[Result].asRight[JsonLogicException].pure[F]
 
-      case VarExpression(Left(key), _) =>
-        sem.getVar(key, currentCtx)
+      case VarExpression(Left(key), defaultOpt) =>
+        lookupVar(key, defaultOpt, currentCtx)
 
-      case VarExpression(Right(keyExpr), _) =>
+      case VarExpression(Right(keyExpr), defaultOpt) =>
         evaluateExpression(keyExpr, currentCtx).flatMap {
           case Right(keyResult) =>
             val keyValue = extractValue(keyResult)
-            sem.getVar(keyValue.toString, currentCtx)
+            keyValue match {
+              case StrValue(name)                  => lookupVar(name, defaultOpt, currentCtx)
+              case ArrayValue(StrValue(name) :: _) => lookupVar(name, defaultOpt, currentCtx)
+              case v                               => JsonLogicException(s"Got non-string input: $v").asLeft[Result[JsonLogicValue]].pure[F]
+            }
           case Left(error) =>
             error.asLeft[Result[JsonLogicValue]].pure[F]
         }
@@ -67,8 +98,9 @@ object JsonLogicRuntimeV2 {
         }
 
       case MapExpression(map) =>
-        map.toList.traverse { case (k, v) =>
-          evaluateExpression(v, currentCtx).map(_.map(k -> _))
+        map.toList.traverse {
+          case (k, v) =>
+            evaluateExpression(v, currentCtx).map(_.map(k -> _))
         }.map { evaluatedPairs =>
           evaluatedPairs.sequence.map { pairs =>
             val (keys, vResults) = pairs.unzip
@@ -92,9 +124,9 @@ object JsonLogicRuntimeV2 {
                     .ifM(
                       ifTrue = evaluateExpression(thenBranch, currentCtx),
                       ifFalse = rest match {
-                        case Nil => (NullValue: JsonLogicValue).pure[Result].asRight[JsonLogicException].pure[F]
+                        case Nil              => (NullValue: JsonLogicValue).pure[Result].asRight[JsonLogicException].pure[F]
                         case List(elseBranch) => evaluateExpression(elseBranch, currentCtx)
-                        case moreArgs => evaluateIfElse(moreArgs)
+                        case moreArgs         => evaluateIfElse(moreArgs)
                       }
                     )
                 case Left(error) =>
@@ -109,17 +141,22 @@ object JsonLogicRuntimeV2 {
         evaluateIfElse(args)
 
       case ApplyExpression(op, args) =>
-        args.zipWithIndex.traverse { case (arg, idx) =>
-          if (JsonLogicRuntimeV2.isCallbackArg(op, idx)) {
-            (FunctionValue(arg): JsonLogicValue).pure[Result].asRight[JsonLogicException].pure[F]
-          } else {
-            evaluateExpression(arg, currentCtx)
-          }
+        args.zipWithIndex.traverse {
+          case (arg, idx) =>
+            if (JsonLogicRuntime.isCallbackArg(op, idx)) {
+              arg match {
+                case ConstExpression(fv: FunctionValue) =>
+                  (fv: JsonLogicValue).pure[Result].asRight[JsonLogicException].pure[F]
+                case _ =>
+                  (FunctionValue(arg): JsonLogicValue).pure[Result].asRight[JsonLogicException].pure[F]
+              }
+            } else {
+              evaluateExpression(arg, currentCtx)
+            }
         }.flatMap { evaluatedArgs =>
           evaluatedArgs.sequence match {
             case Right(resultArgs) =>
-              val unwrappedArgs = extractList(resultArgs.sequence)
-              sem.applyOp(op)(unwrappedArgs)
+              sem.applyOp(op)(resultArgs)
             case Left(error) =>
               error.asLeft[Result[JsonLogicValue]].pure[F]
           }
@@ -132,9 +169,9 @@ object JsonLogicRuntimeV2 {
   // Tail-recursive stack-machine evaluation using tailRecM (stack-safe)
   // Default evaluate uses tail-recursive interpret for stack safety
   def evaluate[F[_]: Monad, Result[_]: ResultContext](
-                                                       program: JsonLogicExpression,
-                                                       ctx: Option[JsonLogicValue]
-  )(implicit sem: JsonLogicSemanticsV2[F, Result]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
+    program: JsonLogicExpression,
+    ctx: Option[JsonLogicValue]
+  )(implicit sem: JsonLogicSemantics[F, Result]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
 
     // Stack frames for tail-recursive evaluation
     sealed trait Frame
@@ -148,7 +185,8 @@ object JsonLogicRuntimeV2 {
       parent: Option[Continuation],
       isArray: Boolean = false,
       mapKeys: List[String] = List.empty,
-      isIfElse: Boolean = false
+      isIfElse: Boolean = false,
+      varDefault: Option[JsonLogicValue] = None
     )
 
     implicit class ContinuationOps(contOpt: Option[Continuation]) {
@@ -158,7 +196,7 @@ object JsonLogicRuntimeV2 {
       ): Either[List[Frame], Either[JsonLogicException, Result[JsonLogicValue]]] =
         contOpt match {
           case Some(cont) => (ApplyValue(value, cont) :: tail).asLeft
-          case None => value.asRight[JsonLogicException].asRight
+          case None       => value.asRight[JsonLogicException].asRight
         }
     }
 
@@ -175,14 +213,31 @@ object JsonLogicRuntimeV2 {
       case Eval(ConstExpression(v), contOpt) :: tail =>
         contOpt.continueOrTerminate(v.pure[Result], tail).pure[F]
 
-      case Eval(VarExpression(Left(key), _), contOpt) :: tail =>
+      case Eval(VarExpression(Left(key), defaultOpt), contOpt) :: tail =>
         sem.getVar(key, ctx).map {
-          case Right(value) => contOpt.continueOrTerminate(value, tail)
-          case Left(err) => err.asLeft[Result[JsonLogicValue]].asRight[Stack]
+          case Right(result) =>
+            val value = extractValue(result)
+            val finalResult = value match {
+              case NullValue if key.nonEmpty =>
+                defaultOpt match {
+                  case Some(d) => d.pure[Result]
+                  case None    => result
+                }
+              case _ => result
+            }
+            contOpt.continueOrTerminate(finalResult, tail)
+          case Left(_) =>
+            val finalResult = defaultOpt match {
+              case Some(d) => d.pure[Result]
+              case None    => (NullValue: JsonLogicValue).pure[Result]
+            }
+            contOpt.continueOrTerminate(finalResult, tail)
         }
 
-      case Eval(VarExpression(Right(keyExpr), _), contOpt) :: tail =>
-        (Eval(keyExpr, Some(Continuation(JsonLogicOp.NoOp, Nil, Nil, contOpt))) :: tail).asLeft[Either[JsonLogicException, Result[JsonLogicValue]]].pure[F]
+      case Eval(VarExpression(Right(keyExpr), defaultOpt), contOpt) :: tail =>
+        (Eval(keyExpr, Some(Continuation(JsonLogicOp.NoOp, Nil, Nil, contOpt, varDefault = defaultOpt))) :: tail)
+          .asLeft[Either[JsonLogicException, Result[JsonLogicValue]]]
+          .pure[F]
 
       case Eval(ArrayExpression(elements), contOpt) :: tail =>
         if (elements.isEmpty) {
@@ -234,29 +289,33 @@ object JsonLogicRuntimeV2 {
         if (args.isEmpty) {
           sem.applyOp(op)(Nil).map {
             case Right(res) => contOpt.continueOrTerminate(res, tail)
-            case Left(err) => err.asLeft[Result[JsonLogicValue]].asRight[Stack]
+            case Left(err)  => err.asLeft[Result[JsonLogicValue]].asRight[Stack]
           }
-        } else if (JsonLogicRuntimeV2.isCallbackArg(op, 0)) {
-          // First arg is callback - wrap it in FunctionValue
-          val wrappedCallback: Result[JsonLogicValue] = (FunctionValue(args.head): JsonLogicValue).pure[Result]
+        } else if (JsonLogicRuntime.isCallbackArg(op, 0)) {
+          // First arg is callback - check if it's already a FunctionValue constant
+          val wrappedCallback: Result[JsonLogicValue] = args.head match {
+            case ConstExpression(fv: FunctionValue) => (fv: JsonLogicValue).pure[Result]
+            case _                                  => (FunctionValue(args.head): JsonLogicValue).pure[Result]
+          }
           val newCont = Continuation(op, List(wrappedCallback), args.tail, contOpt)
           if (args.tail.isEmpty) {
             // No more args - apply the operation
-            val unwrappedArgs = List(JsonLogicRuntimeV2.extractValue(wrappedCallback))
-            sem.applyOp(op)(unwrappedArgs).map {
+            sem.applyOp(op)(List(wrappedCallback)).map {
               case Right(res) => contOpt.continueOrTerminate(res, tail)
-              case Left(err) => err.asLeft[Result[JsonLogicValue]].asRight[Stack]
+              case Left(err)  => err.asLeft[Result[JsonLogicValue]].asRight[Stack]
             }
           } else {
             // More args remain - evaluate next arg
-            (Eval(args.tail.head, Some(newCont.copy(remaining = args.tail.tail))) :: tail).asLeft[Either[JsonLogicException, Result[JsonLogicValue]]].pure[F]
+            (Eval(args.tail.head, Some(newCont.copy(remaining = args.tail.tail))) :: tail)
+              .asLeft[Either[JsonLogicException, Result[JsonLogicValue]]]
+              .pure[F]
           }
         } else {
           val newCont = Continuation(op, Nil, args.tail, contOpt)
           (Eval(args.head, Some(newCont)) :: tail).asLeft[Either[JsonLogicException, Result[JsonLogicValue]]].pure[F]
         }
 
-      case ApplyValue(value, cont @ Continuation(_, processed, remaining, parentContOpt, true, _, _)) :: tail =>
+      case ApplyValue(value, cont @ Continuation(_, processed, remaining, parentContOpt, true, _, _, _)) :: tail =>
         if (remaining.isEmpty) {
           val arrayValue: Result[JsonLogicValue] = (processed :+ value).sequence.map(arr => ArrayValue(arr): JsonLogicValue)
           parentContOpt.continueOrTerminate(arrayValue, tail).pure[F]
@@ -265,10 +324,11 @@ object JsonLogicRuntimeV2 {
           (Eval(remaining.head, Some(newCont)) :: tail).asLeft[Either[JsonLogicException, Result[JsonLogicValue]]].pure[F]
         }
 
-      case ApplyValue(value, cont @ Continuation(_, processed, remaining, parentContOpt, false, mapKeys, _)) :: tail if mapKeys.nonEmpty =>
+      case ApplyValue(value, cont @ Continuation(_, processed, remaining, parentContOpt, false, mapKeys, _, _)) :: tail
+          if mapKeys.nonEmpty =>
         val newProcessed = processed :+ value
         if (remaining.isEmpty) {
-          val pairs = mapKeys.zip(newProcessed.map(JsonLogicRuntimeV2.extractValue)).toMap
+          val pairs = mapKeys.zip(newProcessed.map(JsonLogicRuntime.extractValue)).toMap
           parentContOpt.continueOrTerminate((MapValue(pairs): JsonLogicValue).pure[Result], tail).pure[F]
         } else {
           val newCont = cont.copy(processed = newProcessed, remaining = remaining.tail)
@@ -276,10 +336,10 @@ object JsonLogicRuntimeV2 {
         }
 
       // Handle applying a value to IfElse continuation (lazy evaluation)
-      case ApplyValue(condValue, Continuation(JsonLogicOp.IfElseOp, _, remaining, parentContOpt, _, _, true)) :: tail =>
+      case ApplyValue(condValue, Continuation(JsonLogicOp.IfElseOp, _, remaining, parentContOpt, _, _, true, _)) :: tail =>
         remaining match {
           case thenBranch :: rest =>
-            val condVal = JsonLogicRuntimeV2.extractValue(condValue)
+            val condVal = JsonLogicRuntime.extractValue(condValue)
             if (condVal.isTruthy) {
               (Eval(thenBranch, parentContOpt) :: tail).asLeft[Either[JsonLogicException, Result[JsonLogicValue]]].pure[F]
             } else if (rest.isEmpty) {
@@ -306,33 +366,77 @@ object JsonLogicRuntimeV2 {
               .pure[F]
         }
 
-      case ApplyValue(value, Continuation(JsonLogicOp.NoOp, _, _, parentContOpt, _, _, _)) :: tail =>
-        val keyValue = JsonLogicRuntimeV2.extractValue(value)
-        sem.getVar(keyValue.toString, ctx).map {
-          case Right(result) => parentContOpt.continueOrTerminate(result, tail)
-          case Left(err) => err.asLeft[Result[JsonLogicValue]].asRight[Stack]
+      case ApplyValue(value, Continuation(JsonLogicOp.NoOp, _, _, parentContOpt, _, _, _, defaultOpt)) :: tail =>
+        val keyValue = JsonLogicRuntime.extractValue(value)
+        keyValue match {
+          case StrValue(name) =>
+            sem.getVar(name, ctx).map {
+              case Right(result) =>
+                val extractedValue = extractValue(result)
+                val finalResult = extractedValue match {
+                  case NullValue if name.nonEmpty =>
+                    defaultOpt match {
+                      case Some(d) => d.pure[Result]
+                      case None    => result
+                    }
+                  case _ => result
+                }
+                parentContOpt.continueOrTerminate(finalResult, tail)
+              case Left(_) =>
+                val finalResult = defaultOpt match {
+                  case Some(d) => d.pure[Result]
+                  case None    => (NullValue: JsonLogicValue).pure[Result]
+                }
+                parentContOpt.continueOrTerminate(finalResult, tail)
+            }
+          case ArrayValue(StrValue(name) :: _) =>
+            sem.getVar(name, ctx).map {
+              case Right(result) =>
+                val extractedValue = extractValue(result)
+                val finalResult = extractedValue match {
+                  case NullValue if name.nonEmpty =>
+                    defaultOpt match {
+                      case Some(d) => d.pure[Result]
+                      case None    => result
+                    }
+                  case _ => result
+                }
+                parentContOpt.continueOrTerminate(finalResult, tail)
+              case Left(_) =>
+                val finalResult = defaultOpt match {
+                  case Some(d) => d.pure[Result]
+                  case None    => (NullValue: JsonLogicValue).pure[Result]
+                }
+                parentContOpt.continueOrTerminate(finalResult, tail)
+            }
+          case v =>
+            JsonLogicException(s"Got non-string input: $v")
+              .asLeft[Result[JsonLogicValue]]
+              .asRight[Stack]
+              .pure[F]
         }
 
-      case ApplyValue(value, Continuation(op, processed, remaining, parentContOpt, false, _, _)) :: tail =>
+      case ApplyValue(value, Continuation(op, processed, remaining, parentContOpt, false, _, _, _)) :: tail =>
         val newProcessed = processed :+ value
         if (remaining.isEmpty) {
-          val unwrappedArgs = newProcessed.map(JsonLogicRuntimeV2.extractValue)
-          sem.applyOp(op)(unwrappedArgs).map {
+          sem.applyOp(op)(newProcessed).map {
             case Right(res) => parentContOpt.continueOrTerminate(res, tail)
-            case Left(err) => err.asLeft[Result[JsonLogicValue]].asRight[Stack]
+            case Left(err)  => err.asLeft[Result[JsonLogicValue]].asRight[Stack]
           }
         } else {
           val nextArgIndex = newProcessed.size
-          if (JsonLogicRuntimeV2.isCallbackArg(op, nextArgIndex)) {
-            // Next arg is a callback - wrap it without evaluating
-            val wrappedCallback: Result[JsonLogicValue] = (FunctionValue(remaining.head): JsonLogicValue).pure[Result]
+          if (JsonLogicRuntime.isCallbackArg(op, nextArgIndex)) {
+            // Next arg is callback - check if it's already a FunctionValue constant
+            val wrappedCallback: Result[JsonLogicValue] = remaining.head match {
+              case ConstExpression(fv: FunctionValue) => (fv: JsonLogicValue).pure[Result]
+              case _                                  => (FunctionValue(remaining.head): JsonLogicValue).pure[Result]
+            }
             val updatedProcessed: List[Result[JsonLogicValue]] = newProcessed :+ wrappedCallback
             if (remaining.tail.isEmpty) {
               // No more args - apply operation
-              val unwrappedArgs = updatedProcessed.map(JsonLogicRuntimeV2.extractValue)
-              sem.applyOp(op)(unwrappedArgs).map {
+              sem.applyOp(op)(updatedProcessed).map {
                 case Right(res) => parentContOpt.continueOrTerminate(res, tail)
-                case Left(err) => err.asLeft[Result[JsonLogicValue]].asRight[Stack]
+                case Left(err)  => err.asLeft[Result[JsonLogicValue]].asRight[Stack]
               }
             } else {
               // More args remain

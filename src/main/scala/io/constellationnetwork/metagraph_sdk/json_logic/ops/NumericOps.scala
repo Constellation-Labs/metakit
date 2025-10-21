@@ -1,9 +1,11 @@
-package io.constellationnetwork.metagraph_sdk.json_logic
+package io.constellationnetwork.metagraph_sdk.json_logic.ops
 
 import cats.syntax.either._
 import cats.syntax.traverse._
 
 import scala.annotation.tailrec
+
+import io.constellationnetwork.metagraph_sdk.json_logic.core._
 
 /**
  * Unified numeric handling for consistent arithmetic operations across Int/Float types
