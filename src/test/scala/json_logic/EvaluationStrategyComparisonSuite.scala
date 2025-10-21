@@ -2,7 +2,9 @@ package json_logic
 
 import cats.effect.IO
 
-import io.constellationnetwork.metagraph_sdk.json_logic._
+import io.constellationnetwork.metagraph_sdk.json_logic.core.{JsonLogicExpression, JsonLogicValue}
+import io.constellationnetwork.metagraph_sdk.json_logic.gas.{EvaluationResult, GasConfig, GasLimit}
+import io.constellationnetwork.metagraph_sdk.json_logic.runtime.JsonLogicEvaluator
 
 import io.circe.parser
 import weaver.SimpleIOSuite
@@ -22,8 +24,8 @@ object EvaluationStrategyComparisonSuite extends SimpleIOSuite {
       expr <- IO.fromEither(parser.parse(exprStr).flatMap(_.as[JsonLogicExpression]))
       data <- IO.fromEither(parser.parse(dataStr).flatMap(_.as[JsonLogicValue]))
 
-      recursiveResult <- JsonLogicEvaluatorV2.recursive[IO].evaluate(expr, data, None).attempt
-      tailRecResult   <- JsonLogicEvaluatorV2.tailRecursive[IO].evaluate(expr, data, None).attempt
+      recursiveResult <- JsonLogicEvaluator.recursive[IO].evaluate(expr, data, None)
+      tailRecResult   <- JsonLogicEvaluator.tailRecursive[IO].evaluate(expr, data, None)
     } yield recursiveResult == tailRecResult
 
   private def testBothStrategiesWithGas(
@@ -36,8 +38,8 @@ object EvaluationStrategyComparisonSuite extends SimpleIOSuite {
       expr <- IO.fromEither(parser.parse(exprStr).flatMap(_.as[JsonLogicExpression]))
       data <- IO.fromEither(parser.parse(dataStr).flatMap(_.as[JsonLogicValue]))
 
-      recursiveResult <- JsonLogicEvaluatorV2.recursive[IO].evaluateWithGas(expr, data, None, gasLimit, gasConfig)
-      tailRecResult   <- JsonLogicEvaluatorV2.tailRecursive[IO].evaluateWithGas(expr, data, None, gasLimit, gasConfig)
+      recursiveResult <- JsonLogicEvaluator.recursive[IO].evaluateWithGas(expr, data, None, gasLimit, gasConfig).flatMap(IO.fromEither)
+      tailRecResult   <- JsonLogicEvaluator.tailRecursive[IO].evaluateWithGas(expr, data, None, gasLimit, gasConfig).flatMap(IO.fromEither)
     } yield (recursiveResult, tailRecResult)
 
   test("simple if/else with lazy evaluation: both strategies should produce same result") {

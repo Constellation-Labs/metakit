@@ -4,8 +4,9 @@ import cats.Id
 import cats.effect.IO
 import cats.syntax.all._
 
-import io.constellationnetwork.metagraph_sdk.json_logic.ResultContext._
-import io.constellationnetwork.metagraph_sdk.json_logic.{GasCost, GasMetrics, ResultContext}
+import io.constellationnetwork.metagraph_sdk.json_logic.gas.{GasCost, GasMetrics}
+import io.constellationnetwork.metagraph_sdk.json_logic.runtime.ResultContext
+import io.constellationnetwork.metagraph_sdk.json_logic.runtime.ResultContext._
 
 import weaver.SimpleIOSuite
 
@@ -49,8 +50,7 @@ object ResultContextSuite extends SimpleIOSuite {
     val (result, metrics) = rc.pure(value)
 
     IO.pure(
-      expect(result == "test") and
-        expect(metrics == GasMetrics.zero)
+      expect(result == "test").and(expect(metrics == GasMetrics.zero))
     )
   }
 
@@ -60,10 +60,7 @@ object ResultContextSuite extends SimpleIOSuite {
     val (result, metrics) = rc.map(input)(_.toUpperCase)
 
     IO.pure(
-      expect(result == "HELLO") and
-        expect(metrics.cost == GasCost(100)) and
-        expect(metrics.depth == 5) and
-        expect(metrics.opCount == 2)
+      expect(result == "HELLO").and(expect(metrics.cost == GasCost(100))).and(expect(metrics.depth == 5)).and(expect(metrics.opCount == 2))
     )
   }
 
@@ -75,10 +72,7 @@ object ResultContextSuite extends SimpleIOSuite {
     }
 
     IO.pure(
-      expect(result == 20) and
-        expect(metrics.cost == GasCost(80)) and
-        expect(metrics.depth == 4) and
-        expect(metrics.opCount == 3)
+      expect(result == 20).and(expect(metrics.cost == GasCost(80))).and(expect(metrics.depth == 4)).and(expect(metrics.opCount == 3))
     )
   }
 
@@ -90,8 +84,7 @@ object ResultContextSuite extends SimpleIOSuite {
     }
 
     IO.pure(
-      expect(result == 6) and
-        expect(metrics.depth == 7)
+      expect(result == 6).and(expect(metrics.depth == 7))
     )
   }
 
@@ -105,10 +98,10 @@ object ResultContextSuite extends SimpleIOSuite {
     val (results, metrics) = rc.sequence(inputs)
 
     IO.pure(
-      expect(results == List(1, 2, 3)) and
-        expect(metrics.cost == GasCost(45)) and
-        expect(metrics.depth == 4) and
-        expect(metrics.opCount == 3)
+      expect(results == List(1, 2, 3))
+        .and(expect(metrics.cost == GasCost(45)))
+        .and(expect(metrics.depth == 4))
+        .and(expect(metrics.opCount == 3))
     )
   }
 
@@ -118,8 +111,7 @@ object ResultContextSuite extends SimpleIOSuite {
     val (results, metrics) = rc.sequence(inputs)
 
     IO.pure(
-      expect(results == List.empty) and
-        expect(metrics == GasMetrics.zero)
+      expect(results == List.empty).and(expect(metrics == GasMetrics.zero))
     )
   }
 
@@ -131,10 +123,7 @@ object ResultContextSuite extends SimpleIOSuite {
     val (result, metrics) = step2
 
     IO.pure(
-      expect(result == 25) and
-        expect(metrics.cost == GasCost(100)) and
-        expect(metrics.depth == 5) and
-        expect(metrics.opCount == 3)
+      expect(result == 25).and(expect(metrics.cost == GasCost(100))).and(expect(metrics.depth == 5)).and(expect(metrics.opCount == 3))
     )
   }
 
@@ -153,10 +142,7 @@ object ResultContextSuite extends SimpleIOSuite {
     val (result, metrics) = step2
 
     IO.pure(
-      expect(result == 30) and
-        expect(metrics.cost == GasCost(18)) and
-        expect(metrics.depth == 3) and
-        expect(metrics.opCount == 3)
+      expect(result == 30).and(expect(metrics.cost == GasCost(18))).and(expect(metrics.depth == 3)).and(expect(metrics.opCount == 3))
     )
   }
 
@@ -172,8 +158,7 @@ object ResultContextSuite extends SimpleIOSuite {
     val (value, metrics) = rc.pure("test")
 
     IO.pure(
-      expect(value == "test") and
-        expect(metrics == GasMetrics.zero)
+      expect(value == "test").and(expect(metrics == GasMetrics.zero))
     )
   }
 
@@ -185,8 +170,7 @@ object ResultContextSuite extends SimpleIOSuite {
     val gasResult: (String, GasMetrics) = gasRc.pure("hello")
 
     IO.pure(
-      expect(idResult == 42) and
-        expect(gasResult._1 == "hello")
+      expect(idResult == 42).and(expect(gasResult._1 == "hello"))
     )
   }
 
@@ -198,10 +182,7 @@ object ResultContextSuite extends SimpleIOSuite {
     }
 
     IO.pure(
-      expect(result == 50) and
-        expect(metrics.cost == GasCost(50)) and
-        expect(metrics.depth == 5) and
-        expect(metrics.opCount == 2)
+      expect(result == 50).and(expect(metrics.cost == GasCost(50))).and(expect(metrics.depth == 5)).and(expect(metrics.opCount == 2))
     )
   }
 
@@ -222,14 +203,11 @@ object ResultContextSuite extends SimpleIOSuite {
     val (_, metrics2) = rc.sequence(inputs2)
 
     IO.pure(
-      expect(metrics1.cost == metrics2.cost) and
-        expect(metrics1.depth == metrics2.depth) and
-        expect(metrics1.opCount == metrics2.opCount)
+      expect(metrics1.cost == metrics2.cost).and(expect(metrics1.depth == metrics2.depth)).and(expect(metrics1.opCount == metrics2.opCount))
     )
   }
 
   test("syntax - map on Id context") {
-    
 
     val value: Id[Int] = 10
     val result = value.map(_ * 2)
@@ -242,8 +220,7 @@ object ResultContextSuite extends SimpleIOSuite {
     val (result, metrics) = value.map(_.toUpperCase)
 
     IO.pure(
-      expect(result == "HELLO") and
-        expect(metrics.cost == GasCost(50))
+      expect(result == "HELLO").and(expect(metrics.cost == GasCost(50)))
     )
   }
 
@@ -255,7 +232,6 @@ object ResultContextSuite extends SimpleIOSuite {
   }
 
   test("syntax - flatMap on WithGas context") {
-    
 
     val value: ResultContext.WithGas[Int] = (10, GasMetrics(GasCost(20), 2, 1))
     val (result, metrics) = value.flatMap { x =>
@@ -263,14 +239,11 @@ object ResultContextSuite extends SimpleIOSuite {
     }
 
     IO.pure(
-      expect(result == 20) and
-        expect(metrics.cost == GasCost(30)) and
-        expect(metrics.depth == 3)
+      expect(result == 20).and(expect(metrics.cost == GasCost(30))).and(expect(metrics.depth == 3))
     )
   }
 
   test("syntax - sequence on List[Id]") {
-    
 
     val values: List[Id[Int]] = List(1, 2, 3, 4)
     val result = values.sequence
@@ -287,14 +260,11 @@ object ResultContextSuite extends SimpleIOSuite {
     val (results, metrics) = values.sequence
 
     IO.pure(
-      expect(results == List(1, 2)) and
-        expect(metrics.cost == GasCost(25)) and
-        expect(metrics.depth == 3)
+      expect(results == List(1, 2)).and(expect(metrics.cost == GasCost(25))).and(expect(metrics.depth == 3))
     )
   }
 
   test("syntax - rpure wraps value in Id context") {
-    
 
     val result = 42.pure[Id]
 
@@ -302,18 +272,15 @@ object ResultContextSuite extends SimpleIOSuite {
   }
 
   test("syntax - rpure wraps value in WithGas context") {
-    
 
     val (value, metrics) = "test".pure[ResultContext.WithGas]
 
     IO.pure(
-      expect(value == "test") and
-        expect(metrics == GasMetrics.zero)
+      expect(value == "test").and(expect(metrics == GasMetrics.zero))
     )
   }
 
   test("syntax - chaining map operations") {
-    
 
     val initial: ResultContext.WithGas[Int] = (10, GasMetrics(GasCost(100), 5, 2))
     val result = initial
@@ -323,8 +290,7 @@ object ResultContextSuite extends SimpleIOSuite {
     val (value, metrics) = result
 
     IO.pure(
-      expect(value == 25) and
-        expect(metrics.cost == GasCost(100))
+      expect(value == 25).and(expect(metrics.cost == GasCost(100)))
     )
   }
 
@@ -338,9 +304,7 @@ object ResultContextSuite extends SimpleIOSuite {
     val (value, metrics) = result
 
     IO.pure(
-      expect(value == 20) and
-        expect(metrics.cost == GasCost(18)) and
-        expect(metrics.depth == 3)
+      expect(value == 20).and(expect(metrics.cost == GasCost(18))).and(expect(metrics.depth == 3))
     )
   }
 
@@ -355,9 +319,7 @@ object ResultContextSuite extends SimpleIOSuite {
     val (value, metrics) = result
 
     IO.pure(
-      expect(value == 22) and
-        expect(metrics.cost == GasCost(15)) and
-        expect(metrics.depth == 2)
+      expect(value == 22).and(expect(metrics.cost == GasCost(15))).and(expect(metrics.depth == 2))
     )
   }
 }

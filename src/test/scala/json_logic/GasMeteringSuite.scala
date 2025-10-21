@@ -2,7 +2,9 @@ package json_logic
 
 import cats.effect.IO
 
-import io.constellationnetwork.metagraph_sdk.json_logic._
+import io.constellationnetwork.metagraph_sdk.json_logic.core._
+import io.constellationnetwork.metagraph_sdk.json_logic.gas._
+import io.constellationnetwork.metagraph_sdk.json_logic.runtime.JsonLogicEvaluator
 
 import org.scalacheck.Gen
 import weaver.SimpleIOSuite
@@ -168,6 +170,7 @@ object GasMeteringSuite extends SimpleIOSuite with Checkers {
 
     evaluator
       .evaluateWithGas(expr, data, None, GasLimit.Default, GasConfig.Default)
+      .flatMap(result => IO.fromEither(result))
       .map { result =>
         expect(result.value == IntValue(42))
       }
@@ -183,6 +186,7 @@ object GasMeteringSuite extends SimpleIOSuite with Checkers {
 
     evaluator
       .evaluateWithGas(expr, data, None, GasLimit.Default, GasConfig.Default)
+      .flatMap(result => IO.fromEither(result))
       .map { result =>
         expect(result.value == IntValue(30))
       }
@@ -253,7 +257,6 @@ object GasMeteringSuite extends SimpleIOSuite with Checkers {
 
     evaluator
       .evaluateWithGas(mapExpr, MapValue.empty, None, smallLimit, GasConfig.Default)
-      .attempt
       .map {
         case Left(_: GasExhaustedException) => success
         case Left(other)                    => failure(s"Expected GasExhaustedException but got: $other")
@@ -277,7 +280,6 @@ object GasMeteringSuite extends SimpleIOSuite with Checkers {
 
     evaluator
       .evaluateWithGas(filterExpr, MapValue.empty, None, smallLimit, GasConfig.Default)
-      .attempt
       .map {
         case Left(_: GasExhaustedException) => success
         case Left(other)                    => failure(s"Expected GasExhaustedException but got: $other")
@@ -304,12 +306,17 @@ object GasMeteringSuite extends SimpleIOSuite with Checkers {
     )
 
     for {
-      smallResult <- evaluator.evaluateWithGas(smallMapExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
-      largeResult <- evaluator.evaluateWithGas(largeMapExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
-    } yield expect.all(
-      largeResult.gasUsed.amount > smallResult.gasUsed.amount,
-      largeResult.operationCount > smallResult.operationCount
-    )
+      smallResult <- evaluator
+        .evaluateWithGas(smallMapExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
+        .flatMap(IO.fromEither)
+      largeResult <- evaluator
+        .evaluateWithGas(largeMapExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
+        .flatMap(IO.fromEither)
+    } yield
+      expect.all(
+        largeResult.gasUsed.amount > smallResult.gasUsed.amount,
+        largeResult.operationCount > smallResult.operationCount
+      )
   }
 
   test("nested operations increase depth and gas cost") {
@@ -337,13 +344,16 @@ object GasMeteringSuite extends SimpleIOSuite with Checkers {
     )
 
     for {
-      nestedResult <- evaluator.evaluateWithGas(nestedExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
-      flatResult <- evaluator.evaluateWithGas(flatExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
-    } yield expect.all(
-      nestedResult.gasUsed.amount > flatResult.gasUsed.amount,
-      nestedResult.maxDepth > flatResult.maxDepth,
-      nestedResult.maxDepth >= 3
-    )
+      nestedResult <- evaluator
+        .evaluateWithGas(nestedExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
+        .flatMap(IO.fromEither)
+      flatResult <- evaluator.evaluateWithGas(flatExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default).flatMap(IO.fromEither)
+    } yield
+      expect.all(
+        nestedResult.gasUsed.amount > flatResult.gasUsed.amount,
+        nestedResult.maxDepth > flatResult.maxDepth,
+        nestedResult.maxDepth >= 3
+      )
   }
 
   test("all operation short-circuits on first false") {
@@ -360,6 +370,7 @@ object GasMeteringSuite extends SimpleIOSuite with Checkers {
 
     evaluator
       .evaluateWithGas(allExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
+      .flatMap(result => IO.fromEither(result))
       .map { result =>
         expect.all(
           result.value == BoolValue(false),
@@ -382,6 +393,7 @@ object GasMeteringSuite extends SimpleIOSuite with Checkers {
 
     evaluator
       .evaluateWithGas(findExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
+      .flatMap(result => IO.fromEither(result))
       .map { result =>
         expect.all(
           result.value == IntValue(42),
@@ -410,6 +422,7 @@ object GasMeteringSuite extends SimpleIOSuite with Checkers {
 
     evaluator
       .evaluateWithGas(reduceExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
+      .flatMap(result => IO.fromEither(result))
       .map { result =>
         expect.all(
           result.value == IntValue(20),
@@ -439,6 +452,7 @@ object GasMeteringSuite extends SimpleIOSuite with Checkers {
 
     evaluator
       .evaluateWithGas(varExpr, deepData, None, GasLimit.Default, GasConfig.Default)
+      .flatMap(result => IO.fromEither(result))
       .map { result =>
         expect.all(
           result.value == IntValue(42),
@@ -457,6 +471,7 @@ object GasMeteringSuite extends SimpleIOSuite with Checkers {
 
     evaluator
       .evaluateWithGas(uniqueExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
+      .flatMap(result => IO.fromEither(result))
       .map { result =>
         expect.all(
           result.value == ArrayValue(List(IntValue(1), IntValue(2))),
@@ -477,8 +492,8 @@ object GasMeteringSuite extends SimpleIOSuite with Checkers {
     )
 
     for {
-      smallResult <- evaluator.evaluateWithGas(smallPow, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
-      largeResult <- evaluator.evaluateWithGas(largePow, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
+      smallResult <- evaluator.evaluateWithGas(smallPow, MapValue.empty, None, GasLimit.Default, GasConfig.Default).flatMap(IO.fromEither)
+      largeResult <- evaluator.evaluateWithGas(largePow, MapValue.empty, None, GasLimit.Default, GasConfig.Default).flatMap(IO.fromEither)
     } yield expect(largeResult.gasUsed.amount > smallResult.gasUsed.amount)
   }
 
@@ -506,6 +521,7 @@ object GasMeteringSuite extends SimpleIOSuite with Checkers {
 
     evaluator
       .evaluateWithGas(ifExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
+      .flatMap(result => IO.fromEither(result))
       .map { result =>
         expect.all(
           result.value == IntValue(42),
@@ -522,13 +538,14 @@ object GasMeteringSuite extends SimpleIOSuite with Checkers {
     )
 
     for {
-      result1 <- evaluator.evaluateWithGas(expr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
-      result2 <- evaluator.evaluateWithGas(expr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
-    } yield expect.all(
-      result1.gasUsed == result2.gasUsed,
-      result1.operationCount == result2.operationCount,
-      result1.maxDepth == result2.maxDepth
-    )
+      result1 <- evaluator.evaluateWithGas(expr, MapValue.empty, None, GasLimit.Default, GasConfig.Default).flatMap(IO.fromEither)
+      result2 <- evaluator.evaluateWithGas(expr, MapValue.empty, None, GasLimit.Default, GasConfig.Default).flatMap(IO.fromEither)
+    } yield
+      expect.all(
+        result1.gasUsed == result2.gasUsed,
+        result1.operationCount == result2.operationCount,
+        result1.maxDepth == result2.maxDepth
+      )
   }
 
   test("count operation with predicate") {
@@ -548,6 +565,7 @@ object GasMeteringSuite extends SimpleIOSuite with Checkers {
 
     evaluator
       .evaluateWithGas(countExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
+      .flatMap(result => IO.fromEither(result))
       .map { result =>
         expect.all(
           result.value == IntValue(2),
