@@ -76,6 +76,7 @@ source/metagraph-l0/genesis/*
 TAGS
 tmp/
 .ldb/
+.workspace/
 
 # Additional General Filters
 *.log
