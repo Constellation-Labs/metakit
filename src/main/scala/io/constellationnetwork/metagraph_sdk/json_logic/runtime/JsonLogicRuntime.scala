@@ -23,20 +23,6 @@ object JsonLogicRuntime {
       false
   }
 
-  // Shared helper to extract the value from a Result[JsonLogicValue]
-  private def extractValue[Result[_]](result: Result[JsonLogicValue]): JsonLogicValue = result match {
-    case v: JsonLogicValue      => v
-    case (v: JsonLogicValue, _) => v
-    case _                      => NullValue
-  }
-
-  // Shared helper to extract a list from Result[List[JsonLogicValue]]
-  private def extractList[Result[_]](result: Result[List[JsonLogicValue]]): List[JsonLogicValue] = result match {
-    case list: List[_]      => list.asInstanceOf[List[JsonLogicValue]]
-    case (list: List[_], _) => list.asInstanceOf[List[JsonLogicValue]]
-    case _                  => List.empty
-  }
-
   private def lookupVar[F[_]: Monad, Result[_]: ResultContext](
     key: String,
     defaultOpt: Option[JsonLogicValue],
@@ -44,8 +30,7 @@ object JsonLogicRuntime {
   )(implicit sem: JsonLogicSemantics[F, Result]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
     sem.getVar(key, currentCtx).map {
       case Right(result) =>
-        val value = extractValue(result)
-        value match {
+        result.extractValue match {
           case NullValue if key.nonEmpty =>
             defaultOpt match {
               case Some(d) => d.pure[Result].asRight[JsonLogicException]
@@ -80,8 +65,7 @@ object JsonLogicRuntime {
       case VarExpression(Right(keyExpr), defaultOpt) =>
         evaluateExpression(keyExpr, currentCtx).flatMap {
           case Right(keyResult) =>
-            val keyValue = extractValue(keyResult)
-            keyValue match {
+            keyResult.extractValue match {
               case StrValue(name)                  => lookupVar(name, defaultOpt, currentCtx)
               case ArrayValue(StrValue(name) :: _) => lookupVar(name, defaultOpt, currentCtx)
               case v                               => JsonLogicException(s"Got non-string input: $v").asLeft[Result[JsonLogicValue]].pure[F]
@@ -118,8 +102,7 @@ object JsonLogicRuntime {
             case condition :: thenBranch :: rest =>
               evaluateExpression(condition, currentCtx).flatMap {
                 case Right(condResult) =>
-                  val condValue = extractValue(condResult)
-                  condValue.isTruthy
+                  condResult.extractValue.isTruthy
                     .pure[F]
                     .ifM(
                       ifTrue = evaluateExpression(thenBranch, currentCtx),
@@ -216,8 +199,7 @@ object JsonLogicRuntime {
       case Eval(VarExpression(Left(key), defaultOpt), contOpt) :: tail =>
         sem.getVar(key, ctx).map {
           case Right(result) =>
-            val value = extractValue(result)
-            val finalResult = value match {
+            val finalResult = result.extractValue match {
               case NullValue if key.nonEmpty =>
                 defaultOpt match {
                   case Some(d) => d.pure[Result]
@@ -328,7 +310,7 @@ object JsonLogicRuntime {
           if mapKeys.nonEmpty =>
         val newProcessed = processed :+ value
         if (remaining.isEmpty) {
-          val pairs = mapKeys.zip(newProcessed.map(JsonLogicRuntime.extractValue)).toMap
+          val pairs = mapKeys.zip(newProcessed.map(_.extractValue)).toMap
           parentContOpt.continueOrTerminate((MapValue(pairs): JsonLogicValue).pure[Result], tail).pure[F]
         } else {
           val newCont = cont.copy(processed = newProcessed, remaining = remaining.tail)
@@ -339,8 +321,7 @@ object JsonLogicRuntime {
       case ApplyValue(condValue, Continuation(JsonLogicOp.IfElseOp, _, remaining, parentContOpt, _, _, true, _)) :: tail =>
         remaining match {
           case thenBranch :: rest =>
-            val condVal = JsonLogicRuntime.extractValue(condValue)
-            if (condVal.isTruthy) {
+            if (condValue.extractValue.isTruthy) {
               (Eval(thenBranch, parentContOpt) :: tail).asLeft[Either[JsonLogicException, Result[JsonLogicValue]]].pure[F]
             } else if (rest.isEmpty) {
               parentContOpt.continueOrTerminate((NullValue: JsonLogicValue).pure[Result], tail).pure[F]
@@ -367,13 +348,11 @@ object JsonLogicRuntime {
         }
 
       case ApplyValue(value, Continuation(JsonLogicOp.NoOp, _, _, parentContOpt, _, _, _, defaultOpt)) :: tail =>
-        val keyValue = JsonLogicRuntime.extractValue(value)
-        keyValue match {
+        value.extractValue match {
           case StrValue(name) =>
             sem.getVar(name, ctx).map {
               case Right(result) =>
-                val extractedValue = extractValue(result)
-                val finalResult = extractedValue match {
+                val finalResult = result.extractValue match {
                   case NullValue if name.nonEmpty =>
                     defaultOpt match {
                       case Some(d) => d.pure[Result]
@@ -392,8 +371,7 @@ object JsonLogicRuntime {
           case ArrayValue(StrValue(name) :: _) =>
             sem.getVar(name, ctx).map {
               case Right(result) =>
-                val extractedValue = extractValue(result)
-                val finalResult = extractedValue match {
+                val finalResult = result.extractValue match {
                   case NullValue if name.nonEmpty =>
                     defaultOpt match {
                       case Some(d) => d.pure[Result]

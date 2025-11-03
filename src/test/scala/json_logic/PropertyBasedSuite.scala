@@ -25,13 +25,13 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
   implicit val showMapValue: Show[MapValue] = Show.show(v => s"MapValue(${v.value.size} entries)")
 
   implicit val showJsonLogicValue: Show[JsonLogicValue] = Show.show {
-    case v: IntValue => showIntValue.show(v)
-    case v: FloatValue => showFloatValue.show(v)
-    case v: BoolValue => showBoolValue.show(v)
-    case v: StrValue => showStrValue.show(v)
-    case NullValue => "NullValue"
-    case v: ArrayValue => showArrayValue.show(v)
-    case v: MapValue => showMapValue.show(v)
+    case v: IntValue      => showIntValue.show(v)
+    case v: FloatValue    => showFloatValue.show(v)
+    case v: BoolValue     => showBoolValue.show(v)
+    case v: StrValue      => showStrValue.show(v)
+    case NullValue        => "NullValue"
+    case v: ArrayValue    => showArrayValue.show(v)
+    case v: MapValue      => showMapValue.show(v)
     case _: FunctionValue => s"FunctionValue(...)"
   }
 
@@ -52,10 +52,10 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
 
   implicit val showJsonLogicExpression: Show[JsonLogicExpression] = Show.show {
     case e: ConstExpression => showConstExpression.show(e)
-    case e: VarExpression => showVarExpression.show(e)
+    case e: VarExpression   => showVarExpression.show(e)
     case e: ApplyExpression => showApplyExpression.show(e)
     case e: ArrayExpression => showArrayExpression.show(e)
-    case e: MapExpression => showMapExpression.show(e)
+    case e: MapExpression   => showMapExpression.show(e)
   }
 
   implicit def showList[A: Show]: Show[List[A]] =
@@ -178,71 +178,87 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
   // ============================================================================
 
   test("addition is commutative for integers") {
-    forall(for { a <- genIntValue; b <- genIntValue } yield (a, b)) { case (a, b) =>
-      val expr1 = ApplyExpression(JsonLogicOp.AddOp, List(ConstExpression(a), ConstExpression(b)))
-      val expr2 = ApplyExpression(JsonLogicOp.AddOp, List(ConstExpression(b), ConstExpression(a)))
+    forall(for {
+      a <- genIntValue
+      b <- genIntValue
+    } yield (a, b)) {
+      case (a, b) =>
+        val expr1 = ApplyExpression(JsonLogicOp.AddOp, List(ConstExpression(a), ConstExpression(b)))
+        val expr2 = ApplyExpression(JsonLogicOp.AddOp, List(ConstExpression(b), ConstExpression(a)))
 
-      val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+        val evaluator = JsonLogicEvaluator.tailRecursive[IO]
 
-      for {
-        result1 <- evaluator.evaluate(expr1, MapValue.empty, None)
-        result2 <- evaluator.evaluate(expr2, MapValue.empty, None)
-      } yield expect.all(
-        result1.isRight,
-        result2.isRight,
-        result1 == result2
-      )
+        for {
+          result1 <- evaluator.evaluate(expr1, MapValue.empty, None)
+          result2 <- evaluator.evaluate(expr2, MapValue.empty, None)
+        } yield
+          expect.all(
+            result1.isRight,
+            result2.isRight,
+            result1 == result2
+          )
     }
   }
 
   test("multiplication is commutative for integers") {
-    forall(for { a <- genIntValue; b <- genIntValue } yield (a, b)) { case (a, b) =>
-      val expr1 = ApplyExpression(JsonLogicOp.TimesOp, List(ConstExpression(a), ConstExpression(b)))
-      val expr2 = ApplyExpression(JsonLogicOp.TimesOp, List(ConstExpression(b), ConstExpression(a)))
+    forall(for {
+      a <- genIntValue
+      b <- genIntValue
+    } yield (a, b)) {
+      case (a, b) =>
+        val expr1 = ApplyExpression(JsonLogicOp.TimesOp, List(ConstExpression(a), ConstExpression(b)))
+        val expr2 = ApplyExpression(JsonLogicOp.TimesOp, List(ConstExpression(b), ConstExpression(a)))
 
-      val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+        val evaluator = JsonLogicEvaluator.tailRecursive[IO]
 
-      for {
-        result1 <- evaluator.evaluate(expr1, MapValue.empty, None)
-        result2 <- evaluator.evaluate(expr2, MapValue.empty, None)
-      } yield expect.all(
-        result1.isRight,
-        result2.isRight,
-        result1 == result2
-      )
+        for {
+          result1 <- evaluator.evaluate(expr1, MapValue.empty, None)
+          result2 <- evaluator.evaluate(expr2, MapValue.empty, None)
+        } yield
+          expect.all(
+            result1.isRight,
+            result2.isRight,
+            result1 == result2
+          )
     }
   }
 
   test("addition is associative") {
-    forall(for { a <- genIntValue; b <- genIntValue; c <- genIntValue } yield (a, b, c)) { case (a, b, c) =>
-      // (a + b) + c
-      val expr1 = ApplyExpression(
-        JsonLogicOp.AddOp,
-        List(
-          ApplyExpression(JsonLogicOp.AddOp, List(ConstExpression(a), ConstExpression(b))),
-          ConstExpression(c)
+    forall(for {
+      a <- genIntValue
+      b <- genIntValue
+      c <- genIntValue
+    } yield (a, b, c)) {
+      case (a, b, c) =>
+        // (a + b) + c
+        val expr1 = ApplyExpression(
+          JsonLogicOp.AddOp,
+          List(
+            ApplyExpression(JsonLogicOp.AddOp, List(ConstExpression(a), ConstExpression(b))),
+            ConstExpression(c)
+          )
         )
-      )
 
-      // a + (b + c)
-      val expr2 = ApplyExpression(
-        JsonLogicOp.AddOp,
-        List(
-          ConstExpression(a),
-          ApplyExpression(JsonLogicOp.AddOp, List(ConstExpression(b), ConstExpression(c)))
+        // a + (b + c)
+        val expr2 = ApplyExpression(
+          JsonLogicOp.AddOp,
+          List(
+            ConstExpression(a),
+            ApplyExpression(JsonLogicOp.AddOp, List(ConstExpression(b), ConstExpression(c)))
+          )
         )
-      )
 
-      val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+        val evaluator = JsonLogicEvaluator.tailRecursive[IO]
 
-      for {
-        result1 <- evaluator.evaluate(expr1, MapValue.empty, None)
-        result2 <- evaluator.evaluate(expr2, MapValue.empty, None)
-      } yield expect.all(
-        result1.isRight,
-        result2.isRight,
-        result1 == result2
-      )
+        for {
+          result1 <- evaluator.evaluate(expr1, MapValue.empty, None)
+          result2 <- evaluator.evaluate(expr2, MapValue.empty, None)
+        } yield
+          expect.all(
+            result1.isRight,
+            result2.isRight,
+            result1 == result2
+          )
     }
   }
 
@@ -271,51 +287,60 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
   }
 
   test("subtraction is inverse of addition") {
-    forall(for { a <- genIntValue; b <- genIntValue } yield (a, b)) { case (a, b) =>
-      // (a + b) - b should equal a
-      val expr = ApplyExpression(
-        JsonLogicOp.MinusOp,
-        List(
-          ApplyExpression(JsonLogicOp.AddOp, List(ConstExpression(a), ConstExpression(b))),
-          ConstExpression(b)
+    forall(for {
+      a <- genIntValue
+      b <- genIntValue
+    } yield (a, b)) {
+      case (a, b) =>
+        // (a + b) - b should equal a
+        val expr = ApplyExpression(
+          JsonLogicOp.MinusOp,
+          List(
+            ApplyExpression(JsonLogicOp.AddOp, List(ConstExpression(a), ConstExpression(b))),
+            ConstExpression(b)
+          )
         )
-      )
 
-      val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+        val evaluator = JsonLogicEvaluator.tailRecursive[IO]
 
-      evaluator.evaluate(expr, MapValue.empty, None).map {
-        case Right(result) => expect(result == a)
-        case Left(_)       => failure("Evaluation should succeed")
-      }
+        evaluator.evaluate(expr, MapValue.empty, None).map {
+          case Right(result) => expect(result == a)
+          case Left(_)       => failure("Evaluation should succeed")
+        }
     }
   }
 
   test("multiplication distributes over addition") {
-    forall(for { a <- genIntValue; b <- genIntValue; c <- genIntValue } yield (a, b, c)) { case (a, b, c) =>
-      val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+    forall(for {
+      a <- genIntValue
+      b <- genIntValue
+      c <- genIntValue
+    } yield (a, b, c)) {
+      case (a, b, c) =>
+        val evaluator = JsonLogicEvaluator.tailRecursive[IO]
 
-      // a * (b + c)
-      val leftExpr = ApplyExpression(
-        JsonLogicOp.TimesOp,
-        List(
-          ConstExpression(a),
-          ApplyExpression(JsonLogicOp.AddOp, List(ConstExpression(b), ConstExpression(c)))
+        // a * (b + c)
+        val leftExpr = ApplyExpression(
+          JsonLogicOp.TimesOp,
+          List(
+            ConstExpression(a),
+            ApplyExpression(JsonLogicOp.AddOp, List(ConstExpression(b), ConstExpression(c)))
+          )
         )
-      )
 
-      // (a * b) + (a * c)
-      val rightExpr = ApplyExpression(
-        JsonLogicOp.AddOp,
-        List(
-          ApplyExpression(JsonLogicOp.TimesOp, List(ConstExpression(a), ConstExpression(b))),
-          ApplyExpression(JsonLogicOp.TimesOp, List(ConstExpression(a), ConstExpression(c)))
+        // (a * b) + (a * c)
+        val rightExpr = ApplyExpression(
+          JsonLogicOp.AddOp,
+          List(
+            ApplyExpression(JsonLogicOp.TimesOp, List(ConstExpression(a), ConstExpression(b))),
+            ApplyExpression(JsonLogicOp.TimesOp, List(ConstExpression(a), ConstExpression(c)))
+          )
         )
-      )
 
-      for {
-        result1 <- evaluator.evaluate(leftExpr, MapValue.empty, None)
-        result2 <- evaluator.evaluate(rightExpr, MapValue.empty, None)
-      } yield expect(result1 == result2)
+        for {
+          result1 <- evaluator.evaluate(leftExpr, MapValue.empty, None)
+          result2 <- evaluator.evaluate(rightExpr, MapValue.empty, None)
+        } yield expect(result1 == result2)
     }
   }
 
@@ -324,26 +349,30 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
   // ============================================================================
 
   test("less than is transitive") {
-    forall(for { a <- genIntValue; b <- genIntValue; c <- genIntValue } yield (a, b, c)) { case (a, b, c) =>
-      val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+    forall(for {
+      a <- genIntValue
+      b <- genIntValue
+      c <- genIntValue
+    } yield (a, b, c)) {
+      case (a, b, c) =>
+        val evaluator = JsonLogicEvaluator.tailRecursive[IO]
 
-      // If a < b and b < c, then a < c
-      val aLtB = ApplyExpression(JsonLogicOp.Lt, List(ConstExpression(a), ConstExpression(b)))
-      val bLtC = ApplyExpression(JsonLogicOp.Lt, List(ConstExpression(b), ConstExpression(c)))
-      val aLtC = ApplyExpression(JsonLogicOp.Lt, List(ConstExpression(a), ConstExpression(c)))
+        // If a < b and b < c, then a < c
+        val aLtB = ApplyExpression(JsonLogicOp.Lt, List(ConstExpression(a), ConstExpression(b)))
+        val bLtC = ApplyExpression(JsonLogicOp.Lt, List(ConstExpression(b), ConstExpression(c)))
+        val aLtC = ApplyExpression(JsonLogicOp.Lt, List(ConstExpression(a), ConstExpression(c)))
 
-      for {
-        resultAB <- evaluator.evaluate(aLtB, MapValue.empty, None)
-        resultBC <- evaluator.evaluate(bLtC, MapValue.empty, None)
-        resultAC <- evaluator.evaluate(aLtC, MapValue.empty, None)
-      } yield {
-        (resultAB, resultBC, resultAC) match {
-          case (Right(BoolValue(true)), Right(BoolValue(true)), Right(BoolValue(trueAC))) =>
-            expect(trueAC) // Transitivity holds
-          case _ =>
-            success // Precondition not met, test vacuously passes
-        }
-      }
+        for {
+          resultAB <- evaluator.evaluate(aLtB, MapValue.empty, None)
+          resultBC <- evaluator.evaluate(bLtC, MapValue.empty, None)
+          resultAC <- evaluator.evaluate(aLtC, MapValue.empty, None)
+        } yield
+          (resultAB, resultBC, resultAC) match {
+            case (Right(BoolValue(true)), Right(BoolValue(true)), Right(BoolValue(trueAC))) =>
+              expect(trueAC) // Transitivity holds
+            case _ =>
+              success // Precondition not met, test vacuously passes
+          }
     }
   }
 
@@ -361,16 +390,20 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
   }
 
   test("equality is symmetric") {
-    forall(for { a <- genPrimitiveValue; b <- genPrimitiveValue } yield (a, b)) { case (a, b) =>
-      val expr1 = ApplyExpression(JsonLogicOp.EqStrictOp, List(ConstExpression(a), ConstExpression(b)))
-      val expr2 = ApplyExpression(JsonLogicOp.EqStrictOp, List(ConstExpression(b), ConstExpression(a)))
+    forall(for {
+      a <- genPrimitiveValue
+      b <- genPrimitiveValue
+    } yield (a, b)) {
+      case (a, b) =>
+        val expr1 = ApplyExpression(JsonLogicOp.EqStrictOp, List(ConstExpression(a), ConstExpression(b)))
+        val expr2 = ApplyExpression(JsonLogicOp.EqStrictOp, List(ConstExpression(b), ConstExpression(a)))
 
-      val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+        val evaluator = JsonLogicEvaluator.tailRecursive[IO]
 
-      for {
-        result1 <- evaluator.evaluate(expr1, MapValue.empty, None)
-        result2 <- evaluator.evaluate(expr2, MapValue.empty, None)
-      } yield expect(result1 == result2)
+        for {
+          result1 <- evaluator.evaluate(expr1, MapValue.empty, None)
+          result2 <- evaluator.evaluate(expr2, MapValue.empty, None)
+        } yield expect(result1 == result2)
     }
   }
 
@@ -395,100 +428,116 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
   }
 
   test("AND is commutative") {
-    forall(for { a <- genBoolValue; b <- genBoolValue } yield (a, b)) { case (a, b) =>
-      val expr1 = ApplyExpression(JsonLogicOp.AndOp, List(ConstExpression(a), ConstExpression(b)))
-      val expr2 = ApplyExpression(JsonLogicOp.AndOp, List(ConstExpression(b), ConstExpression(a)))
+    forall(for {
+      a <- genBoolValue
+      b <- genBoolValue
+    } yield (a, b)) {
+      case (a, b) =>
+        val expr1 = ApplyExpression(JsonLogicOp.AndOp, List(ConstExpression(a), ConstExpression(b)))
+        val expr2 = ApplyExpression(JsonLogicOp.AndOp, List(ConstExpression(b), ConstExpression(a)))
 
-      val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+        val evaluator = JsonLogicEvaluator.tailRecursive[IO]
 
-      for {
-        result1 <- evaluator.evaluate(expr1, MapValue.empty, None)
-        result2 <- evaluator.evaluate(expr2, MapValue.empty, None)
-      } yield {
-        // Note: AND may not return BoolValue, it returns the last truthy or first falsy value
-        // But the truthiness should be the same
-        val truth1 = result1.toOption.exists(_.isTruthy)
-        val truth2 = result2.toOption.exists(_.isTruthy)
-        expect(truth1 == truth2)
-      }
+        for {
+          result1 <- evaluator.evaluate(expr1, MapValue.empty, None)
+          result2 <- evaluator.evaluate(expr2, MapValue.empty, None)
+        } yield {
+          // Note: AND may not return BoolValue, it returns the last truthy or first falsy value
+          // But the truthiness should be the same
+          val truth1 = result1.toOption.exists(_.isTruthy)
+          val truth2 = result2.toOption.exists(_.isTruthy)
+          expect(truth1 == truth2)
+        }
     }
   }
 
   test("OR is commutative") {
-    forall(for { a <- genBoolValue; b <- genBoolValue } yield (a, b)) { case (a, b) =>
-      val expr1 = ApplyExpression(JsonLogicOp.OrOp, List(ConstExpression(a), ConstExpression(b)))
-      val expr2 = ApplyExpression(JsonLogicOp.OrOp, List(ConstExpression(b), ConstExpression(a)))
+    forall(for {
+      a <- genBoolValue
+      b <- genBoolValue
+    } yield (a, b)) {
+      case (a, b) =>
+        val expr1 = ApplyExpression(JsonLogicOp.OrOp, List(ConstExpression(a), ConstExpression(b)))
+        val expr2 = ApplyExpression(JsonLogicOp.OrOp, List(ConstExpression(b), ConstExpression(a)))
 
-      val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+        val evaluator = JsonLogicEvaluator.tailRecursive[IO]
 
-      for {
-        result1 <- evaluator.evaluate(expr1, MapValue.empty, None)
-        result2 <- evaluator.evaluate(expr2, MapValue.empty, None)
-      } yield {
-        val truth1 = result1.toOption.exists(_.isTruthy)
-        val truth2 = result2.toOption.exists(_.isTruthy)
-        expect(truth1 == truth2)
-      }
+        for {
+          result1 <- evaluator.evaluate(expr1, MapValue.empty, None)
+          result2 <- evaluator.evaluate(expr2, MapValue.empty, None)
+        } yield {
+          val truth1 = result1.toOption.exists(_.isTruthy)
+          val truth2 = result2.toOption.exists(_.isTruthy)
+          expect(truth1 == truth2)
+        }
     }
   }
 
   test("De Morgan's law for AND") {
-    forall(for { a <- genBoolValue; b <- genBoolValue } yield (a, b)) { case (a, b) =>
-      val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+    forall(for {
+      a <- genBoolValue
+      b <- genBoolValue
+    } yield (a, b)) {
+      case (a, b) =>
+        val evaluator = JsonLogicEvaluator.tailRecursive[IO]
 
-      // !(a && b)
-      val leftExpr = ApplyExpression(
-        JsonLogicOp.NotOp,
-        List(ApplyExpression(JsonLogicOp.AndOp, List(ConstExpression(a), ConstExpression(b))))
-      )
-
-      // !a || !b
-      val rightExpr = ApplyExpression(
-        JsonLogicOp.OrOp,
-        List(
-          ApplyExpression(JsonLogicOp.NotOp, List(ConstExpression(a))),
-          ApplyExpression(JsonLogicOp.NotOp, List(ConstExpression(b)))
+        // !(a && b)
+        val leftExpr = ApplyExpression(
+          JsonLogicOp.NotOp,
+          List(ApplyExpression(JsonLogicOp.AndOp, List(ConstExpression(a), ConstExpression(b))))
         )
-      )
 
-      for {
-        result1 <- evaluator.evaluate(leftExpr, MapValue.empty, None)
-        result2 <- evaluator.evaluate(rightExpr, MapValue.empty, None)
-      } yield {
-        val truth1 = result1.toOption.exists(_.isTruthy)
-        val truth2 = result2.toOption.exists(_.isTruthy)
-        expect(truth1 == truth2)
-      }
+        // !a || !b
+        val rightExpr = ApplyExpression(
+          JsonLogicOp.OrOp,
+          List(
+            ApplyExpression(JsonLogicOp.NotOp, List(ConstExpression(a))),
+            ApplyExpression(JsonLogicOp.NotOp, List(ConstExpression(b)))
+          )
+        )
+
+        for {
+          result1 <- evaluator.evaluate(leftExpr, MapValue.empty, None)
+          result2 <- evaluator.evaluate(rightExpr, MapValue.empty, None)
+        } yield {
+          val truth1 = result1.toOption.exists(_.isTruthy)
+          val truth2 = result2.toOption.exists(_.isTruthy)
+          expect(truth1 == truth2)
+        }
     }
   }
 
   test("De Morgan's law for OR") {
-    forall(for { a <- genBoolValue; b <- genBoolValue } yield (a, b)) { case (a, b) =>
-      val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+    forall(for {
+      a <- genBoolValue
+      b <- genBoolValue
+    } yield (a, b)) {
+      case (a, b) =>
+        val evaluator = JsonLogicEvaluator.tailRecursive[IO]
 
-      // !(a || b)
-      val leftExpr = ApplyExpression(
-        JsonLogicOp.NotOp,
-        List(ApplyExpression(JsonLogicOp.OrOp, List(ConstExpression(a), ConstExpression(b))))
-      )
-
-      // !a && !b
-      val rightExpr = ApplyExpression(
-        JsonLogicOp.AndOp,
-        List(
-          ApplyExpression(JsonLogicOp.NotOp, List(ConstExpression(a))),
-          ApplyExpression(JsonLogicOp.NotOp, List(ConstExpression(b)))
+        // !(a || b)
+        val leftExpr = ApplyExpression(
+          JsonLogicOp.NotOp,
+          List(ApplyExpression(JsonLogicOp.OrOp, List(ConstExpression(a), ConstExpression(b))))
         )
-      )
 
-      for {
-        result1 <- evaluator.evaluate(leftExpr, MapValue.empty, None)
-        result2 <- evaluator.evaluate(rightExpr, MapValue.empty, None)
-      } yield {
-        val truth1 = result1.toOption.exists(_.isTruthy)
-        val truth2 = result2.toOption.exists(_.isTruthy)
-        expect(truth1 == truth2)
-      }
+        // !a && !b
+        val rightExpr = ApplyExpression(
+          JsonLogicOp.AndOp,
+          List(
+            ApplyExpression(JsonLogicOp.NotOp, List(ConstExpression(a))),
+            ApplyExpression(JsonLogicOp.NotOp, List(ConstExpression(b)))
+          )
+        )
+
+        for {
+          result1 <- evaluator.evaluate(leftExpr, MapValue.empty, None)
+          result2 <- evaluator.evaluate(rightExpr, MapValue.empty, None)
+        } yield {
+          val truth1 = result1.toOption.exists(_.isTruthy)
+          val truth2 = result2.toOption.exists(_.isTruthy)
+          expect(truth1 == truth2)
+        }
     }
   }
 
@@ -520,10 +569,11 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
     for {
       resultTrue  <- evaluator.evaluate(exprTrue, MapValue.empty, None)
       resultFalse <- evaluator.evaluate(exprFalse, MapValue.empty, None)
-    } yield expect.all(
-      resultTrue == Right(IntValue(6)),
-      resultFalse == Right(IntValue(5))
-    )
+    } yield
+      expect.all(
+        resultTrue == Right(IntValue(6)),
+        resultFalse == Right(IntValue(5))
+      )
   }
 
   // ============================================================================
@@ -612,36 +662,41 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
       for {
         result1 <- evaluator.evaluate(expr, data, None)
         result2 <- evaluator.evaluate(expr, data, None)
-      } yield {
+      } yield
         // Compare success/failure and values, not exception objects directly
         (result1, result2) match {
           case (Right(v1), Right(v2)) => expect(v1 == v2)
-          case (Left(e1), Left(e2)) => expect(e1.getMessage == e2.getMessage)
-          case _ => failure("Results should both succeed or both fail")
+          case (Left(e1), Left(e2))   => expect(e1.getMessage == e2.getMessage)
+          case _                      => failure("Results should both succeed or both fail")
         }
-      }
     }
   }
 
   test("evaluation never throws uncaught exceptions") {
-    forall(for { expr <- genSimpleExpression(); data <- genJsonLogicValue() } yield (expr, data)) { case (expr, data) =>
-      val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+    forall(for {
+      expr <- genSimpleExpression()
+      data <- genJsonLogicValue()
+    } yield (expr, data)) {
+      case (expr, data) =>
+        val evaluator = JsonLogicEvaluator.tailRecursive[IO]
 
-      evaluator.evaluate(expr, data, None).attempt.map {
-        case Right(Left(_))  => success // JsonLogicException is expected
-        case Right(Right(_)) => success // Success is fine
-        case Left(ex)        => failure(s"Unexpected exception: ${ex.getMessage}")
-      }
+        evaluator.evaluate(expr, data, None).attempt.map {
+          case Right(Left(_))  => success // JsonLogicException is expected
+          case Right(Right(_)) => success // Success is fine
+          case Left(ex)        => failure(s"Unexpected exception: ${ex.getMessage}")
+        }
     }
   }
 
   test("null is falsy, non-zero numbers are truthy") {
-    IO.pure(expect.all(
-      !NullValue.isTruthy,
-      IntValue(1).isTruthy,
-      IntValue(-1).isTruthy,
-      !IntValue(0).isTruthy
-    ))
+    IO.pure(
+      expect.all(
+        !NullValue.isTruthy,
+        IntValue(1).isTruthy,
+        IntValue(-1).isTruthy,
+        !IntValue(0).isTruthy
+      )
+    )
   }
 
   // ============================================================================
@@ -653,7 +708,9 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
       val expr = ApplyExpression(JsonLogicOp.DivOp, List(ConstExpression(a), ConstExpression(IntValue(0))))
       val evaluator = JsonLogicEvaluator.tailRecursive[IO]
 
-      evaluator.evaluate(expr, MapValue.empty, None).map(_.isLeft)
+      evaluator
+        .evaluate(expr, MapValue.empty, None)
+        .map(_.isLeft)
         .map(isError => expect(isError))
     }
   }
@@ -663,66 +720,79 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
       val expr = ApplyExpression(JsonLogicOp.ModuloOp, List(ConstExpression(a), ConstExpression(IntValue(0))))
       val evaluator = JsonLogicEvaluator.tailRecursive[IO]
 
-      evaluator.evaluate(expr, MapValue.empty, None).map(_.isLeft)
+      evaluator
+        .evaluate(expr, MapValue.empty, None)
+        .map(_.isLeft)
         .map(isError => expect(isError))
     }
   }
 
   test("modulo result absolute value is less than divisor absolute value") {
-    forall(for { a <- genIntValue; b <- genNonZeroInt } yield (a, b)) { case (a, b) =>
-      val expr = ApplyExpression(JsonLogicOp.ModuloOp, List(ConstExpression(a), ConstExpression(b)))
-      val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+    forall(for {
+      a <- genIntValue
+      b <- genNonZeroInt
+    } yield (a, b)) {
+      case (a, b) =>
+        val expr = ApplyExpression(JsonLogicOp.ModuloOp, List(ConstExpression(a), ConstExpression(b)))
+        val evaluator = JsonLogicEvaluator.tailRecursive[IO]
 
-      evaluator.evaluate(expr, MapValue.empty, None).map {
-        case Right(IntValue(result)) => expect(result.abs <= b.value.abs)
-        case Right(FloatValue(result)) => expect(result.abs <= BigDecimal(b.value).abs)
-        case Left(_) => failure("Modulo should succeed for non-zero divisor")
-        case _ => success
-      }
+        evaluator.evaluate(expr, MapValue.empty, None).map {
+          case Right(IntValue(result))   => expect(result.abs <= b.value.abs)
+          case Right(FloatValue(result)) => expect(result.abs <= BigDecimal(b.value).abs)
+          case Left(_)                   => failure("Modulo should succeed for non-zero divisor")
+          case _                         => success
+        }
     }
   }
 
   test("modulo sign follows JavaScript semantics") {
-    forall(for { a <- genIntValue; b <- genNonZeroInt } yield (a, b)) { case (a, b) =>
-      val expr = ApplyExpression(JsonLogicOp.ModuloOp, List(ConstExpression(a), ConstExpression(b)))
-      val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+    forall(for {
+      a <- genIntValue
+      b <- genNonZeroInt
+    } yield (a, b)) {
+      case (a, b) =>
+        val expr = ApplyExpression(JsonLogicOp.ModuloOp, List(ConstExpression(a), ConstExpression(b)))
+        val evaluator = JsonLogicEvaluator.tailRecursive[IO]
 
-      evaluator.evaluate(expr, MapValue.empty, None).map {
-        case Right(IntValue(result)) if a.value >= 0 => expect(result >= 0)
-        case Right(IntValue(result)) if a.value < 0 => expect(result <= 0)
-        case _ => success
-      }
+        evaluator.evaluate(expr, MapValue.empty, None).map {
+          case Right(IntValue(result)) if a.value >= 0 => expect(result >= 0)
+          case Right(IntValue(result)) if a.value < 0  => expect(result <= 0)
+          case _                                       => success
+        }
     }
   }
-
 
   // ============================================================================
   // String Operation Properties
   // ============================================================================
 
   test("string concatenation length property") {
-    forall(for { s1 <- genStrValue; s2 <- genStrValue } yield (s1, s2)) { case (s1, s2) =>
-      val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+    forall(for {
+      s1 <- genStrValue
+      s2 <- genStrValue
+    } yield (s1, s2)) {
+      case (s1, s2) =>
+        val evaluator = JsonLogicEvaluator.tailRecursive[IO]
 
-      val catExpr = ApplyExpression(JsonLogicOp.CatOp, List(ConstExpression(s1), ConstExpression(s2)))
-      val len1 = ApplyExpression(JsonLogicOp.LengthOp, List(ConstExpression(s1)))
-      val len2 = ApplyExpression(JsonLogicOp.LengthOp, List(ConstExpression(s2)))
+        val catExpr = ApplyExpression(JsonLogicOp.CatOp, List(ConstExpression(s1), ConstExpression(s2)))
+        val len1 = ApplyExpression(JsonLogicOp.LengthOp, List(ConstExpression(s1)))
+        val len2 = ApplyExpression(JsonLogicOp.LengthOp, List(ConstExpression(s2)))
 
-      for {
-        concatenated <- evaluator.evaluate(catExpr, MapValue.empty, None)
-        length1 <- evaluator.evaluate(len1, MapValue.empty, None)
-        length2 <- evaluator.evaluate(len2, MapValue.empty, None)
-        catLength <- concatenated match {
-          case Right(s: StrValue) => evaluator.evaluate(ApplyExpression(JsonLogicOp.LengthOp, List(ConstExpression(s))), MapValue.empty, None)
-          case other => IO.pure(other)
-        }
-      } yield {
-        (length1, length2, catLength) match {
-          case (Right(IntValue(l1)), Right(IntValue(l2)), Right(IntValue(lCat))) =>
-            expect(lCat == l1 + l2)
-          case _ => failure("Expected integer lengths")
-        }
-      }
+        for {
+          concatenated <- evaluator.evaluate(catExpr, MapValue.empty, None)
+          length1      <- evaluator.evaluate(len1, MapValue.empty, None)
+          length2      <- evaluator.evaluate(len2, MapValue.empty, None)
+          catLength <- concatenated match {
+            case Right(s: StrValue) =>
+              evaluator.evaluate(ApplyExpression(JsonLogicOp.LengthOp, List(ConstExpression(s))), MapValue.empty, None)
+            case other => IO.pure(other)
+          }
+        } yield
+          (length1, length2, catLength) match {
+            case (Right(IntValue(l1)), Right(IntValue(l2)), Right(IntValue(lCat))) =>
+              expect(lCat == l1 + l2)
+            case _ => failure("Expected integer lengths")
+          }
     }
   }
 
@@ -733,7 +803,7 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
 
       evaluator.evaluate(expr, MapValue.empty, None).map {
         case Right(StrValue(result)) => expect(result == result.toLowerCase)
-        case _ => failure("Expected string result")
+        case _                       => failure("Expected string result")
       }
     }
   }
@@ -745,7 +815,7 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
 
       evaluator.evaluate(expr, MapValue.empty, None).map {
         case Right(StrValue(result)) => expect(result == result.toUpperCase)
-        case _ => failure("Expected string result")
+        case _                       => failure("Expected string result")
       }
     }
   }
@@ -768,25 +838,29 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
   }
 
   test("substr never increases string length") {
-    forall(for { str <- genStrValue; start <- Gen.chooseNum(-10, 10) } yield (str, start)) { case (str, start) =>
-      val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+    forall(for {
+      str   <- genStrValue
+      start <- Gen.chooseNum(-10, 10)
+    } yield (str, start)) {
+      case (str, start) =>
+        val evaluator = JsonLogicEvaluator.tailRecursive[IO]
 
-      val substrExpr = ApplyExpression(JsonLogicOp.SubStrOp, List(ConstExpression(str), ConstExpression(IntValue(start))))
-      val originalLen = ApplyExpression(JsonLogicOp.LengthOp, List(ConstExpression(str)))
+        val substrExpr = ApplyExpression(JsonLogicOp.SubStrOp, List(ConstExpression(str), ConstExpression(IntValue(start))))
+        val originalLen = ApplyExpression(JsonLogicOp.LengthOp, List(ConstExpression(str)))
 
-      for {
-        substr <- evaluator.evaluate(substrExpr, MapValue.empty, None)
-        origLen <- evaluator.evaluate(originalLen, MapValue.empty, None)
-        substrLen <- substr match {
-          case Right(s: StrValue) => evaluator.evaluate(ApplyExpression(JsonLogicOp.LengthOp, List(ConstExpression(s))), MapValue.empty, None)
-          case other => IO.pure(other)
-        }
-      } yield {
-        (origLen, substrLen) match {
-          case (Right(IntValue(ol)), Right(IntValue(sl))) => expect(sl <= ol)
-          case _ => success
-        }
-      }
+        for {
+          substr  <- evaluator.evaluate(substrExpr, MapValue.empty, None)
+          origLen <- evaluator.evaluate(originalLen, MapValue.empty, None)
+          substrLen <- substr match {
+            case Right(s: StrValue) =>
+              evaluator.evaluate(ApplyExpression(JsonLogicOp.LengthOp, List(ConstExpression(s))), MapValue.empty, None)
+            case other => IO.pure(other)
+          }
+        } yield
+          (origLen, substrLen) match {
+            case (Right(IntValue(ol)), Right(IntValue(sl))) => expect(sl <= ol)
+            case _                                          => success
+          }
     }
   }
 
@@ -805,7 +879,7 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
 
       evaluator.evaluate(mapExpr, MapValue.empty, None).map {
         case Right(ArrayValue(result)) => expect(result.length == values.length)
-        case _ => failure("Expected array result")
+        case _                         => failure("Expected array result")
       }
     }
   }
@@ -820,7 +894,7 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
 
       evaluator.evaluate(filterExpr, MapValue.empty, None).map {
         case Right(ArrayValue(result)) => expect(result.length <= values.length)
-        case _ => failure("Expected array result")
+        case _                         => failure("Expected array result")
       }
     }
   }
@@ -864,19 +938,21 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
   test("slice preserves element order") {
     forall(for {
       values <- Gen.nonEmptyListOf(genIntValue)
-      start <- Gen.chooseNum(0, values.length)
-      end <- Gen.chooseNum(start, values.length)
-    } yield (values, start, end)) { case (values, start, end) =>
-      val evaluator = JsonLogicEvaluator.tailRecursive[IO]
-      val arr = ArrayValue(values)
+      start  <- Gen.chooseNum(0, values.length)
+      end    <- Gen.chooseNum(start, values.length)
+    } yield (values, start, end)) {
+      case (values, start, end) =>
+        val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+        val arr = ArrayValue(values)
 
-      val expr = ApplyExpression(JsonLogicOp.SliceOp, List(ConstExpression(arr), ConstExpression(IntValue(start)), ConstExpression(IntValue(end))))
+        val expr =
+          ApplyExpression(JsonLogicOp.SliceOp, List(ConstExpression(arr), ConstExpression(IntValue(start)), ConstExpression(IntValue(end))))
 
-      evaluator.evaluate(expr, MapValue.empty, None).map {
-        case Right(ArrayValue(result)) =>
-          expect(result == values.slice(start, end))
-        case _ => failure("Expected array result")
-      }
+        evaluator.evaluate(expr, MapValue.empty, None).map {
+          case Right(ArrayValue(result)) =>
+            expect(result == values.slice(start, end))
+          case _ => failure("Expected array result")
+        }
     }
   }
 
@@ -908,9 +984,9 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
       val expr = ApplyExpression(JsonLogicOp.AbsOp, List(ConstExpression(num)))
 
       evaluator.evaluate(expr, MapValue.empty, None).map {
-        case Right(IntValue(result)) => expect(result >= 0)
+        case Right(IntValue(result))   => expect(result >= 0)
         case Right(FloatValue(result)) => expect(result >= 0)
-        case _ => failure("Expected numeric result")
+        case _                         => failure("Expected numeric result")
       }
     }
   }
@@ -940,9 +1016,9 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
       val expr = ApplyExpression(JsonLogicOp.FloorOp, List(ConstExpression(num)))
 
       evaluator.evaluate(expr, MapValue.empty, None).map {
-        case Right(IntValue(result)) => expect(BigDecimal(result) <= num.value)
+        case Right(IntValue(result))   => expect(BigDecimal(result) <= num.value)
         case Right(FloatValue(result)) => expect(result <= num.value)
-        case _ => success
+        case _                         => success
       }
     }
   }
@@ -953,9 +1029,9 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
       val expr = ApplyExpression(JsonLogicOp.CeilOp, List(ConstExpression(num)))
 
       evaluator.evaluate(expr, MapValue.empty, None).map {
-        case Right(IntValue(result)) => expect(BigDecimal(result) >= num.value)
+        case Right(IntValue(result))   => expect(BigDecimal(result) >= num.value)
         case Right(FloatValue(result)) => expect(result >= num.value)
-        case _ => success
+        case _                         => success
       }
     }
   }
@@ -971,8 +1047,8 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
       for {
         floorResult <- evaluator.evaluate(floorExpr, MapValue.empty, None)
         roundResult <- evaluator.evaluate(roundExpr, MapValue.empty, None)
-        ceilResult <- evaluator.evaluate(ceilExpr, MapValue.empty, None)
-      } yield {
+        ceilResult  <- evaluator.evaluate(ceilExpr, MapValue.empty, None)
+      } yield
         (floorResult, roundResult, ceilResult) match {
           case (Right(IntValue(f)), Right(IntValue(r)), Right(IntValue(c))) =>
             expect.all(f <= r, r <= c)
@@ -980,7 +1056,6 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
             expect.all(f <= r, r <= c)
           case _ => success
         }
-      }
     }
   }
 
@@ -991,23 +1066,28 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
   test("split and join are inverses when separator not in string") {
     forall(for {
       parts <- Gen.listOfN(3, Gen.alphaStr.suchThat(_.nonEmpty))
-      sep <- Gen.const(",")
-    } yield (parts.mkString(sep), sep)) { case (str, sep) =>
-      val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+      sep   <- Gen.const(",")
+    } yield (parts.mkString(sep), sep)) {
+      case (str, sep) =>
+        val evaluator = JsonLogicEvaluator.tailRecursive[IO]
 
-      val strValue = StrValue(str)
-      val sepValue = StrValue(sep)
+        val strValue = StrValue(str)
+        val sepValue = StrValue(sep)
 
-      val splitExpr = ApplyExpression(JsonLogicOp.SplitOp, List(ConstExpression(strValue), ConstExpression(sepValue)))
+        val splitExpr = ApplyExpression(JsonLogicOp.SplitOp, List(ConstExpression(strValue), ConstExpression(sepValue)))
 
-      for {
-        splitResult <- evaluator.evaluate(splitExpr, MapValue.empty, None)
-        joinResult <- splitResult match {
-          case Right(arr: ArrayValue) =>
-            evaluator.evaluate(ApplyExpression(JsonLogicOp.JoinOp, List(ConstExpression(arr), ConstExpression(sepValue))), MapValue.empty, None)
-          case other => IO.pure(other)
-        }
-      } yield expect(joinResult == Right(strValue))
+        for {
+          splitResult <- evaluator.evaluate(splitExpr, MapValue.empty, None)
+          joinResult <- splitResult match {
+            case Right(arr: ArrayValue) =>
+              evaluator.evaluate(
+                ApplyExpression(JsonLogicOp.JoinOp, List(ConstExpression(arr), ConstExpression(sepValue))),
+                MapValue.empty,
+                None
+              )
+            case other => IO.pure(other)
+          }
+        } yield expect(joinResult == Right(strValue))
     }
   }
 
@@ -1038,13 +1118,12 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
       for {
         result1 <- evaluator.evaluateWithGas(expr, MapValue.empty, None, gasLimit, gasConfig)
         result2 <- evaluator.evaluateWithGas(expr, MapValue.empty, None, gasLimit, gasConfig)
-      } yield {
+      } yield
         (result1, result2) match {
           case (Right(r1), Right(r2)) =>
             expect(r1.gasUsed == r2.gasUsed)
           case _ => success // Both failed the same way
         }
-      }
     }
   }
 }

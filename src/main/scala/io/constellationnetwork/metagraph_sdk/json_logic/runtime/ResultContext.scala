@@ -77,6 +77,10 @@ object ResultContext {
     def extract[A](ra: (A, GasMetrics)): A = ra._1
   }
 
+  implicit class ResultOps[Result[_]: ResultContext, A](result: Result[A]) {
+    def extractValue: A = ResultContext[Result].extract(result)
+  }
+
   implicit class ResultListOps[Result[_]: ResultContext](args: List[Result[JsonLogicValue]]) {
     def withMetrics[F[_]: Functor, A](
       f: List[JsonLogicValue] => F[Either[JsonLogicException, Result[A]]]

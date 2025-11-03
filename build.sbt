@@ -9,7 +9,6 @@ ThisBuild / homepage := Some(url("https://github.com/Constellation-Labs/metakit"
 ThisBuild / licenses := List("Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0"))
 ThisBuild / sonatypeCredentialHost := "central.sonatype.com"
 ThisBuild / versionScheme := Some("early-semver")
-ThisBuild / git.gitUncommittedChanges := false
 
 ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
