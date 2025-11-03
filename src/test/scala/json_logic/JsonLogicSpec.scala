@@ -2723,6 +2723,26 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
     }
   }
 
+  test("`pow` handles fractional exponent") {
+    val exprStr = """{"pow": [4, 0.5]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(2))
+    }
+  }
+
+  test("`pow` handles fractional exponent and decimal base") {
+    val exprStr = """{"pow": [6.25, 0.5]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, FloatValue(2.5))
+    }
+  }
+
   test("`has` returns true when map contains key") {
     val exprStr = """{"has": [{"a": 1, "b": 2}, "a"]}"""
     val dataStr = """null"""

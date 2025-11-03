@@ -263,6 +263,7 @@ object JsonLogicSemantics {
       private def handleEqStrictOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>
           val boolResult = values match {
+            case NullValue :: NullValue :: Nil         => true
             case BoolValue(l) :: BoolValue(r) :: Nil   => l == r
             case StrValue(l) :: StrValue(r) :: Nil     => l == r
             case IntValue(l) :: IntValue(r) :: Nil     => l == r

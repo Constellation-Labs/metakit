@@ -9,10 +9,17 @@ trait EvaluatorSyntax {
 
   implicit class EvaluatorSyntaxOps[F[_]: Monad](evaluator: JsonLogicEvaluator[F]) {
 
-    def evalAll(redexList: List[(JsonLogicExpression, JsonLogicValue)], ctx: Option[JsonLogicValue] = None): F[Either[JsonLogicException, List[JsonLogicValue]]] =
+    def evalAll(
+      redexList: List[(JsonLogicExpression, JsonLogicValue)],
+      ctx: Option[JsonLogicValue] = None
+    ): F[Either[JsonLogicException, List[JsonLogicValue]]] =
       evaluator.evaluateAll(redexList, ctx)
 
-    def evalSingle(expr: JsonLogicExpression, data: JsonLogicValue, ctx: Option[JsonLogicValue] = None): F[Either[JsonLogicException, JsonLogicValue]] =
+    def evalSingle(
+      expr: JsonLogicExpression,
+      data: JsonLogicValue,
+      ctx: Option[JsonLogicValue] = None
+    ): F[Either[JsonLogicException, JsonLogicValue]] =
       evaluator.evaluate(expr, data, ctx)
   }
 }
