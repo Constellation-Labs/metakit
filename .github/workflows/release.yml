@@ -16,6 +16,9 @@ jobs:
         with:
           java-version: openjdk@1.11
 
+      - name: Prefetch Scalafmt
+        run: sbt scalafmtCheckAll || true
+
       - name: Build and publish Metakit artifacts to Maven
         run: sbt ci-release
         env:
