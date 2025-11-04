@@ -89,12 +89,10 @@ object NumericOps {
    */
   def reduceNumeric(
     values: List[JsonLogicValue],
-    op: (BigDecimal, BigDecimal) => BigDecimal,
-    identity: BigDecimal
+    op: (BigDecimal, BigDecimal) => BigDecimal
   ): Either[JsonLogicException, JsonLogicValue] =
-    if (values.isEmpty) {
-      JsonLogicException("Cannot reduce empty list").asLeft
-    } else {
+    if (values.isEmpty) JsonLogicException("Cannot reduce empty list").asLeft
+    else {
       values.traverse(promoteToNumeric).map { numerics =>
         val hasFloat = numerics.exists(_.isInstanceOf[FloatResult])
         val result = numerics.map(_.toBigDecimal).reduce(op)
@@ -112,10 +110,4 @@ object NumericOps {
    */
   def compareNumeric(left: NumericResult, right: NumericResult): Int =
     left.toBigDecimal.compare(right.toBigDecimal)
-
-  /**
-   * Checks if two numeric values are equal
-   */
-  def numericEquals(left: NumericResult, right: NumericResult): Boolean =
-    left.toBigDecimal == right.toBigDecimal
 }

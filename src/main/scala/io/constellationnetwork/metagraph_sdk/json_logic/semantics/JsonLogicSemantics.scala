@@ -511,7 +511,7 @@ object JsonLogicSemantics {
           } else if (list.size == 1 && list.head.isInstanceOf[StrValue]) {
             promoteToNumeric(list.head).map(_.toJsonLogicValue)
           } else {
-            reduceNumeric(list, _ + _, 0).map(v => v: JsonLogicValue)
+            reduceNumeric(list, _ + _).map(v => v: JsonLogicValue)
           }
 
         args.withMetrics { values =>
@@ -529,7 +529,7 @@ object JsonLogicSemantics {
           if (list.isEmpty) {
             JsonLogicException(s"Unexpected input for `${TimesOp.tag}`: list cannot be empty").asLeft
           } else {
-            reduceNumeric(list, _ * _, 1).map(v => (v: JsonLogicValue).pure[Result])
+            reduceNumeric(list, _ * _).map(v => (v: JsonLogicValue).pure[Result])
           }
 
         args.withMetrics { values =>
