@@ -3,7 +3,7 @@ import Dependencies.*
 import sbt.*
 import sbt.Keys.*
 
-ThisBuild / scalaVersion := "2.13.15"
+ThisBuild / scalaVersion := "2.13.16"
 ThisBuild / organization := "io.constellationnetwork"
 ThisBuild / homepage := Some(url("https://github.com/Constellation-Labs/metakit"))
 ThisBuild / licenses := List("Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0"))
