@@ -8,6 +8,7 @@ import io.constellationnetwork.metagraph_sdk.crypto.mpt.MerklePatriciaTrie
 import io.constellationnetwork.metagraph_sdk.crypto.mpt.api.MerklePatriciaProver
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher
 import io.constellationnetwork.security.hash.Hash
+import io.constellationnetwork.security.hex.Hex
 
 import org.openjdk.jmh.annotations._
 import org.openjdk.jmh.infra.Blackhole
@@ -28,27 +29,27 @@ class MerklePatriciaWorstCaseBenchmark {
   @Param(Array("1000", "10000"))
   var numEntries: Int = _
 
-  private var entriesWithCommonPrefix: List[(Hash, String)] = _
-  private var entriesRandom: List[(Hash, String)] = _
+  private var entriesWithCommonPrefix: List[(Hex, String)] = _
+  private var entriesRandom: List[(Hex, String)] = _
   private var trieCommonPrefix: MerklePatriciaTrie = _
   private var trieRandom: MerklePatriciaTrie = _
 
   @Setup(Level.Trial)
   def setup(): Unit = {
     // Worst case: all keys share a long common prefix (forces deep tree)
-    val commonPrefixProgram: F[(List[(Hash, String)], MerklePatriciaTrie)] = for {
+    val commonPrefixProgram: F[(List[(Hex, String)], MerklePatriciaTrie)] = for {
       entries <- (1 to numEntries).toList.traverse { i =>
         // Keys with very long common prefix
         val key = s"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_${"%010d".format(i)}"
-        JsonBinaryHasher[F].computeDigest(key).map(_ -> s"value_$i")
+        JsonBinaryHasher[F].computeDigest(key).map(d => Hex(d.value) -> s"value_$i")
       }
       trie <- MerklePatriciaTrie.make[F, String](entries.toMap)
     } yield (entries, trie)
 
     // Best/average case: random keys (balanced tree)
-    val randomProgram: F[(List[(Hash, String)], MerklePatriciaTrie)] = for {
+    val randomProgram: F[(List[(Hex, String)], MerklePatriciaTrie)] = for {
       entries <- (1 to numEntries).toList.traverse { i =>
-        JsonBinaryHasher[F].computeDigest(s"entry_$i").map(_ -> s"value_$i")
+        JsonBinaryHasher[F].computeDigest(s"entry_$i").map(d => Hex(d.value) -> s"value_$i")
       }
       trie <- MerklePatriciaTrie.make[F, String](entries.toMap)
     } yield (entries, trie)
@@ -81,7 +82,7 @@ class MerklePatriciaWorstCaseBenchmark {
 
     val proofs = sampleIndices.traverse { idx =>
       val (digest, _) = entriesWithCommonPrefix(idx)
-      prover.attestDigest(digest).flatMap(IO.fromEither(_))
+      prover.attestPath(digest).flatMap(IO.fromEither(_))
     }.unsafeRunSync()
 
     bh.consume(proofs)
@@ -94,7 +95,7 @@ class MerklePatriciaWorstCaseBenchmark {
 
     val proofs = sampleIndices.traverse { idx =>
       val (digest, _) = entriesRandom(idx)
-      prover.attestDigest(digest).flatMap(IO.fromEither(_))
+      prover.attestPath(digest).flatMap(IO.fromEither(_))
     }.unsafeRunSync()
 
     bh.consume(proofs)
@@ -108,12 +109,12 @@ class MerklePatriciaWorstCaseBenchmark {
 
     val commonProofSize = {
       val (digest, _) = entriesWithCommonPrefix.head
-      proverCommon.attestDigest(digest).flatMap(IO.fromEither(_)).unsafeRunSync().witness.size
+      proverCommon.attestPath(digest).flatMap(IO.fromEither(_)).unsafeRunSync().witness.size
     }
 
     val randomProofSize = {
       val (digest, _) = entriesRandom.head
-      proverRandom.attestDigest(digest).flatMap(IO.fromEither(_)).unsafeRunSync().witness.size
+      proverRandom.attestPath(digest).flatMap(IO.fromEither(_)).unsafeRunSync().witness.size
     }
 
     bh.consume((commonProofSize, randomProofSize))

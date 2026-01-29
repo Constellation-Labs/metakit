@@ -70,6 +70,7 @@ lazy val benchmarks = (project in file("benchmarks"))
   .enablePlugins(JmhPlugin)
   .dependsOn(root)
   .settings(
+    commonSettings,
     name := "metakit-benchmarks",
     publish / skip := true
   )
