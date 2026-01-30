@@ -168,36 +168,97 @@ object GasAwareSemantics {
         op match {
           case CatOp =>
             result match {
-              case StrValue(s) => GasCost(s.length.toLong)
+              case StrValue(s) => gasConfig.sizeCost(s.length.toLong)
               case _           => GasCost.Zero
             }
           case SplitOp =>
             result match {
-              case ArrayValue(arr) => GasCost(arr.size.toLong * 2)
+              case ArrayValue(arr) => gasConfig.sizeCost(arr.size.toLong * 2)
               case _               => GasCost.Zero
             }
           case MergeOp =>
             result match {
-              case ArrayValue(arr) => GasCost(arr.size.toLong)
-              case MapValue(m)     => GasCost(m.size.toLong)
+              case ArrayValue(arr) => gasConfig.sizeCost(arr.size.toLong)
+              case MapValue(m)     => gasConfig.sizeCost(m.size.toLong)
               case _               => GasCost.Zero
             }
           case UniqueOp =>
             args match {
-              case ArrayValue(arr) :: Nil => GasCost((arr.size.toLong * arr.size.toLong) / 10)
+              case ArrayValue(arr) :: Nil => gasConfig.sizeCost(arr.size.toLong)
               case _                      => GasCost.Zero
             }
           case PowOp =>
             args match {
-              case _ :: IntValue(exp) :: Nil   => GasCost(exp.abs.toLong.min(1000))
-              case _ :: FloatValue(exp) :: Nil => GasCost(exp.abs.toLong.min(1000))
+              case _ :: IntValue(exp) :: Nil   => GasCost(exp.abs.toLong)
+              case _ :: FloatValue(exp) :: Nil => GasCost(exp.abs.toLong)
               case _                           => GasCost.Zero
             }
           case AddOp | TimesOp | MinusOp =>
             args match {
-              case ArrayValue(arr) :: Nil => GasCost(arr.size.toLong)
-              case list if list.size > 1  => GasCost((list.size - 1).toLong)
+              case ArrayValue(arr) :: Nil => gasConfig.sizeCost(arr.size.toLong)
+              case list if list.size > 1  => gasConfig.sizeCost((list.size - 1).toLong)
               case _                      => GasCost.Zero
+            }
+          case MapOp | FilterOp | AllOp | NoneOp | SomeOp | FindOp | CountOp =>
+            args match {
+              case ArrayValue(arr) :: _ => gasConfig.sizeCost(arr.size.toLong)
+              case _                    => GasCost.Zero
+            }
+          case ReverseOp =>
+            args match {
+              case ArrayValue(arr) :: Nil => gasConfig.sizeCost(arr.size.toLong)
+              case _                      => GasCost.Zero
+            }
+          case FlattenOp =>
+            result match {
+              case ArrayValue(arr) => gasConfig.sizeCost(arr.size.toLong)
+              case _               => GasCost.Zero
+            }
+          case SliceOp =>
+            result match {
+              case ArrayValue(arr) => gasConfig.sizeCost(arr.size.toLong)
+              case _               => GasCost.Zero
+            }
+          case InOp =>
+            args match {
+              case _ :: ArrayValue(arr) :: Nil => gasConfig.sizeCost(arr.size.toLong)
+              case _ :: StrValue(s) :: Nil     => gasConfig.sizeCost(s.length.toLong / 10)
+              case _                           => GasCost.Zero
+            }
+          case IntersectOp =>
+            args match {
+              case ArrayValue(a) :: ArrayValue(b) :: Nil => gasConfig.sizeCost(a.size.toLong + b.size.toLong)
+              case _                                     => GasCost.Zero
+            }
+          case ReduceOp =>
+            args match {
+              case ArrayValue(arr) :: _ => gasConfig.sizeCost(arr.size.toLong)
+              case _                    => GasCost.Zero
+            }
+          case MaxOp | MinOp =>
+            args match {
+              case ArrayValue(arr) :: Nil => gasConfig.sizeCost(arr.size.toLong)
+              case list                   => gasConfig.sizeCost(list.size.toLong)
+            }
+          case JoinOp =>
+            result match {
+              case StrValue(s) => gasConfig.sizeCost(s.length.toLong)
+              case _           => GasCost.Zero
+            }
+          case SubStrOp =>
+            result match {
+              case StrValue(s) => gasConfig.sizeCost(s.length.toLong)
+              case _           => GasCost.Zero
+            }
+          case MapValuesOp | MapKeysOp =>
+            args match {
+              case MapValue(m) :: Nil => gasConfig.sizeCost(m.size.toLong)
+              case _                  => GasCost.Zero
+            }
+          case EntriesOp =>
+            result match {
+              case ArrayValue(arr) => gasConfig.sizeCost(arr.size.toLong * 2) // Each entry creates a 2-element array
+              case _               => GasCost.Zero
             }
           case _ => GasCost.Zero
         }

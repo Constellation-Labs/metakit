@@ -125,11 +125,11 @@ case class GasConfig(
   typeOf: GasCost = GasCost(1),
   const: GasCost = GasCost.Zero,
   varAccess: GasCost = GasCost(2),
-  arrayExpr: GasCost = GasCost(1),
-  mapExpr: GasCost = GasCost(1),
-  depthPenaltyMultiplier: Long = 5L
+  depthPenaltyMultiplier: Long = 5L,
+  collectionSizeMultiplier: Long = 1L
 ) {
   def depthPenalty(depth: Long): GasCost = GasCost(depth * depthPenaltyMultiplier)
+  def sizeCost(size: Long): GasCost = GasCost(size * collectionSizeMultiplier)
 }
 
 object GasConfig {

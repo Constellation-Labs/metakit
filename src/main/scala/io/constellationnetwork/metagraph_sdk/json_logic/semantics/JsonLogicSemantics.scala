@@ -7,7 +7,7 @@ import io.constellationnetwork.metagraph_sdk.json_logic.core.JsonLogicOp._
 import io.constellationnetwork.metagraph_sdk.json_logic.core._
 import io.constellationnetwork.metagraph_sdk.json_logic.ops.CoercionOps._
 import io.constellationnetwork.metagraph_sdk.json_logic.ops.NumericOps._
-import io.constellationnetwork.metagraph_sdk.json_logic.runtime.ResultContext.{ResultListOps, resultContextApplicative}
+import io.constellationnetwork.metagraph_sdk.json_logic.runtime.ResultContext._
 import io.constellationnetwork.metagraph_sdk.json_logic.runtime.{JsonLogicRuntime, ResultContext}
 
 trait JsonLogicSemantics[F[_], Result[_]] {
@@ -27,12 +27,6 @@ object JsonLogicSemantics {
     evaluationStrategy: EvaluationCallback[F, Result]
   ): JsonLogicSemantics[F, Result] =
     new JsonLogicSemantics[F, Result] {
-
-      def extractValue(result: Result[JsonLogicValue]): JsonLogicValue = result match {
-        case v: JsonLogicValue      => v
-        case (v: JsonLogicValue, _) => v
-        case _                      => NullValue
-      }
 
       override def getVar(
         key: String,
@@ -155,22 +149,19 @@ object JsonLogicSemantics {
         case v @ StrValue(key) =>
           getVar(key).map {
             case Right(result) =>
-              val value = extractValue(result)
-              if (value == NullValue) v.some else None
+              if (result.extractValue == NullValue) v.some else None
             case Left(_) => v.some
           }
         case v @ IntValue(key) =>
           getVar(key.toString).map {
             case Right(result) =>
-              val value = extractValue(result)
-              if (value == NullValue) v.some else None
+              if (result.extractValue == NullValue) v.some else None
             case Left(_) => v.some
           }
         case v @ FloatValue(key) =>
           getVar(key.toString).map {
             case Right(result) =>
-              val value = extractValue(result)
-              if (value == NullValue) v.some else None
+              if (result.extractValue == NullValue) v.some else None
             case Left(_) => v.some
           }
         case v => v.some.pure[F]
@@ -213,8 +204,12 @@ object JsonLogicSemantics {
           }
 
         (values match {
-          case ArrayValue(arr) :: Nil                                                   => impl(arr, 1)
-          case IntValue(min) :: ArrayValue(arr) :: Nil if min > 0 && min < Int.MaxValue => impl(arr, min.toInt)
+          case ArrayValue(arr) :: Nil => impl(arr, 1)
+          case IntValue(min) :: ArrayValue(arr) :: Nil if min > 0 =>
+            safeToInt(min, "missing_some min").fold(
+              err => err.asLeft[JsonLogicValue].pure[F],
+              minInt => impl(arr, minInt)
+            )
           case _ =>
             JsonLogicException(s"Unexpected input for `${MissingSomeOp.tag}' got $values")
               .asLeft[JsonLogicValue]
@@ -260,6 +255,8 @@ object JsonLogicSemantics {
         }
       }
 
+      // Strict equality compares types and values directly.
+      // Arrays and maps use structural value equality (deep comparison).
       private def handleEqStrictOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>
           val boolResult = values match {
@@ -365,8 +362,6 @@ object JsonLogicSemantics {
       }
 
       private def handleLeq(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
-        import io.constellationnetwork.metagraph_sdk.json_logic.ops.NumericOps._
-
         def compareTwo(l: JsonLogicValue, r: JsonLogicValue): Either[JsonLogicException, Boolean] =
           for {
             ln <- promoteToNumeric(l)
@@ -390,8 +385,6 @@ object JsonLogicSemantics {
       }
 
       private def handleGt(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
-        import io.constellationnetwork.metagraph_sdk.json_logic.ops.NumericOps._
-
         def compareTwo(l: JsonLogicValue, r: JsonLogicValue): Either[JsonLogicException, Boolean] =
           for {
             ln <- promoteToNumeric(l)
@@ -407,8 +400,6 @@ object JsonLogicSemantics {
       }
 
       private def handleGeq(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
-        import io.constellationnetwork.metagraph_sdk.json_logic.ops.NumericOps._
-
         def compareTwo(l: JsonLogicValue, r: JsonLogicValue): Either[JsonLogicException, Boolean] =
           for {
             ln <- promoteToNumeric(l)
@@ -426,29 +417,24 @@ object JsonLogicSemantics {
       private def handleModuloOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>
           values match {
-            case IntValue(_) :: IntValue(r) :: Nil if r == 0 =>
-              JsonLogicException("Division by zero in modulo operation").asLeft[Result[JsonLogicValue]]
-            case FloatValue(_) :: FloatValue(r) :: Nil if r == 0 =>
-              JsonLogicException("Division by zero in modulo operation").asLeft[Result[JsonLogicValue]]
-            case IntValue(_) :: FloatValue(r) :: Nil if r == 0 =>
-              JsonLogicException("Division by zero in modulo operation").asLeft[Result[JsonLogicValue]]
-            case FloatValue(_) :: IntValue(r) :: Nil if r == 0 =>
-              JsonLogicException("Division by zero in modulo operation").asLeft[Result[JsonLogicValue]]
-            case IntValue(l) :: IntValue(r) :: Nil =>
-              (IntValue(l % r): JsonLogicValue).pure[Result].asRight[JsonLogicException]
-            case FloatValue(l) :: FloatValue(r) :: Nil =>
-              (FloatValue(l % r): JsonLogicValue).pure[Result].asRight[JsonLogicException]
-            case IntValue(l) :: FloatValue(r) :: Nil =>
-              (FloatValue(BigDecimal(l) % r): JsonLogicValue).pure[Result].asRight[JsonLogicException]
-            case FloatValue(l) :: IntValue(r) :: Nil =>
-              (FloatValue(l % BigDecimal(r)): JsonLogicValue).pure[Result].asRight[JsonLogicException]
-            case _ => JsonLogicException(s"Unexpected input for `${ModuloOp.tag}' got $values").asLeft[Result[JsonLogicValue]]
+            case l :: r :: Nil =>
+              (for {
+                ln <- promoteToNumeric(l)
+                rn <- promoteToNumeric(r)
+              } yield
+                if (rn.toBigDecimal == 0) {
+                  JsonLogicException("Division by zero in modulo operation").asLeft[Result[JsonLogicValue]]
+                } else {
+                  // Note: BigDecimal's % uses truncated division (same as JavaScript/Java)
+                  // e.g., -7 % 3 = -1 (not 2 as in Python's floored division)
+                  combineNumeric(_ % _)(ln, rn).pure[Result].asRight[JsonLogicException]
+                }).fold(_.asLeft[Result[JsonLogicValue]], identity)
+            case _ =>
+              JsonLogicException(s"Unexpected input for `${ModuloOp.tag}' got $values").asLeft[Result[JsonLogicValue]]
           }
         }
 
       private def handleMaxOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
-        import io.constellationnetwork.metagraph_sdk.json_logic.ops.NumericOps._
-
         def impl(list: List[JsonLogicValue]): Either[JsonLogicException, Result[JsonLogicValue]] =
           if (list.isEmpty) {
             JsonLogicException(s"Unexpected input for `${MaxOp.tag}`: list cannot be empty").asLeft
@@ -475,8 +461,6 @@ object JsonLogicSemantics {
       }
 
       private def handleMinOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
-        import io.constellationnetwork.metagraph_sdk.json_logic.ops.NumericOps._
-
         def impl(list: List[JsonLogicValue]): Either[JsonLogicException, Result[JsonLogicValue]] =
           if (list.isEmpty) {
             JsonLogicException(s"Unexpected input for `${MinOp.tag}`: list cannot be empty").asLeft
@@ -503,8 +487,6 @@ object JsonLogicSemantics {
       }
 
       private def handleAddOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
-        import io.constellationnetwork.metagraph_sdk.json_logic.ops.NumericOps._
-
         def impl(list: List[JsonLogicValue]): Either[JsonLogicException, JsonLogicValue] =
           if (list.isEmpty) {
             JsonLogicException(s"Unexpected input for `${AddOp.tag}`: list cannot be empty").asLeft
@@ -523,14 +505,9 @@ object JsonLogicSemantics {
       }
 
       private def handleTimesOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
-        import io.constellationnetwork.metagraph_sdk.json_logic.ops.NumericOps._
-
         def impl(list: List[JsonLogicValue]): Either[JsonLogicException, Result[JsonLogicValue]] =
-          if (list.isEmpty) {
-            JsonLogicException(s"Unexpected input for `${TimesOp.tag}`: list cannot be empty").asLeft
-          } else {
-            reduceNumeric(list, _ * _).map(v => (v: JsonLogicValue).pure[Result])
-          }
+          if (list.isEmpty) JsonLogicException(s"Unexpected input for `${TimesOp.tag}`: list cannot be empty").asLeft
+          else reduceNumeric(list, _ * _).map(v => (v: JsonLogicValue).pure[Result])
 
         args.withMetrics { values =>
           values match {
@@ -540,9 +517,7 @@ object JsonLogicSemantics {
         }
       }
 
-      private def handleMinusOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
-        import io.constellationnetwork.metagraph_sdk.json_logic.ops.NumericOps._
-
+      private def handleMinusOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>
           values match {
             case v :: Nil =>
@@ -558,28 +533,23 @@ object JsonLogicSemantics {
               JsonLogicException(s"Unexpected input for `${MinusOp.tag}' got $values").asLeft[Result[JsonLogicValue]]
           }
         }
-      }
 
       private def handleDivOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>
           values match {
-            case IntValue(_) :: IntValue(r) :: Nil if r == 0 =>
-              JsonLogicException("Division by zero").asLeft[Result[JsonLogicValue]]
-            case FloatValue(_) :: FloatValue(r) :: Nil if r == 0 =>
-              JsonLogicException("Division by zero").asLeft[Result[JsonLogicValue]]
-            case IntValue(_) :: FloatValue(r) :: Nil if r == 0 =>
-              JsonLogicException("Division by zero").asLeft[Result[JsonLogicValue]]
-            case FloatValue(_) :: IntValue(r) :: Nil if r == 0 =>
-              JsonLogicException("Division by zero").asLeft[Result[JsonLogicValue]]
-            case IntValue(l) :: IntValue(r) :: Nil =>
-              (IntValue(l / r): JsonLogicValue).pure[Result].asRight[JsonLogicException]
-            case FloatValue(l) :: FloatValue(r) :: Nil =>
-              (FloatValue(l / r): JsonLogicValue).pure[Result].asRight[JsonLogicException]
-            case IntValue(l) :: FloatValue(r) :: Nil =>
-              (FloatValue(BigDecimal(l) / r): JsonLogicValue).pure[Result].asRight[JsonLogicException]
-            case FloatValue(l) :: IntValue(r) :: Nil =>
-              (FloatValue(l / BigDecimal(r)): JsonLogicValue).pure[Result].asRight[JsonLogicException]
-            case _ => JsonLogicException(s"Unexpected input for `${DivOp.tag}' got $values").asLeft[Result[JsonLogicValue]]
+            case l :: r :: Nil =>
+              (for {
+                ln <- promoteToNumeric(l)
+                rn <- promoteToNumeric(r)
+              } yield
+                if (rn.toBigDecimal == 0) {
+                  JsonLogicException("Division by zero").asLeft[Result[JsonLogicValue]]
+                } else {
+                  // Use safeDivide for explicit DECIMAL128 precision
+                  combineNumeric(safeDivide)(ln, rn).pure[Result].asRight[JsonLogicException]
+                }).fold(_.asLeft[Result[JsonLogicValue]], identity)
+            case _ =>
+              JsonLogicException(s"Unexpected input for `${DivOp.tag}' got $values").asLeft[Result[JsonLogicValue]]
           }
         }
 
@@ -607,6 +577,7 @@ object JsonLogicSemantics {
 
       private def handleInOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
 
+        // For string containment, primitives are converted to their string representation
         def strImpl(toFind: JsonLogicPrimitive, str: String): Either[JsonLogicException, Result[JsonLogicValue]] = {
           val toFindStr = toFind match {
             case BoolValue(value)  => value.toString
@@ -637,21 +608,28 @@ object JsonLogicSemantics {
           toFind: List[JsonLogicValue],
           arr: List[JsonLogicValue]
         ): Either[JsonLogicException, Result[JsonLogicValue]] =
-          (BoolValue(toFind.forall(arr.contains)): JsonLogicValue).pure[Result].asRight[JsonLogicException]
+          (BoolValue(toFind.forall(arr.toSet.contains)): JsonLogicValue).pure[Result].asRight[JsonLogicException]
 
         args.withMetrics { values =>
           values match {
-            case NullValue :: _ :: Nil => (BoolValue(false): JsonLogicValue).pure[Result].asRight[JsonLogicException].pure[F]
+            // null as first arg treated as empty set - empty set is subset of any set
+            case NullValue :: _ :: Nil =>
+              (BoolValue(true): JsonLogicValue).pure[Result].asRight[JsonLogicException].pure[F]
+            // null as second arg - elements cannot be in null
+            case ArrayValue(_) :: NullValue :: Nil =>
+              (BoolValue(false): JsonLogicValue).pure[Result].asRight[JsonLogicException].pure[F]
             case ArrayValue(toFind) :: ArrayValue(arr) :: Nil => arrImpl(toFind, arr).pure[F]
             case _ =>
-              JsonLogicException(s"Unexpected input to `${IntersectOp.tag}` got $values").asLeft[Result[JsonLogicValue]].pure[F]
+              JsonLogicException(s"Unexpected input to `${IntersectOp.tag}`: expected two arrays, got $values")
+                .asLeft[Result[JsonLogicValue]]
+                .pure[F]
           }
         }
       }
 
       private def handleCatOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
-        args.withMetrics { values =>
-          values.traverse {
+        args.withMetrics {
+          _.traverse {
             case NullValue => "".asRight
             case FunctionValue(expr) =>
               JsonLogicException(s"Unexpected input for `${CatOp.tag}` got $expr").asLeft[JsonLogicValue]
@@ -678,12 +656,16 @@ object JsonLogicSemantics {
             substr = if (startIdx >= strLen || endIdx <= startIdx) "" else s.substring(startIdx, endIdx)
           } yield (StrValue(substr): JsonLogicValue).pure[Result]
 
-        args.withMetrics { values =>
-          values match {
-            case StrValue(str) :: IntValue(start) :: Nil                     => impl(str, start.toInt, str.length)
-            case StrValue(str) :: IntValue(start) :: IntValue(length) :: Nil => impl(str, start.toInt, length.toInt)
-            case _ => JsonLogicException(s"Unexpected input to `${SubStrOp.tag}` got $values").asLeft[Result[JsonLogicValue]]
-          }
+        args.withMetrics {
+          case StrValue(str) :: IntValue(start) :: Nil =>
+            safeToInt(start, "substr start").flatMap(s => impl(str, s, str.length))
+          case StrValue(str) :: IntValue(start) :: IntValue(length) :: Nil =>
+            for {
+              s <- safeToInt(start, "substr start")
+              l <- safeToInt(length, "substr length")
+              r <- impl(str, s, l)
+            } yield r
+          case _ => JsonLogicException(s"Unexpected input to `${SubStrOp.tag}` got $values").asLeft[Result[JsonLogicValue]]
         }
       }
 
@@ -692,15 +674,9 @@ object JsonLogicSemantics {
         def impl(arr: List[JsonLogicValue], expr: JsonLogicExpression): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
           arr
             .traverse(el => evaluationStrategy(expr, el.some))
-            .map { eitherList =>
-              eitherList.sequence.map { results =>
-                val combinedResult: Result[List[JsonLogicValue]] = results.sequence
-                combinedResult.map(ArrayValue(_))
-              }
-            }
+            .map(_.sequence.map(_.sequence.map(ArrayValue(_))))
 
-        val values = args.map(extractValue)
-        values match {
+        args.extractValues match {
           case ArrayValue(arr) :: FunctionValue(expr) :: Nil => impl(arr, expr)
           case _ => JsonLogicException(s"Unexpected input to ${MapOp.tag}, got $values").asLeft[Result[JsonLogicValue]].pure[F]
         }
@@ -715,19 +691,17 @@ object JsonLogicSemantics {
           arr.traverse { el =>
             evaluationStrategy(expr, el.some).map {
               case Right(result) =>
-                val value = extractValue(result)
-                (el, value.isTruthy).some
-              case Left(_) => None
+                (el, result.extractValue.isTruthy).asRight[JsonLogicException]
+              case Left(err) => err.asLeft[(JsonLogicValue, Boolean)]
             }
-          }.map { results =>
-            val filtered = results.flatten.collect {
-              case (el, isTruthy) if isTruthy => el
+          }.map {
+            _.sequence.map { pairs =>
+              val filtered = pairs.collect { case (el, isTruthy) if isTruthy => el }
+              (ArrayValue(filtered): JsonLogicValue).pure[Result]
             }
-            (ArrayValue(filtered): JsonLogicValue).pure[Result].asRight[JsonLogicException]
           }
 
-        val values = args.map(extractValue)
-        values match {
+        args.extractValues match {
           case ArrayValue(arr) :: FunctionValue(expr) :: Nil => impl(arr, expr)
           case _ => JsonLogicException(s"Unexpected input to ${FilterOp.tag}, got $values").asLeft[Result[JsonLogicValue]].pure[F]
         }
@@ -744,8 +718,7 @@ object JsonLogicSemantics {
             accEither match {
               case Left(err) => err.asLeft[Result[JsonLogicValue]].pure[F]
               case Right(accResult) =>
-                val accValue = extractValue(accResult)
-                evaluationStrategy(expr, MapValue(Map("current" -> item, "accumulator" -> accValue)).some).map {
+                evaluationStrategy(expr, MapValue(Map("current" -> item, "accumulator" -> accResult.extractValue)).some).map {
                   case Right(newResult) =>
                     val RC = ResultContext[Result]
                     val combined = RC.flatMap(accResult)(_ => newResult)
@@ -755,8 +728,7 @@ object JsonLogicSemantics {
             }
           }
 
-        val values = args.map(extractValue)
-        values match {
+        args.extractValues match {
           case ArrayValue(arr) :: FunctionValue(expr) :: Nil =>
             if (arr.isEmpty) {
               (NullValue: JsonLogicValue).pure[Result].asRight[JsonLogicException].pure[F]
@@ -776,21 +748,15 @@ object JsonLogicSemantics {
         ): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
           arr.traverse { el =>
             evaluationStrategy(expr, el.some).map {
-              case Right(result) => result.map(_.isTruthy)
-              case Left(_)       => false.pure[Result]
+              case Right(result) => result.map(_.isTruthy).asRight[JsonLogicException]
+              case Left(err)     => err.asLeft[Result[Boolean]]
             }
-          }.map { resultBools =>
-            val boolResults: Result[List[Boolean]] = resultBools.sequence
-            val finalResult: Result[Boolean] = boolResults.map(_.forall(identity))
-            (finalResult.map(BoolValue(_)): Result[JsonLogicValue]).asRight[JsonLogicException]
-          }
+          }.map(_.sequence.map(_.sequence.map(_.forall(identity)).map(BoolValue(_)): Result[JsonLogicValue]))
 
-        args.withMetrics { values =>
-          values match {
-            case NullValue :: FunctionValue(_) :: Nil => (BoolValue(false): JsonLogicValue).pure[Result].asRight[JsonLogicException].pure[F]
-            case ArrayValue(arr) :: FunctionValue(expr) :: Nil => impl(arr, expr)
-            case _ => JsonLogicException(s"Unexpected input to ${AllOp.tag}, got $values").asLeft[Result[JsonLogicValue]].pure[F]
-          }
+        args.withMetrics {
+          case NullValue :: FunctionValue(_) :: Nil => (BoolValue(false): JsonLogicValue).pure[Result].asRight[JsonLogicException].pure[F]
+          case ArrayValue(arr) :: FunctionValue(expr) :: Nil => impl(arr, expr)
+          case _ => JsonLogicException(s"Unexpected input to ${AllOp.tag}, got $values").asLeft[Result[JsonLogicValue]].pure[F]
         }
       }
 
@@ -802,17 +768,16 @@ object JsonLogicSemantics {
         ): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
           arr.traverse { el =>
             evaluationStrategy(expr, el.some).map {
-              case Right(result) => result.map(v => !v.isTruthy)
-              case Left(_)       => true.pure[Result]
+              case Right(result) => result.map(v => !v.isTruthy).asRight[JsonLogicException]
+              case Left(err)     => err.asLeft[Result[Boolean]]
             }
-          }.map { resultBools =>
-            val boolResults: Result[List[Boolean]] = resultBools.sequence
-            val finalResult: Result[Boolean] = boolResults.map(_.forall(identity))
-            (finalResult.map(BoolValue(_)): Result[JsonLogicValue]).asRight[JsonLogicException]
+          }.map {
+            _.sequence.map {
+              _.sequence.map(_.forall(identity)).map(BoolValue(_)): Result[JsonLogicValue]
+            }
           }
 
-        val values = args.map(extractValue)
-        values match {
+        args.extractValues match {
           case ArrayValue(arr) :: FunctionValue(expr) :: Nil => impl(arr, expr)
           case _ => JsonLogicException(s"Unexpected input to ${NoneOp.tag}, got $values").asLeft[Result[JsonLogicValue]].pure[F]
         }
@@ -828,19 +793,22 @@ object JsonLogicSemantics {
           arr.traverse { el =>
             evaluationStrategy(expr, el.some).map {
               case Right(result) =>
-                val value = extractValue(result)
-                value.isTruthy
-              case Left(_) => false
+                result.extractValue.isTruthy.asRight[JsonLogicException]
+              case Left(err) => err.asLeft[Boolean]
             }
-          }.map { bools =>
-            val test = bools.count(identity) >= threshold
-            (BoolValue(test): JsonLogicValue).pure[Result].asRight[JsonLogicException]
+          }.map {
+            _.sequence.map { bools =>
+              (BoolValue(bools.count(identity) >= threshold): JsonLogicValue).pure[Result]
+            }
           }
 
-        val values = args.map(extractValue)
-        values match {
-          case ArrayValue(arr) :: FunctionValue(expr) :: Nil                  => impl(arr, expr, 1)
-          case ArrayValue(arr) :: FunctionValue(expr) :: IntValue(min) :: Nil => impl(arr, expr, min.toInt)
+        args.extractValues match {
+          case ArrayValue(arr) :: FunctionValue(expr) :: Nil => impl(arr, expr, 1)
+          case ArrayValue(arr) :: FunctionValue(expr) :: IntValue(min) :: Nil =>
+            safeToInt(min, "some threshold").fold(
+              err => err.asLeft[Result[JsonLogicValue]].pure[F],
+              minInt => impl(arr, expr, minInt)
+            )
           case _ => JsonLogicException(s"Unexpected input to ${SomeOp.tag}, got $values").asLeft[Result[JsonLogicValue]].pure[F]
         }
       }
@@ -868,11 +836,13 @@ object JsonLogicSemantics {
         def implMap(
           input: Map[String, JsonLogicValue],
           key: String
-        ): Either[JsonLogicException, Result[JsonLogicValue]] =
+        ): Either[JsonLogicException, Result[JsonLogicValue]] = {
+          val availableKeys = input.keys.take(5).mkString(", ") + (if (input.size > 5) ", ..." else "")
           Either.fromOption(
             input.get(key).map(_.pure[Result]),
-            JsonLogicException(s"Could not find key $key in the provided map $input")
+            JsonLogicException(s"Could not find key '$key' in map with keys: [$availableKeys]")
           )
+        }
 
         args.withMetrics { values =>
           values match {
@@ -893,18 +863,16 @@ object JsonLogicSemantics {
         ): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
           arr.traverse { el =>
             evaluationStrategy(expr, el.some).map {
-              case Right(result) =>
-                val value = extractValue(result)
-                value.isTruthy
-              case Left(_) => false
+              case Right(result) => result.extractValue.isTruthy.asRight[JsonLogicException]
+              case Left(err)     => err.asLeft[Boolean]
             }
-          }.map { bools =>
-            val count = bools.count(identity)
-            (IntValue(count): JsonLogicValue).pure[Result].asRight[JsonLogicException]
+          }.map {
+            _.sequence.map { bools =>
+              (IntValue(bools.count(identity)): JsonLogicValue).pure[Result]
+            }
           }
 
-        val values = args.map(extractValue)
-        values match {
+        args.extractValues match {
           case ArrayValue(arr) :: Nil                        => countSimple(arr).pure[F]
           case ArrayValue(arr) :: FunctionValue(expr) :: Nil => countWithPredicate(arr, expr)
           case _ => JsonLogicException(s"Unexpected input to ${CountOp.tag}, got $values").asLeft[Result[JsonLogicValue]].pure[F]
@@ -927,23 +895,24 @@ object JsonLogicSemantics {
           expr: JsonLogicExpression
         ): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
           arr
-            .foldLeftM[F, Option[JsonLogicValue]](None) {
-              case (acc @ Some(_), _) => (acc: Option[JsonLogicValue]).pure[F]
-              case (None, el) =>
+            .foldLeftM[F, Either[JsonLogicException, Option[JsonLogicValue]]](None.asRight) {
+              case (Right(acc @ Some(_)), _) =>
+                (acc.asRight[JsonLogicException]: Either[JsonLogicException, Option[JsonLogicValue]]).pure[F]
+              case (Right(None), el) =>
                 evaluationStrategy(expr, el.some).map {
                   case Right(result) =>
-                    val value = extractValue(result)
-                    if (value.isTruthy) Some(el) else None
-                  case _ => None
+                    (if (result.extractValue.isTruthy) Some(el) else None).asRight[JsonLogicException]
+                  case Left(err) => err.asLeft[Option[JsonLogicValue]]
                 }
+              case (Left(err), _) => err.asLeft[Option[JsonLogicValue]].pure[F]
             }
             .map {
-              case Some(value) => (value: JsonLogicValue).pure[Result].asRight[JsonLogicException]
-              case None        => (NullValue: JsonLogicValue).pure[Result].asRight[JsonLogicException]
+              case Right(Some(value)) => (value: JsonLogicValue).pure[Result].asRight[JsonLogicException]
+              case Right(None)        => (NullValue: JsonLogicValue).pure[Result].asRight[JsonLogicException]
+              case Left(err)          => err.asLeft[Result[JsonLogicValue]]
             }
 
-        val values = args.map(extractValue)
-        values match {
+        args.extractValues match {
           case ArrayValue(arr) :: FunctionValue(expr) :: Nil => impl(arr, expr)
           case _ => JsonLogicException(s"Unexpected input to ${FindOp.tag}, got $values").asLeft[Result[JsonLogicValue]].pure[F]
         }
@@ -991,9 +960,12 @@ object JsonLogicSemantics {
         args.withMetrics { values =>
           values match {
             case StrValue(str) :: StrValue(separator) :: Nil =>
-              (ArrayValue(str.split(java.util.regex.Pattern.quote(separator), -1).map(StrValue(_)).toList): JsonLogicValue)
-                .pure[Result]
-                .asRight[JsonLogicException]
+              if (separator.isEmpty)
+                JsonLogicException("Split separator cannot be empty").asLeft[Result[JsonLogicValue]]
+              else
+                (ArrayValue(str.split(java.util.regex.Pattern.quote(separator), -1).map(StrValue(_)).toList): JsonLogicValue)
+                  .pure[Result]
+                  .asRight[JsonLogicException]
             case _ => JsonLogicException(s"Unexpected input to ${SplitOp.tag}, got $values").asLeft[Result[JsonLogicValue]]
           }
         }
@@ -1012,7 +984,11 @@ object JsonLogicSemantics {
       private def handleUniqueOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>
           values match {
-            case ArrayValue(arr) :: Nil => (ArrayValue(arr.distinct): JsonLogicValue).pure[Result].asRight[JsonLogicException]
+            case ArrayValue(arr) :: Nil =>
+              // Use LinkedHashSet for O(n) distinct while preserving insertion order
+              val seen = scala.collection.mutable.LinkedHashSet.empty[JsonLogicValue]
+              arr.foreach(seen.add)
+              (ArrayValue(seen.toList): JsonLogicValue).pure[Result].asRight[JsonLogicException]
             case _ => JsonLogicException(s"Unexpected input to ${UniqueOp.tag}, got $values").asLeft[Result[JsonLogicValue]]
           }
         }
@@ -1021,12 +997,19 @@ object JsonLogicSemantics {
         args.withMetrics { values =>
           values match {
             case ArrayValue(arr) :: IntValue(start) :: Nil =>
-              val startIdx = if (start < 0) Math.max(0, arr.length + start.toInt) else start.toInt
-              (ArrayValue(arr.drop(startIdx)): JsonLogicValue).pure[Result].asRight[JsonLogicException]
+              safeToInt(start, "slice start").map { s =>
+                val startIdx = if (s < 0) Math.max(0, arr.length + s) else s
+                (ArrayValue(arr.drop(startIdx)): JsonLogicValue).pure[Result]
+              }
             case ArrayValue(arr) :: IntValue(start) :: IntValue(end) :: Nil =>
-              val startIdx = if (start < 0) Math.max(0, arr.length + start.toInt) else start.toInt
-              val endIdx = if (end < 0) Math.max(0, arr.length + end.toInt) else end.toInt
-              (ArrayValue(arr.slice(startIdx, endIdx)): JsonLogicValue).pure[Result].asRight[JsonLogicException]
+              for {
+                s <- safeToInt(start, "slice start")
+                e <- safeToInt(end, "slice end")
+              } yield {
+                val startIdx = if (s < 0) Math.max(0, arr.length + s) else s
+                val endIdx = if (e < 0) Math.max(0, arr.length + e) else e
+                (ArrayValue(arr.slice(startIdx, endIdx)): JsonLogicValue).pure[Result]
+              }
             case _ => JsonLogicException(s"Unexpected input to ${SliceOp.tag}, got $values").asLeft[Result[JsonLogicValue]]
           }
         }
@@ -1065,6 +1048,11 @@ object JsonLogicSemantics {
           values match {
             case StrValue(str) :: StrValue(prefix) :: Nil =>
               (BoolValue(str.startsWith(prefix)): JsonLogicValue).pure[Result].asRight[JsonLogicException]
+            // Null handling: null prefix or null string returns false
+            case StrValue(_) :: NullValue :: Nil =>
+              (BoolValue(false): JsonLogicValue).pure[Result].asRight[JsonLogicException]
+            case NullValue :: _ :: Nil =>
+              (BoolValue(false): JsonLogicValue).pure[Result].asRight[JsonLogicException]
             case _ => JsonLogicException(s"Unexpected input to ${StartsWithOp.tag}, got $values").asLeft[Result[JsonLogicValue]]
           }
         }
@@ -1074,6 +1062,11 @@ object JsonLogicSemantics {
           values match {
             case StrValue(str) :: StrValue(suffix) :: Nil =>
               (BoolValue(str.endsWith(suffix)): JsonLogicValue).pure[Result].asRight[JsonLogicException]
+            // Null handling: null suffix or null string returns false
+            case StrValue(_) :: NullValue :: Nil =>
+              (BoolValue(false): JsonLogicValue).pure[Result].asRight[JsonLogicException]
+            case NullValue :: _ :: Nil =>
+              (BoolValue(false): JsonLogicValue).pure[Result].asRight[JsonLogicException]
             case _ => JsonLogicException(s"Unexpected input to ${EndsWithOp.tag}, got $values").asLeft[Result[JsonLogicValue]]
           }
         }
@@ -1156,6 +1149,40 @@ object JsonLogicSemantics {
       private def handlePowOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
         val maxSafeExponent = 999
 
+        def isNonNegativeIntExp(num: NumericResult): Boolean = num match {
+          case IntResult(e)   => e >= 0 && e.isValidInt && e <= maxSafeExponent
+          case FloatResult(e) => e.isWhole && e >= 0 && e <= maxSafeExponent
+        }
+
+        def computeExactPow(baseNum: NumericResult, expInt: Int): Either[JsonLogicException, Result[JsonLogicValue]] = {
+          val baseDecimal = baseNum.toBigDecimal
+          if (baseDecimal.isWhole) {
+            // Use BigInt.pow for exact integer result
+            val result = baseDecimal.toBigInt.pow(expInt)
+            ((IntValue(result): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight
+          } else {
+            // Use BigDecimal.pow for better precision with fractional base
+            val result = baseDecimal.pow(expInt)
+            if (result.isWhole && result.isValidLong)
+              ((IntValue(result.toBigInt): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight
+            else
+              ((FloatValue(result): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight
+          }
+        }
+
+        def computeDoublePow(baseNum: NumericResult, expDouble: Double): Either[JsonLogicException, Result[JsonLogicValue]] = {
+          val powResult = Math.pow(baseNum.toBigDecimal.toDouble, expDouble)
+          if (powResult.isInfinity) {
+            JsonLogicException(s"Power operation resulted in infinity").asLeft[Result[JsonLogicValue]]
+          } else if (powResult.isNaN) {
+            JsonLogicException(s"Power operation resulted in NaN").asLeft[Result[JsonLogicValue]]
+          } else if (powResult.isWhole && powResult.isValidInt) {
+            ((IntValue(BigInt(powResult.toInt)): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight
+          } else {
+            ((FloatValue(BigDecimal(powResult)): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight
+          }
+        }
+
         args.withMetrics { values =>
           values match {
             case IntValue(base) :: IntValue(exp) :: Nil if exp >= 0 && exp.isValidInt && exp <= maxSafeExponent =>
@@ -1168,25 +1195,21 @@ object JsonLogicSemantics {
               for {
                 baseNum <- promoteToNumeric(base)
                 expNum  <- promoteToNumeric(exp)
-                result <- {
-                  val expDouble = expNum.toBigDecimal.toDouble
-                  if (expDouble.abs > maxSafeExponent) {
-                    JsonLogicException(
-                      s"Exponent magnitude ${expDouble.abs} exceeds maximum safe value $maxSafeExponent"
-                    ).asLeft[Result[JsonLogicValue]]
+                result <-
+                  if (isNonNegativeIntExp(expNum)) {
+                    // Use exact arithmetic for non-negative integer exponents
+                    computeExactPow(baseNum, expNum.toBigDecimal.toInt)
                   } else {
-                    val powResult = Math.pow(baseNum.toBigDecimal.toDouble, expDouble)
-                    if (powResult.isInfinity) {
-                      JsonLogicException(s"Power operation resulted in infinity").asLeft[Result[JsonLogicValue]]
-                    } else if (powResult.isNaN) {
-                      JsonLogicException(s"Power operation resulted in NaN").asLeft[Result[JsonLogicValue]]
-                    } else if (powResult.isWhole && powResult.isValidInt) {
-                      ((IntValue(BigInt(powResult.toInt)): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight[JsonLogicException]
+                    // Fall back to Double for negative or fractional exponents
+                    val expDouble = expNum.toBigDecimal.toDouble
+                    if (expDouble.abs > maxSafeExponent) {
+                      JsonLogicException(
+                        s"Exponent magnitude ${expDouble.abs} exceeds maximum safe value $maxSafeExponent"
+                      ).asLeft[Result[JsonLogicValue]]
                     } else {
-                      ((FloatValue(BigDecimal(powResult)): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight[JsonLogicException]
+                      computeDoublePow(baseNum, expDouble)
                     }
                   }
-                }
               } yield result
             case _ => JsonLogicException(s"Unexpected input to ${PowOp.tag}, got $values").asLeft[Result[JsonLogicValue]]
           }

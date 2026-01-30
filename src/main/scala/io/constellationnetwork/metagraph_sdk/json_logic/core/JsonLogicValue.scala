@@ -1,5 +1,6 @@
 package io.constellationnetwork.metagraph_sdk.json_logic.core
 
+import cats.syntax.either._
 import cats.syntax.traverse._
 import cats.{Eq, Functor, Show}
 
@@ -51,8 +52,8 @@ object JsonLogicValue {
       case NullValue        => false
       case FunctionValue(_) => false
       case BoolValue(v)     => key.toBooleanOption.contains(v)
-      case IntValue(v)      => Option(BigInt(key)).contains(v)
-      case FloatValue(v)    => Option(BigDecimal(key)).contains(v)
+      case IntValue(v)      => Either.catchNonFatal(BigInt(key)).toOption.contains(v)
+      case FloatValue(v)    => Either.catchNonFatal(BigDecimal(key)).toOption.contains(v)
       case StrValue(v)      => key.contains(v)
       case ArrayValue(list) => key.toIntOption.exists(_ <= list.length)
       case MapValue(map)    => map.contains(key)

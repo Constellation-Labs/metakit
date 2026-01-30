@@ -573,4 +573,249 @@ object GasMeteringSuite extends SimpleIOSuite with Checkers {
         )
       }
   }
+
+  test("join operation gas scales with output string length") {
+    val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+
+    // Small output: "a,b,c" = 5 chars
+    val smallArray = ArrayValue(List(StrValue("a"), StrValue("b"), StrValue("c")))
+    val smallJoinExpr = ApplyExpression(
+      JsonLogicOp.JoinOp,
+      List(ConstExpression(smallArray), ConstExpression(StrValue(",")))
+    )
+
+    // Large output: "aaa...aaa,bbb...bbb,ccc...ccc" with 100-char strings
+    val largeArray = ArrayValue(List(StrValue("a" * 100), StrValue("b" * 100), StrValue("c" * 100)))
+    val largeJoinExpr = ApplyExpression(
+      JsonLogicOp.JoinOp,
+      List(ConstExpression(largeArray), ConstExpression(StrValue(",")))
+    )
+
+    for {
+      smallResult <- evaluator
+        .evaluateWithGas(smallJoinExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
+        .flatMap(IO.fromEither)
+      largeResult <- evaluator
+        .evaluateWithGas(largeJoinExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
+        .flatMap(IO.fromEither)
+    } yield
+      expect(
+        largeResult.gasUsed.amount > smallResult.gasUsed.amount,
+        s"Large join (${largeResult.gasUsed.amount}) should cost more than small join (${smallResult.gasUsed.amount})"
+      )
+  }
+
+  test("substr operation gas scales with output string length") {
+    val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+    val longString = StrValue("x" * 1000)
+
+    // Small output: 5 chars
+    val smallSubstrExpr = ApplyExpression(
+      JsonLogicOp.SubStrOp,
+      List(ConstExpression(longString), ConstExpression(IntValue(0)), ConstExpression(IntValue(5)))
+    )
+
+    // Large output: 500 chars
+    val largeSubstrExpr = ApplyExpression(
+      JsonLogicOp.SubStrOp,
+      List(ConstExpression(longString), ConstExpression(IntValue(0)), ConstExpression(IntValue(500)))
+    )
+
+    for {
+      smallResult <- evaluator
+        .evaluateWithGas(smallSubstrExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
+        .flatMap(IO.fromEither)
+      largeResult <- evaluator
+        .evaluateWithGas(largeSubstrExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
+        .flatMap(IO.fromEither)
+    } yield
+      expect(
+        largeResult.gasUsed.amount > smallResult.gasUsed.amount,
+        s"Large substr (${largeResult.gasUsed.amount}) should cost more than small substr (${smallResult.gasUsed.amount})"
+      )
+  }
+
+  test("mapValues operation gas scales with map size") {
+    val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+
+    val smallMap = MapValue(Map("a" -> IntValue(1)))
+    val largeMap = MapValue(Map("a" -> IntValue(1), "b" -> IntValue(2), "c" -> IntValue(3), "d" -> IntValue(4), "e" -> IntValue(5)))
+
+    val smallMapValuesExpr = ApplyExpression(
+      JsonLogicOp.MapValuesOp,
+      List(ConstExpression(smallMap))
+    )
+
+    val largeMapValuesExpr = ApplyExpression(
+      JsonLogicOp.MapValuesOp,
+      List(ConstExpression(largeMap))
+    )
+
+    for {
+      smallResult <- evaluator
+        .evaluateWithGas(smallMapValuesExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
+        .flatMap(IO.fromEither)
+      largeResult <- evaluator
+        .evaluateWithGas(largeMapValuesExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
+        .flatMap(IO.fromEither)
+    } yield
+      expect(
+        largeResult.gasUsed.amount > smallResult.gasUsed.amount,
+        s"Large mapValues (${largeResult.gasUsed.amount}) should cost more than small mapValues (${smallResult.gasUsed.amount})"
+      )
+  }
+
+  test("mapKeys operation gas scales with map size") {
+    val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+
+    val smallMap = MapValue(Map("a" -> IntValue(1)))
+    val largeMap = MapValue(Map("a" -> IntValue(1), "b" -> IntValue(2), "c" -> IntValue(3), "d" -> IntValue(4), "e" -> IntValue(5)))
+
+    val smallMapKeysExpr = ApplyExpression(
+      JsonLogicOp.MapKeysOp,
+      List(ConstExpression(smallMap))
+    )
+
+    val largeMapKeysExpr = ApplyExpression(
+      JsonLogicOp.MapKeysOp,
+      List(ConstExpression(largeMap))
+    )
+
+    for {
+      smallResult <- evaluator
+        .evaluateWithGas(smallMapKeysExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
+        .flatMap(IO.fromEither)
+      largeResult <- evaluator
+        .evaluateWithGas(largeMapKeysExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
+        .flatMap(IO.fromEither)
+    } yield
+      expect(
+        largeResult.gasUsed.amount > smallResult.gasUsed.amount,
+        s"Large mapKeys (${largeResult.gasUsed.amount}) should cost more than small mapKeys (${smallResult.gasUsed.amount})"
+      )
+  }
+
+  test("entries operation gas scales with map size") {
+    val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+
+    val smallMap = MapValue(Map("a" -> IntValue(1)))
+    val largeMap = MapValue(Map("a" -> IntValue(1), "b" -> IntValue(2), "c" -> IntValue(3), "d" -> IntValue(4), "e" -> IntValue(5)))
+
+    val smallEntriesExpr = ApplyExpression(
+      JsonLogicOp.EntriesOp,
+      List(ConstExpression(smallMap))
+    )
+
+    val largeEntriesExpr = ApplyExpression(
+      JsonLogicOp.EntriesOp,
+      List(ConstExpression(largeMap))
+    )
+
+    for {
+      smallResult <- evaluator
+        .evaluateWithGas(smallEntriesExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
+        .flatMap(IO.fromEither)
+      largeResult <- evaluator
+        .evaluateWithGas(largeEntriesExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
+        .flatMap(IO.fromEither)
+    } yield
+      expect(
+        largeResult.gasUsed.amount > smallResult.gasUsed.amount,
+        s"Large entries (${largeResult.gasUsed.amount}) should cost more than small entries (${smallResult.gasUsed.amount})"
+      )
+  }
+
+  test("flatten operation gas scales with output size") {
+    val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+
+    // Small: [[1]] flattens to [1] - output size 1
+    val smallNestedArray = ArrayValue(List(ArrayValue(List(IntValue(1)))))
+    // Large: [[1,2,3,4,5]] flattens to [1,2,3,4,5] - output size 5
+    val largeNestedArray = ArrayValue(List(ArrayValue(List(IntValue(1), IntValue(2), IntValue(3), IntValue(4), IntValue(5)))))
+
+    val smallFlattenExpr = ApplyExpression(
+      JsonLogicOp.FlattenOp,
+      List(ConstExpression(smallNestedArray))
+    )
+
+    val largeFlattenExpr = ApplyExpression(
+      JsonLogicOp.FlattenOp,
+      List(ConstExpression(largeNestedArray))
+    )
+
+    for {
+      smallResult <- evaluator
+        .evaluateWithGas(smallFlattenExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
+        .flatMap(IO.fromEither)
+      largeResult <- evaluator
+        .evaluateWithGas(largeFlattenExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
+        .flatMap(IO.fromEither)
+    } yield
+      expect(
+        largeResult.gasUsed.amount > smallResult.gasUsed.amount,
+        s"Large flatten (${largeResult.gasUsed.amount}) should cost more than small flatten (${smallResult.gasUsed.amount})"
+      )
+  }
+
+  test("unique operation gas scales linearly with array size") {
+    val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+
+    val smallArray = ArrayValue(List(IntValue(1), IntValue(2)))
+    val largeArray = ArrayValue((1 to 20).map(IntValue(_)).toList)
+
+    val smallUniqueExpr = ApplyExpression(
+      JsonLogicOp.UniqueOp,
+      List(ConstExpression(smallArray))
+    )
+
+    val largeUniqueExpr = ApplyExpression(
+      JsonLogicOp.UniqueOp,
+      List(ConstExpression(largeArray))
+    )
+
+    for {
+      smallResult <- evaluator
+        .evaluateWithGas(smallUniqueExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
+        .flatMap(IO.fromEither)
+      largeResult <- evaluator
+        .evaluateWithGas(largeUniqueExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
+        .flatMap(IO.fromEither)
+    } yield
+      expect(
+        largeResult.gasUsed.amount > smallResult.gasUsed.amount,
+        s"Large unique (${largeResult.gasUsed.amount}) should cost more than small unique (${smallResult.gasUsed.amount})"
+      )
+  }
+
+  test("intersect operation gas scales linearly with combined size") {
+    val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+
+    val smallArray1 = ArrayValue(List(IntValue(1)))
+    val smallArray2 = ArrayValue(List(IntValue(1)))
+    val largeArray1 = ArrayValue((1 to 10).map(IntValue(_)).toList)
+    val largeArray2 = ArrayValue((1 to 10).map(IntValue(_)).toList)
+
+    val smallIntersectExpr = ApplyExpression(
+      JsonLogicOp.IntersectOp,
+      List(ConstExpression(smallArray1), ConstExpression(smallArray2))
+    )
+
+    val largeIntersectExpr = ApplyExpression(
+      JsonLogicOp.IntersectOp,
+      List(ConstExpression(largeArray1), ConstExpression(largeArray2))
+    )
+
+    for {
+      smallResult <- evaluator
+        .evaluateWithGas(smallIntersectExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
+        .flatMap(IO.fromEither)
+      largeResult <- evaluator
+        .evaluateWithGas(largeIntersectExpr, MapValue.empty, None, GasLimit.Default, GasConfig.Default)
+        .flatMap(IO.fromEither)
+    } yield
+      expect(
+        largeResult.gasUsed.amount > smallResult.gasUsed.amount,
+        s"Large intersect (${largeResult.gasUsed.amount}) should cost more than small intersect (${smallResult.gasUsed.amount})"
+      )
+  }
 }

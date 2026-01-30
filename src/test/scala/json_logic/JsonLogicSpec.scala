@@ -2950,4 +2950,414 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
         staticTestRunner(expr, data, BoolValue(true))
     }
   }
+
+  // === Error propagation in array predicates ===
+
+  test("filter propagates predicate errors") {
+    // Predicate that errors on element 0
+    val exprStr = """{"filter": [[1, 0, 2], {"/": [1, {"var": ""}]}]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        expectError(expr, data)
+    }
+  }
+
+  test("all propagates predicate errors") {
+    val exprStr = """{"all": [[1, 0, 2], {"/": [1, {"var": ""}]}]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        expectError(expr, data)
+    }
+  }
+
+  test("none propagates predicate errors") {
+    val exprStr = """{"none": [[1, 0, 2], {"/": [1, {"var": ""}]}]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        expectError(expr, data)
+    }
+  }
+
+  test("some propagates predicate errors") {
+    val exprStr = """{"some": [[1, 0, 2], {"/": [1, {"var": ""}]}]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        expectError(expr, data)
+    }
+  }
+
+  test("count propagates predicate errors") {
+    val exprStr = """{"count": [[1, 0, 2], {"/": [1, {"var": ""}]}]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        expectError(expr, data)
+    }
+  }
+
+  test("find propagates predicate errors") {
+    // Put 0 first so error occurs before any truthy result
+    val exprStr = """{"find": [[0, 1, 2], {"/": [1, {"var": ""}]}]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        expectError(expr, data)
+    }
+  }
+
+  // === Int-Float and Bool-Float coercion ===
+
+  test("'==' can compare int and float") {
+    val exprStr = """{"==": [1, 1.0]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
+    }
+  }
+
+  test("'==' can compare int and float (not equal)") {
+    val exprStr = """{"==": [5, 5.5]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(false))
+    }
+  }
+
+  test("'==' can compare bool and float (true == 1.0)") {
+    val exprStr = """{"==": [true, 1.0]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
+    }
+  }
+
+  test("'==' can compare bool and float (false == 0.0)") {
+    val exprStr = """{"==": [false, 0.0]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
+    }
+  }
+
+  test("'==' can compare bool and float (true != 2.0)") {
+    val exprStr = """{"==": [true, 2.0]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(false))
+    }
+  }
+
+  test("'==' can compare float and float") {
+    val exprStr = """{"==": [3.14, 3.14]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
+    }
+  }
+
+  test("'==' can compare bool and string 'true'") {
+    val exprStr = """{"==": [true, "true"]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
+    }
+  }
+
+  test("'==' can compare bool and string 'false'") {
+    val exprStr = """{"==": [false, "false"]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
+    }
+  }
+
+  // === Safe integer overflow checks ===
+
+  test("substr with huge start index returns error") {
+    val exprStr = """{"substr": ["hello", 9223372036854775807]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        expectError(expr, data)
+    }
+  }
+
+  test("slice with huge start index returns error") {
+    val exprStr = """{"slice": [[1,2,3], 9223372036854775807]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        expectError(expr, data)
+    }
+  }
+
+  test("slice with huge end index returns error") {
+    val exprStr = """{"slice": [[1,2,3], 0, 9223372036854775807]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        expectError(expr, data)
+    }
+  }
+
+  // === Split operation validation ===
+
+  test("split with empty separator returns error") {
+    val exprStr = """{"split": ["hello", ""]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        expectError(expr, data)
+    }
+  }
+
+  test("split with valid separator works correctly") {
+    val exprStr = """{"split": ["a,b,c", ","]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, ArrayValue(List(StrValue("a"), StrValue("b"), StrValue("c"))))
+    }
+  }
+
+  // === Power precision tests ===
+
+  test("pow preserves precision for large integer exponents") {
+    // 2^60 = 1152921504606846976 - exact value that Double cannot represent precisely
+    val exprStr = """{"pow": [2, 60]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(BigInt("1152921504606846976")))
+    }
+  }
+
+  test("pow with fractional base uses BigDecimal for precision") {
+    val exprStr = """{"pow": [1.5, 3]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, FloatValue(BigDecimal("3.375")))
+    }
+  }
+
+  test("pow with negative exponent falls back to Double") {
+    val exprStr = """{"pow": [2, -1]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, FloatValue(BigDecimal(0.5)))
+    }
+  }
+
+  // === Intersect null handling ===
+
+  test("intersect with null second arg returns false") {
+    val exprStr = """{"intersect": [[1, 2], null]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(false))
+    }
+  }
+
+  test("intersect with null first arg returns true (empty subset)") {
+    val exprStr = """{"intersect": [null, [1, 2]]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
+    }
+  }
+
+  // === Modulo negative number tests ===
+
+  test("modulo with negative dividend uses truncated division") {
+    // -7 % 3 = -1 (JavaScript behavior, not Python's floored division which gives 2)
+    val exprStr = """{"%": [-7, 3]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(-1))
+    }
+  }
+
+  test("modulo with negative divisor uses truncated division") {
+    // 7 % -3 = 1 (JavaScript behavior)
+    val exprStr = """{"%": [7, -3]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(1))
+    }
+  }
+
+  // === Round 4: startsWith/endsWith null handling ===
+
+  test("startsWith with null prefix returns false") {
+    val exprStr = """{"startsWith": ["hello", null]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(false))
+    }
+  }
+
+  test("startsWith with null string returns false") {
+    val exprStr = """{"startsWith": [null, "he"]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(false))
+    }
+  }
+
+  test("endsWith with null suffix returns false") {
+    val exprStr = """{"endsWith": ["hello", null]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(false))
+    }
+  }
+
+  test("endsWith with null string returns false") {
+    val exprStr = """{"endsWith": [null, "lo"]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(false))
+    }
+  }
+
+  // === Round 4: unique preserves order ===
+
+  test("unique preserves insertion order") {
+    val exprStr = """{"unique": [[3, 1, 2, 1, 3, 2]]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, ArrayValue(List(IntValue(3), IntValue(1), IntValue(2))))
+    }
+  }
+
+  // === Round 4: intersect with Set optimization ===
+
+  test("intersect returns true when all elements are present") {
+    val exprStr = """{"intersect": [[1, 2], [1, 2, 3, 4]]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
+    }
+  }
+
+  test("intersect returns false when some elements are missing") {
+    val exprStr = """{"intersect": [[1, 2, 5], [1, 2, 3, 4]]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(false))
+    }
+  }
+
+  // === Round 5: Division precision with DECIMAL128 ===
+
+  test("division handles repeating decimals without exception") {
+    // 1/3 produces a non-terminating decimal - DECIMAL128 bounds it to 34 digits
+    val exprStr = """{"/": [1, 3]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        JsonLogicEvaluator
+          .tailRecursive[IO]
+          .evaluate(expr, data, None)
+          .map {
+            case Right(FloatValue(result)) =>
+              // Result should be approximately 0.333... bounded by DECIMAL128 precision
+              expect(result > BigDecimal("0.33")).and(expect(result < BigDecimal("0.34")))
+            case other => failure(s"Expected FloatValue, got $other")
+          }
+    }
+  }
+
+  test("division returns correct result for terminating decimals") {
+    val exprStr = """{"/": [1, 4]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, FloatValue(BigDecimal("0.25")))
+    }
+  }
+
+  // === Round 5: Large integer string coercion ===
+
+  test("large integer strings are coerced correctly in equality comparison") {
+    // String "999999999999999999" should coerce to BigInt, not remain as string
+    val exprStr = """{"==": ["999999999999999999", 999999999999999999]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(true))
+    }
+  }
+
+  test("large integer strings work in arithmetic operations") {
+    // Large integer string should be promotable to numeric
+    val exprStr = """{"+": ["999999999999999999", 1]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(BigInt("1000000000000000000")))
+    }
+  }
 }

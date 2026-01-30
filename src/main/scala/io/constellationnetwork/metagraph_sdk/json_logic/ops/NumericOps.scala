@@ -12,6 +12,22 @@ import io.constellationnetwork.metagraph_sdk.json_logic.core._
  */
 object NumericOps {
 
+  /**
+   * MathContext for division operations using DECIMAL128 (IEEE 754-2008).
+   * Provides 34-digit precision to bound non-terminating decimals like 1/3.
+   * Prevents ArithmeticException for non-terminating results.
+   */
+  private val DivisionContext = java.math.MathContext.DECIMAL128
+
+  def safeDivide(l: BigDecimal, r: BigDecimal): BigDecimal =
+    BigDecimal(l.bigDecimal.divide(r.bigDecimal, DivisionContext))
+
+  def safeToInt(bi: BigInt, name: String): Either[JsonLogicException, Int] =
+    if (bi >= Int.MinValue && bi <= Int.MaxValue)
+      bi.toInt.asRight
+    else
+      JsonLogicException(s"$name value $bi exceeds Int range").asLeft
+
   sealed trait NumericResult {
     def toBigDecimal: BigDecimal = this match {
       case IntResult(i)   => BigDecimal(i)
@@ -48,7 +64,6 @@ object NumericOps {
             .leftMap(_ => JsonLogicException(s"Cannot convert string '$s' to number"))
         }
       case ArrayValue(List(single)) =>
-        // Single element arrays coerce to their element
         promoteToNumeric(single)
       case ArrayValue(Nil) =>
         IntResult(0).asRight
@@ -66,7 +81,7 @@ object NumericOps {
 
   /**
    * Combines two numeric values using the given operation.
-   * Returns IntValue if both operands are ints and result is whole, otherwise FloatValue
+   * Returns IntValue if both operands are ints and result is whole, otherwise FloatValue.
    */
   def combineNumeric(
     op: (BigDecimal, BigDecimal) => BigDecimal
@@ -74,11 +89,8 @@ object NumericOps {
     (left, right) match {
       case (IntResult(l), IntResult(r)) =>
         val result = op(BigDecimal(l), BigDecimal(r))
-        if (result.isWhole && result.isValidLong) {
-          IntValue(result.toBigInt)
-        } else {
-          FloatValue(result)
-        }
+        if (result.isWhole && result.isValidLong) IntValue(result.toBigInt)
+        else FloatValue(result)
       case (IntResult(l), FloatResult(r))   => FloatValue(op(BigDecimal(l), r))
       case (FloatResult(l), IntResult(r))   => FloatValue(op(l, BigDecimal(r)))
       case (FloatResult(l), FloatResult(r)) => FloatValue(op(l, r))

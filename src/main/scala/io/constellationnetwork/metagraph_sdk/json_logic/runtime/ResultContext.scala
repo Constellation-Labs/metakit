@@ -3,6 +3,8 @@ package io.constellationnetwork.metagraph_sdk.json_logic.runtime
 import cats._
 import cats.syntax.all._
 
+import scala.annotation.tailrec
+
 import io.constellationnetwork.metagraph_sdk.json_logic.core.{JsonLogicException, JsonLogicValue}
 import io.constellationnetwork.metagraph_sdk.json_logic.gas.GasMetrics
 
@@ -16,6 +18,8 @@ trait ResultContext[Result[_]] {
   def sequence[A](results: List[Result[A]]): Result[List[A]]
 
   def extract[A](ra: Result[A]): A
+
+  def tailRecM[A, B](a: A)(f: A => Result[Either[A, B]]): Result[B]
 }
 
 object ResultContext {
@@ -27,12 +31,7 @@ object ResultContext {
 
       def flatMap[A, B](fa: Result[A])(f: A => Result[B]): Result[B] = RC.flatMap(fa)(f)
 
-      def tailRecM[A, B](a: A)(f: A => Result[Either[A, B]]): Result[B] =
-        // Default stack-unsafe implementation - subclasses can override
-        flatMap(f(a)) {
-          case Left(a1) => tailRecM(a1)(f)
-          case Right(b) => pure(b)
-        }
+      def tailRecM[A, B](a: A)(f: A => Result[Either[A, B]]): Result[B] = RC.tailRecM(a)(f)
     }
 
   implicit def resultContextFlatMap[Result[_]](implicit RC: ResultContext[Result]): FlatMap[Result] =
@@ -51,6 +50,13 @@ object ResultContext {
     def sequence[A](results: List[A]): List[A] = results
 
     def extract[A](ra: A): A = ra
+
+    @tailrec
+    def tailRecM[A, B](a: A)(f: A => Either[A, B]): B =
+      f(a) match {
+        case Left(a1) => tailRecM(a1)(f)
+        case Right(b) => b
+      }
   }
 
   type WithGas[A] = (A, GasMetrics)
@@ -75,6 +81,19 @@ object ResultContext {
     }
 
     def extract[A](ra: (A, GasMetrics)): A = ra._1
+
+    def tailRecM[A, B](a: A)(f: A => (Either[A, B], GasMetrics)): (B, GasMetrics) = {
+      @tailrec
+      def loop(current: A, accMetrics: GasMetrics): (B, GasMetrics) = {
+        val (result, metrics) = f(current)
+        val combined = accMetrics.combine(metrics)
+        result match {
+          case Left(a1) => loop(a1, combined)
+          case Right(b) => (b, combined)
+        }
+      }
+      loop(a, GasMetrics.zero)
+    }
   }
 
   implicit class ResultOps[Result[_]: ResultContext, A](result: Result[A]) {
@@ -82,6 +101,12 @@ object ResultContext {
   }
 
   implicit class ResultListOps[Result[_]: ResultContext](args: List[Result[JsonLogicValue]]) {
+
+    def extractValues: List[JsonLogicValue] = {
+      val RC = ResultContext[Result]
+      args.map(RC.extract)
+    }
+
     def withMetrics[F[_]: Functor, A](
       f: List[JsonLogicValue] => F[Either[JsonLogicException, Result[A]]]
     ): F[Either[JsonLogicException, Result[A]]] = {
