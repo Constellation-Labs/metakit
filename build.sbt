@@ -26,6 +26,8 @@ ThisBuild / evictionErrorLevel := Level.Warn
 
 lazy val commonSettings = Seq(
   scalacOptions ++= List("-Ymacro-annotations", "-Yrangepos", "-Wconf:cat=unused:info", "-language:reflectiveCalls"),
+  scalafmtOnCompile := true,
+  scalafixOnCompile := true,
   resolvers += Resolver.mavenLocal,
   libraryDependencies ++= Seq(
     CompilerPlugin.kindProjector,
