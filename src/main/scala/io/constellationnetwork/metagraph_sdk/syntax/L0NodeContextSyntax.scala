@@ -1,14 +1,16 @@
 package io.constellationnetwork.metagraph_sdk.syntax
-
 import cats.data.EitherT
 import cats.effect.Sync
 import cats.syntax.all._
 
 import io.constellationnetwork.currency.dataApplication._
 import io.constellationnetwork.currency.schema.currency.CurrencyIncrementalSnapshot
+import io.constellationnetwork.metagraph_sdk.std.JsonBinaryCodec
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryCodec.{JsonBinaryDecodeOps, _}
+import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher._
 import io.constellationnetwork.schema.SnapshotOrdinal
 import io.constellationnetwork.security.Hashed
+import io.constellationnetwork.security.signature.Signed
 
 import derevo.circe.magnolia.{decoder, encoder}
 import derevo.derive
@@ -48,6 +50,12 @@ trait L0NodeContextSyntax {
         )
         .map(_.signed.value)
         .value
+
+    def getFeeForUpdate[U <: DataUpdate](update: U)(implicit bin: JsonBinaryCodec[F, U]): F[Option[Signed[FeeTransaction]]] =
+      for {
+        feeMap     <- ctx.getSnapshotFeeTransactions
+        updateHash <- update.computeDigest
+      } yield feeMap.get(updateHash)
   }
 }
 
