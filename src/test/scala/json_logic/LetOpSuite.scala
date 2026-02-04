@@ -15,7 +15,7 @@ object LetOpSuite extends SimpleIOSuite {
       expr <- IO.fromEither(parser.parse(jsonLogic).flatMap(_.as[JsonLogicExpression]))
       dataVal = data.getOrElse(NullValue)
       result <- JsonLogicEvaluator.tailRecursive[IO].evaluate(expr, dataVal, None)
-      value <- IO.fromEither(result)
+      value  <- IO.fromEither(result)
     } yield value
 
   private def expectResult(jsonLogic: String, expected: JsonLogicValue, data: Option[JsonLogicValue] = None): IO[Expectations] =
