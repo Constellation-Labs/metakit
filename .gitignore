@@ -282,3 +282,4 @@ Cargo.lock
 .claude/
 .claude-session-history
 claude-session.md
+.aider*
