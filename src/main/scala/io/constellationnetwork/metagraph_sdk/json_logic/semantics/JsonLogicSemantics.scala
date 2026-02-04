@@ -87,6 +87,7 @@ object JsonLogicSemantics {
           case ExistsOp      => handleExists
           case MissingSomeOp => handleMissingSome
           case IfElseOp      => handleIfElseOp
+          case LetOp         => handleLetOp
           case EqOp          => handleEqOp
           case EqStrictOp    => handleEqStrictOp
           case NEqOp         => handleNEqOp
@@ -1242,6 +1243,12 @@ object JsonLogicSemantics {
             case _            => JsonLogicException(s"Unexpected input to ${TypeOfOp.tag}, got $values").asLeft[Result[JsonLogicValue]]
           }
         }
+
+      // Let is handled specially in the runtime; this should not be reached
+      private def handleLetOp(
+        @annotation.unused args: List[Result[JsonLogicValue]]
+      ): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
+        JsonLogicException("let operator should be handled in runtime, not semantics").asLeft[Result[JsonLogicValue]].pure[F]
     }
 
   implicit class semanticOpsV2[F[_]: Monad, Result[_]: ResultContext](sem: JsonLogicSemantics[F, Result]) {
