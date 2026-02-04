@@ -442,8 +442,12 @@ object AllOperatorsComparisonSuite extends SimpleIOSuite {
   }
 
   test("values: empty object") {
-    // Note: empty input behaves differently between evaluators (known discrepancy)
     testBothStrategies("""{"values": [{}]}""", "null").map(expect(_))
+  }
+
+  test("values: no args") {
+    // Both evaluators should return NullValue for empty args
+    testBothStrategies("""{"values": []}""", "null").map(expect(_))
   }
 
   test("keys: get keys") {
@@ -451,8 +455,12 @@ object AllOperatorsComparisonSuite extends SimpleIOSuite {
   }
 
   test("keys: empty object") {
-    // Note: empty input behaves differently between evaluators (known discrepancy)
     testBothStrategies("""{"keys": [{}]}""", "null").map(expect(_))
+  }
+
+  test("keys: no args") {
+    // Both evaluators should return NullValue for empty args
+    testBothStrategies("""{"keys": []}""", "null").map(expect(_))
   }
 
   test("get: get property") {
@@ -460,8 +468,12 @@ object AllOperatorsComparisonSuite extends SimpleIOSuite {
   }
 
   test("get: property from data") {
-    // Note: get with default/path edge cases behave differently between evaluators
     testBothStrategies("""{"get": [{"var": "obj"}, "key"]}""", """{"obj": {"key": 42}}""").map(expect(_))
+  }
+
+  test("get: missing property returns null") {
+    // Both evaluators should return NullValue for missing keys
+    testBothStrategies("""{"get": [{"a": 1}, "b"]}""", "null").map(expect(_))
   }
 
   test("has: has property") {
@@ -477,8 +489,12 @@ object AllOperatorsComparisonSuite extends SimpleIOSuite {
   }
 
   test("entries: empty object") {
-    // Note: empty input behaves differently between evaluators (known discrepancy)
     testBothStrategies("""{"entries": [{}]}""", "null").map(expect(_))
+  }
+
+  test("entries: no args") {
+    // Both evaluators should return NullValue for empty args
+    testBothStrategies("""{"entries": []}""", "null").map(expect(_))
   }
 
   // Utility
