@@ -12,6 +12,7 @@ object JsonLogicOp extends Enum[JsonLogicOp] with CirceEnum[JsonLogicOp] {
   case object NoOp extends JsonLogicOp("noop")
   case object IfElseOp extends JsonLogicOp("if")
   case object DefaultOp extends JsonLogicOp("default")
+  case object LetOp extends JsonLogicOp("let")
 
   // Logical Operators
   case object NotOp extends JsonLogicOp("!")

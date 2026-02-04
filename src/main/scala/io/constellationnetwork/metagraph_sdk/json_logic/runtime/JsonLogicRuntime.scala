@@ -123,6 +123,54 @@ object JsonLogicRuntime {
 
         evaluateIfElse(args)
 
+      case ApplyExpression(JsonLogicOp.LetOp, args) =>
+        // Syntax: {"let": [[[name1, expr1], [name2, expr2], ...], resultExpr]}
+        // Bindings are evaluated sequentially, each in the context of previous bindings
+        // Result expression is evaluated with all bindings in scope
+        args match {
+          case ArrayExpression(bindings) :: resultExpr :: Nil =>
+            def processBindings(
+              remaining: List[JsonLogicExpression],
+              accumulatedBindings: Map[String, JsonLogicValue]
+            ): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
+              remaining match {
+                case Nil =>
+                  // All bindings processed, evaluate result with accumulated context
+                  val letCtx = currentCtx match {
+                    case Some(MapValue(existing)) => MapValue(existing ++ accumulatedBindings).some
+                    case Some(other)              => MapValue(accumulatedBindings + ("" -> other)).some
+                    case None                     => MapValue(accumulatedBindings).some
+                  }
+                  evaluateExpression(resultExpr, letCtx)
+
+                case ArrayExpression(ConstExpression(StrValue(name)) :: valueExpr :: Nil) :: rest =>
+                  // Evaluate binding expression in context with accumulated bindings
+                  val bindingCtx = currentCtx match {
+                    case Some(MapValue(existing)) => MapValue(existing ++ accumulatedBindings).some
+                    case Some(other)              => MapValue(accumulatedBindings + ("" -> other)).some
+                    case None                     => if (accumulatedBindings.isEmpty) None else MapValue(accumulatedBindings).some
+                  }
+                  evaluateExpression(valueExpr, bindingCtx).flatMap {
+                    case Right(valueResult) =>
+                      processBindings(rest, accumulatedBindings + (name -> valueResult.extractValue))
+                    case Left(error) =>
+                      error.asLeft[Result[JsonLogicValue]].pure[F]
+                  }
+
+                case invalid :: _ =>
+                  JsonLogicException(s"let binding must be [name, expr], got: $invalid")
+                    .asLeft[Result[JsonLogicValue]]
+                    .pure[F]
+              }
+
+            processBindings(bindings, Map.empty)
+
+          case _ =>
+            JsonLogicException("let requires [[bindings...], resultExpr]")
+              .asLeft[Result[JsonLogicValue]]
+              .pure[F]
+        }
+
       case ApplyExpression(op, args) =>
         args.zipWithIndex.traverse {
           case (arg, idx) =>
@@ -171,6 +219,19 @@ object JsonLogicRuntime {
       isIfElse: Boolean = false,
       varDefault: Option[JsonLogicValue] = None
     )
+
+    // Special continuation for let bindings
+    case class LetContinuation(
+      currentName: String,
+      remainingBindings: List[JsonLogicExpression],
+      resultExpr: JsonLogicExpression,
+      accumulatedBindings: Map[String, JsonLogicValue],
+      parent: Option[Continuation],
+      originalCtx: Option[JsonLogicValue]
+    )
+
+    case class EvalLet(expr: JsonLogicExpression, cont: LetContinuation) extends Frame
+    case class ApplyLetValue(value: Result[JsonLogicValue], cont: LetContinuation) extends Frame
 
     implicit class ContinuationOps(contOpt: Option[Continuation]) {
       def continueOrTerminate(
@@ -245,6 +306,31 @@ object JsonLogicRuntime {
             mapKeys = List(firstKey) ++ remaining.map(_._1)
           )
           (Eval(firstExpr, Some(newCont)) :: tail).asLeft[Either[JsonLogicException, Result[JsonLogicValue]]].pure[F]
+        }
+
+      // Handle LetOp: {"let": [[[name1, expr1], ...], resultExpr]}
+      case Eval(ApplyExpression(JsonLogicOp.LetOp, args), contOpt) :: tail =>
+        args match {
+          case ArrayExpression(bindings) :: resultExpr :: Nil if bindings.nonEmpty =>
+            // Start processing first binding
+            bindings.head match {
+              case ArrayExpression(ConstExpression(StrValue(name)) :: valueExpr :: Nil) =>
+                val letCont = LetContinuation(name, bindings.tail, resultExpr, Map.empty, contOpt, ctx)
+                (EvalLet(valueExpr, letCont) :: tail).asLeft[Either[JsonLogicException, Result[JsonLogicValue]]].pure[F]
+              case invalid =>
+                JsonLogicException(s"let binding must be [name, expr], got: $invalid")
+                  .asLeft[Result[JsonLogicValue]]
+                  .asRight[Stack]
+                  .pure[F]
+            }
+          case ArrayExpression(Nil) :: resultExpr :: Nil =>
+            // No bindings, just evaluate result
+            (Eval(resultExpr, contOpt) :: tail).asLeft[Either[JsonLogicException, Result[JsonLogicValue]]].pure[F]
+          case _ =>
+            JsonLogicException("let requires [[bindings...], resultExpr]")
+              .asLeft[Result[JsonLogicValue]]
+              .asRight[Stack]
+              .pure[F]
         }
 
       // Handle IfElseOp with lazy evaluation of branches
@@ -425,6 +511,76 @@ object JsonLogicRuntime {
             val newCont = Continuation(op, newProcessed, remaining.tail, parentContOpt)
             (Eval(remaining.head, Some(newCont)) :: tail).asLeft[Either[JsonLogicException, Result[JsonLogicValue]]].pure[F]
           }
+        }
+
+      // Handle EvalLet: evaluate expression in let context
+      case EvalLet(expr, letCont) :: tail =>
+        // Build context with accumulated bindings
+        val letCtx = letCont.originalCtx match {
+          case Some(MapValue(existing)) => MapValue(existing ++ letCont.accumulatedBindings).some
+          case Some(other) if letCont.accumulatedBindings.nonEmpty =>
+            MapValue(letCont.accumulatedBindings + ("" -> other)).some
+          case Some(other) => Some(other)
+          case None if letCont.accumulatedBindings.nonEmpty =>
+            MapValue(letCont.accumulatedBindings).some
+          case None => None
+        }
+        // Evaluate expression with let context, then apply to let continuation
+        expr match {
+          case ConstExpression(v) =>
+            (ApplyLetValue(v.pure[Result], letCont) :: tail).asLeft[Either[JsonLogicException, Result[JsonLogicValue]]].pure[F]
+          case VarExpression(Left(key), defaultOpt) =>
+            sem.getVar(key, letCtx).map {
+              case Right(result) =>
+                val finalResult = result.extractValue match {
+                  case NullValue if key.nonEmpty => defaultOpt.map(_.pure[Result]).getOrElse(result)
+                  case _                         => result
+                }
+                (ApplyLetValue(finalResult, letCont) :: tail).asLeft[Either[JsonLogicException, Result[JsonLogicValue]]]
+              case Left(_) =>
+                val finalResult = defaultOpt.map(_.pure[Result]).getOrElse((NullValue: JsonLogicValue).pure[Result])
+                (ApplyLetValue(finalResult, letCont) :: tail).asLeft[Either[JsonLogicException, Result[JsonLogicValue]]]
+            }
+          case _ =>
+            // For complex expressions, evaluate them and capture result
+            sem.evaluateWith(expr, letCtx).map {
+              case Right(result) =>
+                (ApplyLetValue(result, letCont) :: tail).asLeft[Either[JsonLogicException, Result[JsonLogicValue]]]
+              case Left(err) =>
+                err.asLeft[Result[JsonLogicValue]].asRight[Stack]
+            }
+        }
+
+      // Handle ApplyLetValue: process evaluated binding value
+      case ApplyLetValue(value, letCont) :: tail =>
+        val newBindings = letCont.accumulatedBindings + (letCont.currentName -> value.extractValue)
+
+        letCont.remainingBindings match {
+          case Nil =>
+            // All bindings processed, evaluate result expression with full context
+            val resultCtx = letCont.originalCtx match {
+              case Some(MapValue(existing)) => MapValue(existing ++ newBindings).some
+              case Some(other)              => MapValue(newBindings + ("" -> other)).some
+              case None                     => MapValue(newBindings).some
+            }
+            // Evaluate result and return to parent continuation
+            sem.evaluateWith(letCont.resultExpr, resultCtx).map {
+              case Right(result) =>
+                letCont.parent.continueOrTerminate(result, tail)
+              case Left(err) =>
+                err.asLeft[Result[JsonLogicValue]].asRight[Stack]
+            }
+
+          case ArrayExpression(ConstExpression(StrValue(nextName)) :: nextValueExpr :: Nil) :: rest =>
+            // Process next binding
+            val nextLetCont = LetContinuation(nextName, rest, letCont.resultExpr, newBindings, letCont.parent, letCont.originalCtx)
+            (EvalLet(nextValueExpr, nextLetCont) :: tail).asLeft[Either[JsonLogicException, Result[JsonLogicValue]]].pure[F]
+
+          case invalid :: _ =>
+            JsonLogicException(s"let binding must be [name, expr], got: $invalid")
+              .asLeft[Result[JsonLogicValue]]
+              .asRight[Stack]
+              .pure[F]
         }
 
       case unknown =>
