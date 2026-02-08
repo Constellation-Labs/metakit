@@ -12,7 +12,7 @@ import io.constellationnetwork.metagraph_sdk.models.CanonicalJson._
 
 import io.circe.jawn.JawnParser
 import io.circe.syntax._
-import io.circe.{Decoder, Encoder, Json}
+import io.circe.{Decoder, Encoder, Json, JsonObject}
 import org.bouncycastle.util.encoders.Base64
 
 trait JsonBinaryCodec[F[_], A] {
@@ -38,6 +38,9 @@ object JsonBinaryCodec {
    * fields entirely, while the receiver's decoder fills them with None (encoded
    * as null). Without dropping nulls, the re-encoded JSON would differ from the
    * original, causing signature verification to fail.
+   *
+   * Note: null values inside arrays are preserved to maintain index positions.
+   * Only object field values that are null are removed.
    */
   private def dropNulls(json: Json): Json =
     json.arrayOrObject(
@@ -45,7 +48,11 @@ object JsonBinaryCodec {
       arr => Json.fromValues(arr.map(dropNulls)),
       obj =>
         Json.fromJsonObject(
-          obj.filter { case (_, v) => !v.isNull }.mapValues(dropNulls)
+          JsonObject.fromIterable(
+            obj.toIterable.collect {
+              case (k, v) if !v.isNull => k -> dropNulls(v)
+            }
+          )
         )
     )
 
