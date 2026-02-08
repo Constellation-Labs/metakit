@@ -20,11 +20,66 @@ trait JsonBinaryCodec[F[_], A] {
   def deserialize(bytes: Array[Byte]): F[Either[Throwable, A]]
 }
 
+/**
+ * Exception thrown when JSON nesting depth exceeds the configured limit.
+ *
+ * This protects against stack overflow attacks from maliciously crafted
+ * deeply nested JSON payloads.
+ */
+case class MaxDepthExceededException(depth: Int, limit: Int)
+    extends RuntimeException(s"JSON nesting depth $depth exceeds maximum allowed depth of $limit")
+
 object JsonBinaryCodec {
   def apply[F[_], A](implicit ev: JsonBinaryCodec[F, A]): JsonBinaryCodec[F, A] = ev
 
   def fromBinary[F[_], A](bytes: Array[Byte])(implicit codec: JsonBinaryCodec[F, A]): F[Either[Throwable, A]] =
     codec.deserialize(bytes)
+
+  /**
+   * Default maximum nesting depth for JSON structures.
+   * This value balances practical use cases against DoS protection.
+   */
+  val DefaultMaxDepth: Int = 64
+
+  /**
+   * Computes the maximum nesting depth of a JSON value.
+   * Uses tail-recursive trampolined approach with explicit work list.
+   *
+   * @param json The JSON value to measure
+   * @return The maximum nesting depth (0 for primitives, 1+ for containers)
+   */
+  private def jsonDepth(json: Json): Int = {
+    import scala.annotation.tailrec
+
+    @tailrec
+    def loop(work: List[(Json, Int)], maxDepth: Int): Int =
+      work match {
+        case Nil => maxDepth
+        case (current, depth) :: rest =>
+          val newMax = math.max(maxDepth, depth)
+          val children = current.arrayOrObject(
+            List.empty[(Json, Int)],
+            arr => arr.toList.map(elem => (elem, depth + 1)),
+            obj => obj.toIterable.toList.map { case (_, v) => (v, depth + 1) }
+          )
+          loop(children ::: rest, newMax)
+      }
+
+    loop(List((json, 0)), 0)
+  }
+
+  /**
+   * Validates that JSON depth does not exceed the specified limit.
+   *
+   * @param json The JSON value to validate
+   * @param maxDepth Maximum allowed nesting depth
+   * @return Either an error or the validated JSON
+   */
+  private def validateDepth(json: Json, maxDepth: Int): Either[Throwable, Json] = {
+    val depth = jsonDepth(json)
+    if (depth > maxDepth) Left(MaxDepthExceededException(depth, maxDepth))
+    else Right(json)
+  }
 
   /**
    * Recursively removes null values from JSON objects.
@@ -57,6 +112,14 @@ object JsonBinaryCodec {
     )
 
   implicit def derive[F[_]: MonadThrow, A: Encoder: Decoder]: JsonBinaryCodec[F, A] =
+    deriveWithMaxDepth[F, A](DefaultMaxDepth)
+
+  /**
+   * Derives a JsonBinaryCodec with a custom maximum depth limit.
+   *
+   * @param maxDepth Maximum allowed JSON nesting depth for deserialization
+   */
+  def deriveWithMaxDepth[F[_]: MonadThrow, A: Encoder: Decoder](maxDepth: Int): JsonBinaryCodec[F, A] =
     new JsonBinaryCodec[F, A] {
 
       def serialize(content: A): F[Array[Byte]] =
@@ -69,11 +132,21 @@ object JsonBinaryCodec {
       def deserialize(bytes: Array[Byte]): F[Either[Throwable, A]] =
         (for {
           canonical <- EitherT(bytes.fromBinary[CanonicalJson](jsonBinaryCodecForCanonical[F]))
-          parsed    <- EitherT.fromEither[F].apply[Throwable, A](JawnParser(false).decode[A](canonical.value))
+          json      <- EitherT.fromEither[F](JawnParser(false).parse(canonical.value))
+          _         <- EitherT.fromEither[F](validateDepth(json, maxDepth))
+          parsed    <- EitherT.fromEither[F].apply[Throwable, A](json.as[A].leftMap(_.fillInStackTrace()))
         } yield parsed).value
     }
 
   implicit def deriveDataUpdate[F[_]: MonadThrow, U <: DataUpdate: Encoder: Decoder]: JsonBinaryCodec[F, U] =
+    deriveDataUpdateWithMaxDepth[F, U](DefaultMaxDepth)
+
+  /**
+   * Derives a DataUpdate JsonBinaryCodec with a custom maximum depth limit.
+   *
+   * @param maxDepth Maximum allowed JSON nesting depth for deserialization
+   */
+  def deriveDataUpdateWithMaxDepth[F[_]: MonadThrow, U <: DataUpdate: Encoder: Decoder](maxDepth: Int): JsonBinaryCodec[F, U] =
     new JsonBinaryCodec[F, U] {
 
       def serialize(content: U): F[Array[Byte]] =
@@ -111,7 +184,9 @@ object JsonBinaryCodec {
           )
 
           canonical <- EitherT(decodedBytes.fromBinary[CanonicalJson](jsonBinaryCodecForCanonical[F]))
-          parsed    <- EitherT.fromEither[F].apply[Throwable, U](JawnParser(false).decode[U](canonical.value))
+          json      <- EitherT.fromEither[F](JawnParser(false).parse(canonical.value))
+          _         <- EitherT.fromEither[F](validateDepth(json, maxDepth))
+          parsed    <- EitherT.fromEither[F].apply[Throwable, U](json.as[U].leftMap(_.fillInStackTrace()))
         } yield parsed).value
     }
 

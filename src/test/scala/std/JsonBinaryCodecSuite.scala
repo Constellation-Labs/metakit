@@ -4,8 +4,8 @@ import java.nio.charset.StandardCharsets
 
 import cats.effect.IO
 
-import io.constellationnetwork.metagraph_sdk.std.JsonBinaryCodec
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryCodec.{JsonBinaryDecodeOps, JsonBinaryEncodeOps}
+import io.constellationnetwork.metagraph_sdk.std.{JsonBinaryCodec, MaxDepthExceededException}
 
 import org.bouncycastle.util.encoders.Base64
 import shared.Generators._
@@ -189,5 +189,65 @@ object JsonBinaryCodecSuite extends SimpleIOSuite with Checkers {
     forall { (testData: TestDataUpdateComplex) =>
       assertRoundTrip(testData)
     }
+  }
+
+  // --- Depth limit tests ---
+
+  test("codec should accept JSON within default depth limit") {
+    // TestDataComplex has depth 2 when nested is Some
+    val data = TestDataComplex("outer", 1, Some(TestData("inner", 2)))
+    assertRoundTrip(data)
+  }
+
+  test("codec should reject JSON exceeding custom depth limit") {
+    // Create a codec with a very restrictive depth limit
+    implicit val restrictedCodec: JsonBinaryCodec[IO, TestDataComplex] =
+      JsonBinaryCodec.deriveWithMaxDepth[IO, TestDataComplex](1)
+
+    // TestDataComplex with nested data has depth 2
+    val data = TestDataComplex("outer", 1, Some(TestData("inner", 2)))
+
+    for {
+      serialized   <- data.toBinary(JsonBinaryCodec.deriveWithMaxDepth[IO, TestDataComplex](100)) // serialize with permissive limit
+      deserialized <- restrictedCodec.deserialize(serialized)
+    } yield
+      expect(deserialized.isLeft) &&
+      expect(deserialized.left.exists(_.isInstanceOf[MaxDepthExceededException]))
+  }
+
+  test("codec should accept shallow JSON with restrictive depth limit") {
+    implicit val restrictedCodec: JsonBinaryCodec[IO, TestData] =
+      JsonBinaryCodec.deriveWithMaxDepth[IO, TestData](1)
+
+    // TestData is flat (depth 1)
+    val data = TestData("test", 42)
+    assertRoundTrip(data)(restrictedCodec)
+  }
+
+  test("DataUpdate codec should reject JSON exceeding custom depth limit") {
+    implicit val restrictedCodec: JsonBinaryCodec[IO, TestDataUpdateComplex] =
+      JsonBinaryCodec.deriveDataUpdateWithMaxDepth[IO, TestDataUpdateComplex](0)
+
+    // Even depth-1 JSON should fail with limit 0
+    val data = TestDataUpdateComplex("test", 42, None)
+
+    for {
+      serialized   <- data.toBinary(JsonBinaryCodec.deriveDataUpdateWithMaxDepth[IO, TestDataUpdateComplex](100))
+      deserialized <- restrictedCodec.deserialize(serialized)
+    } yield
+      expect(deserialized.isLeft) &&
+      expect(deserialized.left.exists(_.isInstanceOf[MaxDepthExceededException]))
+  }
+
+  test("default max depth should be 64") {
+    IO.pure(expect(JsonBinaryCodec.DefaultMaxDepth == 64))
+  }
+
+  test("MaxDepthExceededException should have informative message") {
+    val ex = MaxDepthExceededException(100, 64)
+    IO.pure(
+      expect(ex.getMessage.contains("100")) &&
+      expect(ex.getMessage.contains("64"))
+    )
   }
 }
