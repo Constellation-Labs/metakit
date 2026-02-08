@@ -159,4 +159,35 @@ object JsonBinaryCodecSuite extends SimpleIOSuite with Checkers {
       // This ensures hash compatibility with senders who omit the field
       expect(!str.contains("\"nested\""))
   }
+
+  test("DataUpdate codec should drop null values from Option fields") {
+    // Same behavior as regular codec, but for DataUpdate path
+    // Note: DataUpdate wraps in prefix + base64, so we decode to check content
+    val dataWithNone = TestDataUpdateComplex("test", 42, None)
+    val dataWithSome = TestDataUpdateComplex("test", 42, Some("meta"))
+
+    for {
+      bytesNone <- dataWithNone.toBinary
+      bytesSome <- dataWithSome.toBinary
+      // Extract base64 part and decode
+      strNoneRaw = new String(bytesNone, StandardCharsets.UTF_8)
+      strSomeRaw = new String(bytesSome, StandardCharsets.UTF_8)
+      base64None = strNoneRaw.split("\n").drop(2).mkString
+      base64Some = strSomeRaw.split("\n").drop(2).mkString
+      decodedNone = new String(Base64.decode(base64None), StandardCharsets.UTF_8)
+      decodedSome = new String(Base64.decode(base64Some), StandardCharsets.UTF_8)
+    } yield
+      // When metadata is None, the key should not appear in decoded content
+      expect(!decodedNone.contains("metadata")) &&
+      expect(!decodedNone.contains("null")) &&
+      // When metadata has a value, it should appear
+      expect(decodedSome.contains("metadata")) &&
+      expect(decodedSome.contains("meta"))
+  }
+
+  test("DataUpdate codec should round-trip data with Option fields") {
+    forall { (testData: TestDataUpdateComplex) =>
+      assertRoundTrip(testData)
+    }
+  }
 }
