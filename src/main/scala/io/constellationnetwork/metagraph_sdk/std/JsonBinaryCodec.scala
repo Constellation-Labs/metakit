@@ -9,10 +9,10 @@ import cats.syntax.all._
 import io.constellationnetwork.currency.dataApplication.DataUpdate
 import io.constellationnetwork.metagraph_sdk.models.CanonicalJson
 import io.constellationnetwork.metagraph_sdk.models.CanonicalJson._
-import io.constellationnetwork.metagraph_sdk.std.JsonCanonicalizer.JsonPrinterEncodeOps
 
 import io.circe.jawn.JawnParser
-import io.circe.{Decoder, Encoder}
+import io.circe.syntax._
+import io.circe.{Decoder, Encoder, Json}
 import org.bouncycastle.util.encoders.Base64
 
 trait JsonBinaryCodec[F[_], A] {
@@ -26,12 +26,36 @@ object JsonBinaryCodec {
   def fromBinary[F[_], A](bytes: Array[Byte])(implicit codec: JsonBinaryCodec[F, A]): F[Either[Throwable, A]] =
     codec.deserialize(bytes)
 
+  /**
+   * Recursively removes null values from JSON objects.
+   *
+   * This ensures that Option[T] fields encoded as null by Circe are omitted
+   * from the canonical representation, matching the behavior of JSON serializers
+   * that omit undefined/null fields (e.g., TypeScript's JSON.stringify with
+   * replacer, or Circe's dropNullValues printer).
+   *
+   * This is important for signature compatibility: the sender may omit optional
+   * fields entirely, while the receiver's decoder fills them with None (encoded
+   * as null). Without dropping nulls, the re-encoded JSON would differ from the
+   * original, causing signature verification to fail.
+   */
+  private def dropNulls(json: Json): Json =
+    json.arrayOrObject(
+      json,
+      arr => Json.fromValues(arr.map(dropNulls)),
+      obj =>
+        Json.fromJsonObject(
+          obj.filter { case (_, v) => !v.isNull }.mapValues(dropNulls)
+        )
+    )
+
   implicit def derive[F[_]: MonadThrow, A: Encoder: Decoder]: JsonBinaryCodec[F, A] =
     new JsonBinaryCodec[F, A] {
 
       def serialize(content: A): F[Array[Byte]] =
         for {
-          str   <- content.toCanonical
+          json  <- dropNulls(content.asJson).pure[F]
+          str   <- JsonCanonicalizer.canonicalizeJson[F](json)
           bytes <- str.toBinary(jsonBinaryCodecForCanonical[F])
         } yield bytes
 
@@ -47,7 +71,8 @@ object JsonBinaryCodec {
 
       def serialize(content: U): F[Array[Byte]] =
         for {
-          str          <- content.toCanonical
+          json         <- dropNulls(content.asJson).pure[F]
+          str          <- JsonCanonicalizer.canonicalizeJson[F](json)
           bytes        <- str.toBinary(jsonBinaryCodecForCanonical[F])
           base64String <- Base64.toBase64String(bytes).pure[F]
           prefixedString = s"\u0019Constellation Signed Data:\n${base64String.length}\n$base64String"
