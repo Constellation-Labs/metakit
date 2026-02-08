@@ -118,4 +118,45 @@ object JsonBinaryCodecSuite extends SimpleIOSuite with Checkers {
       } yield expect(java.util.Arrays.equals(serialized1, serialized2))
     }
   }
+
+  test("codec should drop null values from Option fields") {
+    // TestDataComplex has nested: Option[TestData] which becomes null when None
+    val dataWithNone = TestDataComplex("test", 42, None)
+    val dataWithSome = TestDataComplex("test", 42, Some(TestData("inner", 1)))
+
+    for {
+      bytesNone <- dataWithNone.toBinary
+      bytesSome <- dataWithSome.toBinary
+      strNone = new String(bytesNone, StandardCharsets.UTF_8)
+      strSome = new String(bytesSome, StandardCharsets.UTF_8)
+    } yield
+      // When nested is None, the "nested" key should not appear in the serialized form
+      expect(!strNone.contains("nested")) &&
+      expect(!strNone.contains("null")) &&
+      // When nested has a value, it should appear
+      expect(strSome.contains("nested")) &&
+      expect(strSome.contains("inner"))
+  }
+
+  test("codec should round-trip data with Option fields") {
+    forall { (testData: TestDataComplex) =>
+      assertRoundTrip(testData)
+    }
+  }
+
+  test("codec with None produces same bytes as sender without field") {
+    // This simulates the signature compatibility scenario:
+    // - TypeScript SDK sends JSON without optional field
+    // - Scala deserializes to case class with None
+    // - Scala re-serializes - should produce same bytes (no null field)
+    val dataWithNone = TestDataComplex("test", 42, None)
+
+    for {
+      serialized <- dataWithNone.toBinary
+      str = new String(serialized, StandardCharsets.UTF_8)
+    } yield
+      // The serialized form should not contain "nested" key at all
+      // This ensures hash compatibility with senders who omit the field
+      expect(!str.contains("\"nested\""))
+  }
 }
