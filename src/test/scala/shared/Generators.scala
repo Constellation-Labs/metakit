@@ -34,6 +34,14 @@ object Generators {
     } yield TestDataUpdate(id, value)
   )
 
+  implicit val arbTestDataUpdateComplex: Arbitrary[TestDataUpdateComplex] = Arbitrary(
+    for {
+      id       <- Gen.stringOf(Gen.alphaNumChar)
+      value    <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
+      metadata <- Gen.option(nonEmptyAlphaStr)
+    } yield TestDataUpdateComplex(id, value, metadata)
+  )
+
   val genTestDataUpdate: Gen[TestDataUpdate] = arbTestDataUpdate.arbitrary
 
   val jsonValueGen: Gen[Json] = Gen.oneOf(

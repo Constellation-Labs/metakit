@@ -17,4 +17,7 @@ object Models {
   @derive(encoder, decoder, show)
   case class TestDataUpdate(id: String, value: Int) extends DataUpdate
 
+  @derive(encoder, decoder, show)
+  case class TestDataUpdateComplex(id: String, value: Int, metadata: Option[String]) extends DataUpdate
+
 }
