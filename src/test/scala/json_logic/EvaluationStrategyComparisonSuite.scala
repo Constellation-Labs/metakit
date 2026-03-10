@@ -330,4 +330,80 @@ object EvaluationStrategyComparisonSuite extends SimpleIOSuite {
         )
     }
   }
+
+  test("let with single binding: both strategies should produce same result") {
+    val exprStr = """{"let": [[["x", 5]], {"var": "x"}]}"""
+    val dataStr = """null"""
+
+    testBothStrategies(exprStr, dataStr).map(expect(_))
+  }
+
+  test("let with sequential bindings: both strategies should produce same result") {
+    val exprStr = """{"let": [[["x", 5], ["y", {"+": [{"var": "x"}, 3]}]], {"var": "y"}]}"""
+    val dataStr = """null"""
+
+    testBothStrategies(exprStr, dataStr).map(expect(_))
+  }
+
+  test("let with external data access: both strategies should produce same result") {
+    val exprStr = """{"let": [[["doubled", {"*": [{"var": "value"}, 2]}]], {"+": [{"var": "doubled"}, {"var": "value"}]}]}"""
+    val dataStr = """{"value": 10}"""
+
+    testBothStrategies(exprStr, dataStr).map(expect(_))
+  }
+
+  test("let with nested let: both strategies should produce same result") {
+    val exprStr = """
+      {"let": [
+        [["x", 5]],
+        {"let": [
+          [["y", {"+": [{"var": "x"}, 10]}]],
+          {"*": [{"var": "x"}, {"var": "y"}]}
+        ]}
+      ]}
+    """
+    val dataStr = """null"""
+
+    testBothStrategies(exprStr, dataStr).map(expect(_))
+  }
+
+  test("let operation: both strategies should have same gas cost") {
+    val exprStr = """
+      {"let": [
+        [["a", 10], ["b", 20], ["sum", {"+": [{"var": "a"}, {"var": "b"}]}]],
+        {"*": [{"var": "sum"}, 2]}
+      ]}
+    """
+    val dataStr = """null"""
+
+    testBothStrategiesWithGas(exprStr, dataStr).map {
+      case (recursive, tailRec) =>
+        expect.all(
+          recursive.value == tailRec.value,
+          recursive.gasUsed == tailRec.gasUsed
+        )
+    }
+  }
+
+  test("let with complex nested operations: both strategies should have same gas cost") {
+    val exprStr = """
+      {"let": [
+        [
+          ["items", {"var": "data"}],
+          ["total", {"reduce": [{"var": "items"}, {"+": [{"var": "current"}, {"var": "accumulator"}]}, 0]}],
+          ["len", {"count": [{"var": "items"}]}]
+        ],
+        {"/": [{"var": "total"}, {"var": "len"}]}
+      ]}
+    """
+    val dataStr = """{"data": [10, 20, 30, 40]}"""
+
+    testBothStrategiesWithGas(exprStr, dataStr).map {
+      case (recursive, tailRec) =>
+        expect.all(
+          recursive.value == tailRec.value,
+          recursive.gasUsed == tailRec.gasUsed
+        )
+    }
+  }
 }

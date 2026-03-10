@@ -106,6 +106,7 @@ object GasAwareSemantics {
         case ExistsOp      => config.exists
         case MissingSomeOp => config.missingSome
         case IfElseOp      => config.ifElse
+        case LetOp         => config.ifElse // Similar cost to if/else (control flow)
         case EqOp          => config.eq
         case EqStrictOp    => config.eqStrict
         case NEqOp         => config.neq

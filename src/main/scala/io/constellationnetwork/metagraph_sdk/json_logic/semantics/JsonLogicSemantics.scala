@@ -87,6 +87,7 @@ object JsonLogicSemantics {
           case ExistsOp      => handleExists
           case MissingSomeOp => handleMissingSome
           case IfElseOp      => handleIfElseOp
+          case LetOp         => handleLetOp
           case EqOp          => handleEqOp
           case EqStrictOp    => handleEqStrictOp
           case NEqOp         => handleNEqOp
@@ -816,6 +817,7 @@ object JsonLogicSemantics {
       private def handleMapValuesOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>
           values match {
+            case Nil                => (NullValue: JsonLogicValue).pure[Result].asRight[JsonLogicException]
             case NullValue :: Nil   => (NullValue: JsonLogicValue).pure[Result].asRight[JsonLogicException]
             case MapValue(v) :: Nil => (ArrayValue(v.values.toList): JsonLogicValue).pure[Result].asRight[JsonLogicException]
             case _ => JsonLogicException(s"Unexpected input for `${MapValuesOp.tag}' got $values").asLeft[Result[JsonLogicValue]]
@@ -825,6 +827,7 @@ object JsonLogicSemantics {
       private def handleMapKeysOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>
           values match {
+            case Nil                => (NullValue: JsonLogicValue).pure[Result].asRight[JsonLogicException]
             case NullValue :: Nil   => (NullValue: JsonLogicValue).pure[Result].asRight[JsonLogicException]
             case MapValue(v) :: Nil => (ArrayValue(v.keys.map(StrValue(_)).toList): JsonLogicValue).pure[Result].asRight[JsonLogicException]
             case _ => JsonLogicException(s"Unexpected input for `${MapKeysOp.tag}' got $values").asLeft[Result[JsonLogicValue]]
@@ -836,13 +839,12 @@ object JsonLogicSemantics {
         def implMap(
           input: Map[String, JsonLogicValue],
           key: String
-        ): Either[JsonLogicException, Result[JsonLogicValue]] = {
-          val availableKeys = input.keys.take(5).mkString(", ") + (if (input.size > 5) ", ..." else "")
-          Either.fromOption(
-            input.get(key).map(_.pure[Result]),
-            JsonLogicException(s"Could not find key '$key' in map with keys: [$availableKeys]")
-          )
-        }
+        ): Either[JsonLogicException, Result[JsonLogicValue]] =
+          // Return NullValue for missing keys (consistent behavior for both evaluators)
+          input.get(key) match {
+            case Some(value) => value.pure[Result].asRight[JsonLogicException]
+            case None        => (NullValue: JsonLogicValue).pure[Result].asRight[JsonLogicException]
+          }
 
         args.withMetrics { values =>
           values match {
@@ -1228,6 +1230,7 @@ object JsonLogicSemantics {
       private def handleEntriesOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>
           values match {
+            case Nil => (NullValue: JsonLogicValue).pure[Result].asRight[JsonLogicException]
             case MapValue(m) :: Nil =>
               val entries = m.toList.map { case (k, v) => ArrayValue(List(StrValue(k), v)) }
               ((ArrayValue(entries): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight[JsonLogicException]
@@ -1242,6 +1245,12 @@ object JsonLogicSemantics {
             case _            => JsonLogicException(s"Unexpected input to ${TypeOfOp.tag}, got $values").asLeft[Result[JsonLogicValue]]
           }
         }
+
+      // Let is handled specially in the runtime; this should not be reached
+      private def handleLetOp(
+        @annotation.unused args: List[Result[JsonLogicValue]]
+      ): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
+        JsonLogicException("let operator should be handled in runtime, not semantics").asLeft[Result[JsonLogicValue]].pure[F]
     }
 
   implicit class semanticOpsV2[F[_]: Monad, Result[_]: ResultContext](sem: JsonLogicSemantics[F, Result]) {
