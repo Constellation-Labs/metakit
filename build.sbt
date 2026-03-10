@@ -9,7 +9,6 @@ ThisBuild / homepage := Some(url("https://github.com/Constellation-Labs/metakit"
 ThisBuild / licenses := List("Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0"))
 ThisBuild / sonatypeCredentialHost := "central.sonatype.com"
 ThisBuild / versionScheme := Some("early-semver")
-ThisBuild / git.gitUncommittedChanges := false
 
 ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
@@ -27,6 +26,8 @@ ThisBuild / evictionErrorLevel := Level.Warn
 
 lazy val commonSettings = Seq(
   scalacOptions ++= List("-Ymacro-annotations", "-Yrangepos", "-Wconf:cat=unused:info", "-language:reflectiveCalls"),
+  scalafmtOnCompile := true,
+  scalafixOnCompile := true,
   resolvers += Resolver.mavenLocal,
   libraryDependencies ++= Seq(
     CompilerPlugin.kindProjector,
@@ -71,6 +72,7 @@ lazy val benchmarks = (project in file("benchmarks"))
   .enablePlugins(JmhPlugin)
   .dependsOn(root)
   .settings(
+    commonSettings,
     name := "metakit-benchmarks",
     publish / skip := true
   )

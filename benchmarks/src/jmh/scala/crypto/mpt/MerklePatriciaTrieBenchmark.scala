@@ -8,7 +8,7 @@ import io.constellationnetwork.metagraph_sdk.crypto.mpt.MerklePatriciaTrie
 import io.constellationnetwork.metagraph_sdk.crypto.mpt.api.{MerklePatriciaProver, MerklePatriciaVerifier}
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher.deriveFromCodec
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher
-import io.constellationnetwork.security.hash.Hash
+import io.constellationnetwork.security.hex.Hex
 
 import org.openjdk.jmh.annotations._
 import org.openjdk.jmh.infra.Blackhole
@@ -19,7 +19,7 @@ import scala.util.Random
 @State(Scope.Benchmark)
 @BenchmarkMode(Array(Mode.AverageTime))
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
-@Fork(value = 1, jvmArgs = Array("-Xms2G", "-Xmx2G"))
+@Fork(value = 1, jvmArgs = Array("-Xms2G", "-Xmx8G"))
 @Warmup(iterations = 3, time = 1, timeUnit = TimeUnit.SECONDS)
 @Measurement(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
 class MerklePatriciaTrieBenchmark {
@@ -32,7 +32,7 @@ class MerklePatriciaTrieBenchmark {
   @Param(Array("10", "50", "100"))
   var numProofsToVerify: Int = _
 
-  private var entries: List[(Hash, String)] = _
+  private var entries: List[(Hex, String)] = _
   private var trie: MerklePatriciaTrie = _
   private var verifier: MerklePatriciaVerifier[F] = _
   private var prover: MerklePatriciaProver[F] = _
@@ -40,9 +40,9 @@ class MerklePatriciaTrieBenchmark {
 
   @Setup(Level.Trial)
   def setup(): Unit = {
-    val program: F[(List[(Hash, String)], MerklePatriciaTrie)] = for {
+    val program: F[(List[(Hex, String)], MerklePatriciaTrie)] = for {
       entriesList <- (1 to numEntries).toList.traverse { i =>
-        JsonBinaryHasher[F].computeDigest(s"entry_$i").map(_ -> s"value_$i")
+        JsonBinaryHasher[F].computeDigest(s"entry_$i").map(d => Hex(d.value) -> s"value_$i")
       }
       trieInstance <- MerklePatriciaTrie.make[F, String](entriesList.toMap)
     } yield (entriesList, trieInstance)
@@ -66,7 +66,7 @@ class MerklePatriciaTrieBenchmark {
   def generateProofs(bh: Blackhole): Unit = {
     val proofs = randomIndices.traverse { idx =>
       val (digest, _) = entries(idx)
-      prover.attestDigest(digest).flatMap(IO.fromEither(_))
+      prover.attestPath(digest).flatMap(IO.fromEither(_))
     }.unsafeRunSync()
     bh.consume(proofs)
   }
@@ -76,7 +76,7 @@ class MerklePatriciaTrieBenchmark {
     val results = randomIndices.traverse { idx =>
       val (digest, _) = entries(idx)
       for {
-        proof <- prover.attestDigest(digest).flatMap(IO.fromEither(_))
+        proof <- prover.attestPath(digest).flatMap(IO.fromEither(_))
         result <- verifier.confirm(proof)
       } yield result
     }.unsafeRunSync()
@@ -92,7 +92,7 @@ class MerklePatriciaTrieBenchmark {
       results <- randomIndices.traverse { idx =>
         val (digest, _) = entries(idx)
         for {
-          proof <- newProver.attestDigest(digest).flatMap(IO.fromEither(_))
+          proof <- newProver.attestPath(digest).flatMap(IO.fromEither(_))
           result <- newVerifier.confirm(proof).map(_.leftMap(_.toString))
         } yield result
       }
@@ -106,7 +106,7 @@ class MerklePatriciaTrieBenchmark {
   def proofSizeMeasurement(bh: Blackhole): Unit = {
     val proofSizes = randomIndices.map { idx =>
       val (digest, _) = entries(idx)
-      val proof = prover.attestDigest(digest).flatMap(IO.fromEither(_)).unsafeRunSync()
+      val proof = prover.attestPath(digest).flatMap(IO.fromEither(_)).unsafeRunSync()
       proof.witness.size
     }
     bh.consume(proofSizes)
@@ -117,7 +117,7 @@ class MerklePatriciaTrieBenchmark {
     val results = randomIndices.parTraverse { idx =>
       val (digest, _) = entries(idx)
       for {
-        proof <- prover.attestDigest(digest).flatMap(IO.fromEither(_))
+        proof <- prover.attestPath(digest).flatMap(IO.fromEither(_))
         result <- verifier.confirm(proof)
       } yield result
     }.unsafeRunSync()

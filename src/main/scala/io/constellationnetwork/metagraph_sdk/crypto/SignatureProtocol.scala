@@ -15,7 +15,6 @@ import io.constellationnetwork.security.key.ops.PublicKeyOps
 import io.constellationnetwork.security.signature.signature.{Signature, SignatureProof}
 import io.constellationnetwork.security.signature.{Signed, Signing}
 
-import io.circe.{Decoder, Encoder}
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 trait SignatureProver[F[_]] {
@@ -124,10 +123,10 @@ object SignatureProtocol {
       Slf4jLogger.getLogger[F].error(err)(s"Failed to verify signature with id: ${proof.id.show}").as(false)
     }
 
-  def proveSigned[F[_]: Async: SecurityProvider, A: Encoder: Decoder](implicit codec: JsonBinaryCodec[F, A]): SignedJsonProducer[F, A] =
+  def proveSigned[F[_]: Async: SecurityProvider, A](implicit codec: JsonBinaryCodec[F, A]): SignedJsonProducer[F, A] =
     new SignedJsonProducer[F, A](codec.asRight)
 
-  def verifySigned[F[_]: Async: SecurityProvider, A: Encoder: Decoder](implicit codec: JsonBinaryCodec[F, A]): SignedJsonEvaluator[F, A] =
+  def verifySigned[F[_]: Async: SecurityProvider, A](implicit codec: JsonBinaryCodec[F, A]): SignedJsonEvaluator[F, A] =
     new SignedJsonEvaluator[F, A](codec.asRight)
 
   def customProveSigned[F[_]: Async: SecurityProvider, A](toBytes: A => F[Array[Byte]]): SignedJsonProducer[F, A] =
