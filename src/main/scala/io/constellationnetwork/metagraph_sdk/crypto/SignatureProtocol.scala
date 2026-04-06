@@ -3,10 +3,12 @@ package io.constellationnetwork.metagraph_sdk.crypto
 import java.nio.charset.StandardCharsets
 import java.security.KeyPair
 
+import cats.Applicative
 import cats.data.{NonEmptyList, NonEmptySet}
 import cats.effect.Async
 import cats.syntax.all._
 
+import io.constellationnetwork.metagraph_sdk.crypto.curves.Secp256r1
 import io.constellationnetwork.metagraph_sdk.std.{JsonBinaryCodec, JsonBinaryHasher}
 import io.constellationnetwork.security.SecurityProvider
 import io.constellationnetwork.security.hash.Hash
@@ -23,6 +25,14 @@ trait SignatureProver[F[_]] {
 
 trait SignatureVerifier[F[_]] {
   def confirm(msg: Hash, proof: SignatureProof): F[Boolean]
+}
+
+trait MetagraphSignatureProver[F[_]] {
+  def attest(msg: Hash, keypair: KeyPair): F[MetagraphSignatureProof]
+}
+
+trait MetagraphSignatureVerifier[F[_]] {
+  def confirm(msg: Hash, proof: MetagraphSignatureProof): F[Boolean]
 }
 
 class SignedJsonProducer[F[_]: Async: SecurityProvider, A](serde: Either[A => F[Array[Byte]], JsonBinaryCodec[F, A]]) {
@@ -135,4 +145,76 @@ object SignatureProtocol {
   def customVerifySigned[F[_]: Async: SecurityProvider, A](toBytes: A => F[Array[Byte]]): SignedJsonEvaluator[F, A] =
     new SignedJsonEvaluator[F, A](toBytes.asLeft)
 
+  // --- Scheme-aware API ---
+
+  def schemeProver[F[_]: Async: SecurityProvider](scheme: SigningScheme): MetagraphSignatureProver[F] =
+    scheme match {
+      case SigningScheme.Secp256k1Rfc8785V1 => secp256k1Prover[F]
+      case SigningScheme.Secp256r1Rfc8785V1 => secp256r1Prover[F]
+    }
+
+  def schemeVerifier[F[_]: Async: SecurityProvider](scheme: SigningScheme): MetagraphSignatureVerifier[F] =
+    scheme match {
+      case SigningScheme.Secp256k1Rfc8785V1 => secp256k1Verifier[F]
+      case SigningScheme.Secp256r1Rfc8785V1 => secp256r1Verifier[F]
+    }
+
+  def autoVerifier[F[_]: Async: SecurityProvider]: MetagraphSignatureVerifier[F] =
+    (msg: Hash, proof: MetagraphSignatureProof) =>
+      schemeVerifier[F](proof.scheme.getOrElse(SigningScheme.Secp256k1Rfc8785V1)).confirm(msg, proof)
+
+  def proveSignedWithScheme[F[_]: Async: SecurityProvider, A](
+    scheme: SigningScheme
+  )(implicit codec: JsonBinaryCodec[F, A]): MetagraphSignedProducer[F, A] =
+    new MetagraphSignedProducer[F, A](codec.asRight, scheme)
+
+  def verifySignedWithScheme[F[_]: Async: SecurityProvider, A](
+    resolver: SignatureProof => F[Option[SigningScheme]]
+  )(implicit codec: JsonBinaryCodec[F, A]): MetagraphSignedEvaluator[F, A] =
+    new MetagraphSignedEvaluator[F, A](codec.asRight, resolver)
+
+  def constantSchemeResolver[F[_]: Applicative](scheme: SigningScheme): SignatureProof => F[Option[SigningScheme]] =
+    _ => scheme.some.pure[F]
+
+  // --- Private scheme implementations ---
+
+  private def secp256k1Prover[F[_]: Async: SecurityProvider]: MetagraphSignatureProver[F] =
+    (msg: Hash, keypair: KeyPair) =>
+      for {
+        id        <- keypair.getPublic.toId.pure[F]
+        msgBytes  <- msg.value.getBytes(StandardCharsets.UTF_8).pure[F]
+        sigBytes  <- Signing.signData(msgBytes)(keypair.getPrivate)
+        signature <- Signature(Hex.fromBytes(sigBytes)).pure[F]
+      } yield MetagraphSignatureProof(id, signature, SigningScheme.Secp256k1Rfc8785V1.some)
+
+  private def secp256r1Prover[F[_]: Async: SecurityProvider]: MetagraphSignatureProver[F] =
+    (msg: Hash, keypair: KeyPair) =>
+      for {
+        id        <- Secp256r1.publicKeyToId(keypair.getPublic).pure[F]
+        msgBytes  <- msg.value.getBytes(StandardCharsets.UTF_8).pure[F]
+        sigBytes  <- Secp256r1.sign(msgBytes, keypair.getPrivate)
+        signature <- Signature(Hex.fromBytes(sigBytes)).pure[F]
+      } yield MetagraphSignatureProof(id, signature, SigningScheme.Secp256r1Rfc8785V1.some)
+
+  private def secp256k1Verifier[F[_]: Async: SecurityProvider]: MetagraphSignatureVerifier[F] =
+    (msg: Hash, proof: MetagraphSignatureProof) =>
+      (for {
+        publicKey <- proof.id.hex.toPublicKey
+        msgBytes  <- msg.value.getBytes(StandardCharsets.UTF_8).pure[F]
+        sigBytes  <- proof.signature.value.toBytes.pure[F]
+        result    <- Signing.verifySignature(msgBytes, sigBytes)(publicKey)
+      } yield result).handleErrorWith { err =>
+        Slf4jLogger.getLogger[F].error(err)(s"Failed to verify k1 signature with id: ${proof.id.show}").as(false)
+      }
+
+  private def secp256r1Verifier[F[_]: Async: SecurityProvider]: MetagraphSignatureVerifier[F] =
+    (msg: Hash, proof: MetagraphSignatureProof) =>
+      (for {
+        publicKey <- Secp256r1.idToPublicKey(proof.id)
+        msgBytes  <- msg.value.getBytes(StandardCharsets.UTF_8).pure[F]
+        sigBytes  <- proof.signature.value.toBytes.pure[F]
+        result    <- Secp256r1.verify(msgBytes, sigBytes, publicKey)
+      } yield result).handleErrorWith { err =>
+        Slf4jLogger.getLogger[F].error(err)(s"Failed to verify r1 signature with id: ${proof.id.show}").as(false)
+      }
 }
