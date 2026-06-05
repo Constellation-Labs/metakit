@@ -191,7 +191,7 @@ object GasAwareSemantics {
           case PowOp =>
             args match {
               case _ :: IntValue(exp) :: Nil   => GasCost(exp.abs.toLong)
-              case _ :: FloatValue(exp) :: Nil => GasCost(exp.abs.toLong)
+              case _ :: FloatValue(exp) :: Nil => GasCost(exp.numerator.abs.toLong)
               case _                           => GasCost.Zero
             }
           case AddOp | TimesOp | MinusOp =>

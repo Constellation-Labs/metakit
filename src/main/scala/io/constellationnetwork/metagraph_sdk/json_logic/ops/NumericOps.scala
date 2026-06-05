@@ -6,21 +6,22 @@ import cats.syntax.traverse._
 import scala.annotation.tailrec
 
 import io.constellationnetwork.metagraph_sdk.json_logic.core._
+import io.constellationnetwork.metagraph_sdk.numerics.Ratio
+import io.constellationnetwork.metagraph_sdk.numerics.RatioOps.implicits._
 
 /**
- * Unified numeric handling for consistent arithmetic operations across Int/Float types
+ * Unified numeric handling for the JSON Logic VM.
+ *
+ * Arithmetic is exact (rational) so the Scala, Rust, and WASM evaluators agree byte-for-byte — the cross-language
+ * reproducibility that matching Java's BigDecimal DECIMAL128/setScale rounding elsewhere would not give us. The only
+ * rounding is at canonical serialization (RFC 8785 shortest-double), which is deterministic. Integers and non-integers are
+ * tracked separately so operator result typing (IntValue vs FloatValue) matches JSON Logic semantics.
  */
 object NumericOps {
 
-  /**
-   * MathContext for division operations using DECIMAL128 (IEEE 754-2008).
-   * Provides 34-digit precision to bound non-terminating decimals like 1/3.
-   * Prevents ArithmeticException for non-terminating results.
-   */
-  private val DivisionContext = java.math.MathContext.DECIMAL128
-
-  def safeDivide(l: BigDecimal, r: BigDecimal): BigDecimal =
-    BigDecimal(l.bigDecimal.divide(r.bigDecimal, DivisionContext))
+  /** Exact rational division (was BigDecimal DECIMAL128 on dev; now lossless). */
+  def safeDivide(l: Ratio, r: Ratio): Ratio =
+    l / r
 
   def safeToInt(bi: BigInt, name: String): Either[JsonLogicException, Int] =
     if (bi >= Int.MinValue && bi <= Int.MaxValue)
@@ -29,19 +30,27 @@ object NumericOps {
       JsonLogicException(s"$name value $bi exceeds Int range").asLeft
 
   sealed trait NumericResult {
-    def toBigDecimal: BigDecimal = this match {
-      case IntResult(i)   => BigDecimal(i)
-      case FloatResult(f) => f
+
+    def toRatio: Ratio = this match {
+      case IntResult(i)   => Ratio(i)
+      case FloatResult(r) => r
     }
+
+    def isFloat: Boolean = this match {
+      case FloatResult(_) => true
+      case IntResult(_)   => false
+    }
+
+    def toBigDecimal: BigDecimal = toRatio.toBigDecimal
 
     def toJsonLogicValue: JsonLogicValue = this match {
       case IntResult(i)   => IntValue(i)
-      case FloatResult(f) => FloatValue(f)
+      case FloatResult(r) => FloatValue(r)
     }
   }
 
   case class IntResult(value: BigInt) extends NumericResult
-  case class FloatResult(value: BigDecimal) extends NumericResult
+  case class FloatResult(value: Ratio) extends NumericResult
 
   /**
    * Promotes a JsonLogicValue to a numeric type, handling coercion
@@ -59,8 +68,8 @@ object NumericOps {
         } else {
           Either
             .catchNonFatal(BigInt(s))
-            .map(IntResult(_))
-            .orElse(Either.catchNonFatal(BigDecimal(s)).map(FloatResult(_)))
+            .map(IntResult(_): NumericResult)
+            .orElse(Either.catchNonFatal(Ratio.fromBigDecimal(BigDecimal(s))).map(FloatResult(_): NumericResult))
             .leftMap(_ => JsonLogicException(s"Cannot convert string '$s' to number"))
         }
       case ArrayValue(List(single)) =>
@@ -80,46 +89,46 @@ object NumericOps {
     }
 
   /**
-   * Combines two numeric values using the given operation.
-   * Returns IntValue if both operands are ints and result is whole, otherwise FloatValue.
+   * Combines two numeric values using the given exact-rational operation.
+   * Returns IntValue when neither operand was a float and the result is integral, otherwise FloatValue.
    */
   def combineNumeric(
-    op: (BigDecimal, BigDecimal) => BigDecimal
-  )(left: NumericResult, right: NumericResult): JsonLogicValue =
-    (left, right) match {
-      case (IntResult(l), IntResult(r)) =>
-        val result = op(BigDecimal(l), BigDecimal(r))
-        if (result.isWhole && result.isValidLong) IntValue(result.toBigInt)
-        else FloatValue(result)
-      case (IntResult(l), FloatResult(r))   => FloatValue(op(BigDecimal(l), r))
-      case (FloatResult(l), IntResult(r))   => FloatValue(op(l, BigDecimal(r)))
-      case (FloatResult(l), FloatResult(r)) => FloatValue(op(l, r))
-    }
+    op: (Ratio, Ratio) => Ratio
+  )(left: NumericResult, right: NumericResult): JsonLogicValue = {
+    val result = op(left.toRatio, right.toRatio)
+    if (!left.isFloat && !right.isFloat && result.isInteger) IntValue(result.toBigInt)
+    else FloatValue(result)
+  }
 
   /**
-   * Combines a list of numeric values using the given operation and identity element
+   * Combines a list of numeric values using the given exact-rational operation.
    */
   def reduceNumeric(
     values: List[JsonLogicValue],
-    op: (BigDecimal, BigDecimal) => BigDecimal
+    op: (Ratio, Ratio) => Ratio
   ): Either[JsonLogicException, JsonLogicValue] =
     if (values.isEmpty) JsonLogicException("Cannot reduce empty list").asLeft
     else {
       values.traverse(promoteToNumeric).map { numerics =>
-        val hasFloat = numerics.exists(_.isInstanceOf[FloatResult])
-        val result = numerics.map(_.toBigDecimal).reduce(op)
+        val hasFloat = numerics.exists(_.isFloat)
+        val result = numerics.map(_.toRatio).reduce(op)
 
-        if (!hasFloat && result.isWhole && result.isValidLong) {
-          IntValue(result.toBigInt)
-        } else {
-          FloatValue(result)
-        }
+        if (!hasFloat && result.isInteger) IntValue(result.toBigInt)
+        else FloatValue(result)
       }
     }
 
   /**
-   * Compares two numeric values
+   * Compares two numeric values exactly.
    */
   def compareNumeric(left: NumericResult, right: NumericResult): Int =
-    left.toBigDecimal.compare(right.toBigDecimal)
+    left.toRatio.compare(right.toRatio)
+
+  /**
+   * Plain decimal string for a rational, used by the string ops (cat / join / in). Integral values render without a
+   * decimal point; non-integral values use the exact decimal expansion with trailing zeros stripped.
+   */
+  def floatToPlainString(r: Ratio): String =
+    if (r.isInteger) r.numerator.toString
+    else r.toBigDecimal.bigDecimal.stripTrailingZeros.toPlainString
 }

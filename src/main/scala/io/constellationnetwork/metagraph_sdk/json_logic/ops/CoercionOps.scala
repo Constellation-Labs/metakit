@@ -5,12 +5,13 @@ import cats.syntax.either._
 import scala.annotation.tailrec
 
 import io.constellationnetwork.metagraph_sdk.json_logic.core._
+import io.constellationnetwork.metagraph_sdk.numerics.Ratio
 
 sealed trait CoercedValue
 case object CoercedNull extends CoercedValue
 final case class CoercedBool(value: Boolean) extends CoercedValue
 final case class CoercedInt(value: BigInt) extends CoercedValue
-final case class CoercedFloat(value: BigDecimal) extends CoercedValue
+final case class CoercedFloat(value: Ratio) extends CoercedValue
 final case class CoercedString(value: String) extends CoercedValue
 
 object CoercionOps {
@@ -63,18 +64,18 @@ object CoercionOps {
       case (CoercedBool(lb), CoercedBool(rb))     => (lb == rb).asRight
       case (CoercedBool(lb), CoercedInt(ri))      => (if (lb) ri == 1 else ri == 0).asRight
       case (CoercedInt(li), CoercedBool(rb))      => (if (rb) li == 1 else li == 0).asRight
-      case (CoercedBool(lb), CoercedFloat(rf))    => (BigDecimal(if (lb) 1 else 0) == rf).asRight
-      case (CoercedFloat(lf), CoercedBool(rb))    => (lf == BigDecimal(if (rb) 1 else 0)).asRight
+      case (CoercedBool(lb), CoercedFloat(rf))    => (Ratio(if (lb) 1 else 0) == rf).asRight
+      case (CoercedFloat(lf), CoercedBool(rb))    => (lf == Ratio(if (rb) 1 else 0)).asRight
       case (CoercedBool(lb), CoercedString(rs))   => rs.toBooleanOption.contains(lb).asRight
       case (CoercedString(ls), CoercedBool(rb))   => ls.toBooleanOption.contains(rb).asRight
       case (CoercedInt(li), CoercedInt(ri))       => (li == ri).asRight
-      case (CoercedInt(li), CoercedFloat(rf))     => (BigDecimal(li) == rf).asRight
-      case (CoercedFloat(lf), CoercedInt(ri))     => (lf == BigDecimal(ri)).asRight
+      case (CoercedInt(li), CoercedFloat(rf))     => (Ratio(li) == rf).asRight
+      case (CoercedFloat(lf), CoercedInt(ri))     => (lf == Ratio(ri)).asRight
       case (CoercedFloat(lf), CoercedFloat(rf))   => (lf == rf).asRight
       case (CoercedInt(li), CoercedString(rs))    => safeParseBigInt(rs).contains(li).asRight
       case (CoercedString(ls), CoercedInt(ri))    => safeParseBigInt(ls).contains(ri).asRight
-      case (CoercedFloat(lf), CoercedString(rs))  => safeParseBigDecimal(rs).contains(lf).asRight
-      case (CoercedString(ls), CoercedFloat(rf))  => safeParseBigDecimal(ls).contains(rf).asRight
+      case (CoercedFloat(lf), CoercedString(rs))  => safeParseBigDecimal(rs).map(Ratio.fromBigDecimal).contains(lf).asRight
+      case (CoercedString(ls), CoercedFloat(rf))  => safeParseBigDecimal(ls).map(Ratio.fromBigDecimal).contains(rf).asRight
       case (CoercedString(ls), CoercedString(rs)) => (ls == rs).asRight
     }
 }
