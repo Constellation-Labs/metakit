@@ -298,7 +298,9 @@ object JsonLogicSemantics {
             case FloatValue(l) :: FloatValue(r) :: Nil => l != r
             case ArrayValue(l) :: ArrayValue(r) :: Nil => l != r
             case MapValue(l) :: MapValue(r) :: Nil     => l != r
-            case _                                     => false
+            // `!==` is the negation of `===`: values of mismatched types are NOT strictly equal, hence strictly
+            // not-equal. Matches the JSON Logic reference / TS (`!==` === `!(===)`).
+            case _ => true
           }
           (BoolValue(boolResult): JsonLogicValue).pure[Result].asRight[JsonLogicException]
         }
@@ -756,6 +758,9 @@ object JsonLogicSemantics {
 
         args.withMetrics {
           case NullValue :: FunctionValue(_) :: Nil => (BoolValue(false): JsonLogicValue).pure[Result].asRight[JsonLogicException].pure[F]
+          // `all` over an EMPTY array is false (JSON Logic reference / TS), not vacuously true.
+          case ArrayValue(Nil) :: FunctionValue(_) :: Nil =>
+            (BoolValue(false): JsonLogicValue).pure[Result].asRight[JsonLogicException].pure[F]
           case ArrayValue(arr) :: FunctionValue(expr) :: Nil => impl(arr, expr)
           case _ => JsonLogicException(s"Unexpected input to ${AllOp.tag}, got $values").asLeft[Result[JsonLogicValue]].pure[F]
         }

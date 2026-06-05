@@ -610,7 +610,7 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
     }
   }
 
-  test("!== can test strict not-equal with type coercion for un-like types") {
+  test("!== is strict not-equal: un-like types are not strictly equal (=> true)") {
     val exprStr =
       """
         |{"!==" : [1, "1"]}
@@ -623,7 +623,7 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
 
     parseTestJson(exprStr, dataStr).flatMap {
       case (expr, data) =>
-        staticTestRunner(expr, data, BoolValue(false))
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -2971,6 +2971,16 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
     parseTestJson(exprStr, dataStr).flatMap {
       case (expr, data) =>
         expectError(expr, data)
+    }
+  }
+
+  test("`all` over an empty array is false (not vacuously true)") {
+    val exprStr = """{"all": [[], {">": [{"var": ""}, 0]}]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(false))
     }
   }
 
