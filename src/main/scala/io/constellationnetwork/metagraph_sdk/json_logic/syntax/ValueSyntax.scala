@@ -1,6 +1,7 @@
 package io.constellationnetwork.metagraph_sdk.json_logic.syntax
 
 import io.constellationnetwork.metagraph_sdk.json_logic.core._
+import io.constellationnetwork.metagraph_sdk.numerics.Ratio
 
 trait ValueSyntax {
 
@@ -21,7 +22,7 @@ trait ValueSyntax {
       case NullValue        => false
       case BoolValue(v)     => v
       case IntValue(i)      => i != 0
-      case FloatValue(d)    => d != 0.0
+      case FloatValue(d)    => d.numerator != 0
       case StrValue(s)      => s.nonEmpty
       case ArrayValue(v)    => v.nonEmpty
       case MapValue(v)      => v.nonEmpty
@@ -33,7 +34,7 @@ trait ValueSyntax {
       case FunctionValue(_) => false
       case BoolValue(v)     => key.toBooleanOption.contains(v)
       case IntValue(v)      => Option(BigInt(key)).contains(v)
-      case FloatValue(v)    => Option(BigDecimal(key)).contains(v)
+      case FloatValue(v)    => Option(Ratio.fromBigDecimal(BigDecimal(key))).contains(v)
       case StrValue(v)      => key.contains(v)
       case ArrayValue(list) => key.toIntOption.exists(_ <= list.length)
       case MapValue(map)    => map.contains(key)

@@ -4,6 +4,9 @@ import cats.syntax.either._
 import cats.syntax.traverse._
 import cats.{Eq, Functor, Show}
 
+import io.constellationnetwork.metagraph_sdk.numerics.Ratio
+import io.constellationnetwork.metagraph_sdk.numerics.RatioOps.implicits._
+
 import io.circe.{Decoder, DecodingFailure, Encoder, Json}
 
 sealed trait JsonLogicValue {
@@ -17,7 +20,7 @@ case object NullValue extends JsonLogicValue { val tag = "null" }
 final case class FunctionValue(expr: JsonLogicExpression) extends JsonLogicValue { val tag = "function" }
 final case class BoolValue(value: Boolean) extends JsonLogicPrimitive("bool")
 final case class IntValue(value: BigInt) extends JsonLogicPrimitive("int")
-final case class FloatValue(value: BigDecimal) extends JsonLogicPrimitive("float")
+final case class FloatValue(value: Ratio) extends JsonLogicPrimitive("float")
 final case class StrValue(value: String) extends JsonLogicPrimitive("string")
 final case class ArrayValue(value: List[JsonLogicValue]) extends JsonLogicCollection("array")
 final case class MapValue(value: Map[String, JsonLogicValue]) extends JsonLogicCollection("map")
@@ -41,7 +44,7 @@ object JsonLogicValue {
       case NullValue        => false
       case BoolValue(v)     => v
       case IntValue(i)      => i != 0
-      case FloatValue(d)    => d != 0.0
+      case FloatValue(d)    => d.numerator != 0
       case StrValue(s)      => s.nonEmpty
       case ArrayValue(v)    => v.nonEmpty
       case MapValue(v)      => v.nonEmpty
@@ -53,7 +56,7 @@ object JsonLogicValue {
       case FunctionValue(_) => false
       case BoolValue(v)     => key.toBooleanOption.contains(v)
       case IntValue(v)      => Either.catchNonFatal(BigInt(key)).toOption.contains(v)
-      case FloatValue(v)    => Either.catchNonFatal(BigDecimal(key)).toOption.contains(v)
+      case FloatValue(v)    => Either.catchNonFatal(Ratio.fromBigDecimal(BigDecimal(key))).toOption.contains(v)
       case StrValue(v)      => key.contains(v)
       case ArrayValue(list) => key.toIntOption.exists(_ <= list.length)
       case MapValue(map)    => map.contains(key)
@@ -71,7 +74,7 @@ object JsonLogicValue {
     case NullValue         => Json.Null
     case BoolValue(value)  => Json.fromBoolean(value)
     case IntValue(value)   => Json.fromBigInt(value)
-    case FloatValue(value) => Json.fromBigDecimal(value)
+    case FloatValue(value) => Json.fromBigDecimal(value.toBigDecimal)
     case StrValue(value)   => Json.fromString(value)
     case ArrayValue(value) => Json.fromValues(value.map(encodeJsonLogicValue(_)))
     case MapValue(value)   => Json.obj(value.map { case (k, v) => k -> encodeJsonLogicValue(v) }.toSeq: _*)
@@ -120,7 +123,7 @@ object JsonLogicValue {
     case NullValue        => "null"
     case BoolValue(v)     => v.toString
     case IntValue(v)      => v.toString
-    case FloatValue(v)    => v.toString
+    case FloatValue(v)    => v.toBigDecimal.toString
     case StrValue(v)      => s""""$v""""
     case ArrayValue(vs)   => vs.map(showJsonLogicValue.show).mkString("[", ", ", "]")
     case MapValue(m)      => m.map { case (k, v) => s""""$k": ${showJsonLogicValue.show(v)}""" }.mkString("{", ", ", "}")
@@ -218,9 +221,15 @@ object MapValue {
   def of(entries: (String, JsonLogicValue)*): MapValue = MapValue(entries.toMap)
 }
 
+object FloatValue {
+
+  /** Convenience constructor from an exact terminating decimal; the stored value is always an exact [[Ratio]]. */
+  def apply(value: BigDecimal): FloatValue = FloatValue(Ratio.fromBigDecimal(value))
+}
+
 object IntValue {
 
   implicit class IntValueOps(iv: IntValue) {
-    def asFloatValue: FloatValue = FloatValue(BigDecimal(iv.value))
+    def asFloatValue: FloatValue = FloatValue(Ratio(iv.value))
   }
 }

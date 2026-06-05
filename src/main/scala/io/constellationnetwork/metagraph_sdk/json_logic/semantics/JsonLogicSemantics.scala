@@ -9,6 +9,8 @@ import io.constellationnetwork.metagraph_sdk.json_logic.ops.CoercionOps._
 import io.constellationnetwork.metagraph_sdk.json_logic.ops.NumericOps._
 import io.constellationnetwork.metagraph_sdk.json_logic.runtime.ResultContext._
 import io.constellationnetwork.metagraph_sdk.json_logic.runtime.{JsonLogicRuntime, ResultContext}
+import io.constellationnetwork.metagraph_sdk.numerics.Ratio
+import io.constellationnetwork.metagraph_sdk.numerics.RatioOps.implicits._
 
 trait JsonLogicSemantics[F[_], Result[_]] {
   def getVar(key: String, ctx: Option[JsonLogicValue] = None): F[Either[JsonLogicException, Result[JsonLogicValue]]]
@@ -160,7 +162,7 @@ object JsonLogicSemantics {
             case Left(_) => v.some
           }
         case v @ FloatValue(key) =>
-          getVar(key.toString).map {
+          getVar(floatToPlainString(key)).map {
             case Right(result) =>
               if (result.extractValue == NullValue) v.some else None
             case Left(_) => v.some
@@ -428,7 +430,7 @@ object JsonLogicSemantics {
                 } else {
                   // Note: BigDecimal's % uses truncated division (same as JavaScript/Java)
                   // e.g., -7 % 3 = -1 (not 2 as in Python's floored division)
-                  combineNumeric(_ % _)(ln, rn).pure[Result].asRight[JsonLogicException]
+                  combineNumeric((a, b) => a.mod(b))(ln, rn).pure[Result].asRight[JsonLogicException]
                 }).fold(_.asLeft[Result[JsonLogicValue]], identity)
             case _ =>
               JsonLogicException(s"Unexpected input for `${ModuloOp.tag}' got $values").asLeft[Result[JsonLogicValue]]
@@ -441,10 +443,10 @@ object JsonLogicSemantics {
             JsonLogicException(s"Unexpected input for `${MaxOp.tag}`: list cannot be empty").asLeft
           } else {
             list.traverse(promoteToNumeric).map { numerics =>
-              val maxValue = numerics.map(_.toBigDecimal).max
-              val hasFloat = numerics.exists(_.isInstanceOf[FloatResult])
+              val maxValue = numerics.map(_.toRatio).reduce((a, b) => a.max(b))
+              val hasFloat = numerics.exists(_.isFloat)
 
-              val result: JsonLogicValue = if (!hasFloat && maxValue.isWhole && maxValue.isValidLong) {
+              val result: JsonLogicValue = if (!hasFloat && maxValue.isInteger) {
                 IntValue(maxValue.toBigInt)
               } else {
                 FloatValue(maxValue)
@@ -467,10 +469,10 @@ object JsonLogicSemantics {
             JsonLogicException(s"Unexpected input for `${MinOp.tag}`: list cannot be empty").asLeft
           } else {
             list.traverse(promoteToNumeric).map { numerics =>
-              val minValue = numerics.map(_.toBigDecimal).min
-              val hasFloat = numerics.exists(_.isInstanceOf[FloatResult])
+              val minValue = numerics.map(_.toRatio).reduce((a, b) => a.min(b))
+              val hasFloat = numerics.exists(_.isFloat)
 
-              val result: JsonLogicValue = if (!hasFloat && minValue.isWhole && minValue.isValidLong) {
+              val result: JsonLogicValue = if (!hasFloat && minValue.isInteger) {
                 IntValue(minValue.toBigInt)
               } else {
                 FloatValue(minValue)
@@ -494,7 +496,7 @@ object JsonLogicSemantics {
           } else if (list.size == 1 && list.head.isInstanceOf[StrValue]) {
             promoteToNumeric(list.head).map(_.toJsonLogicValue)
           } else {
-            reduceNumeric(list, _ + _).map(v => v: JsonLogicValue)
+            reduceNumeric(list, (a, b) => a + b).map(v => v: JsonLogicValue)
           }
 
         args.withMetrics { values =>
@@ -508,7 +510,7 @@ object JsonLogicSemantics {
       private def handleTimesOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
         def impl(list: List[JsonLogicValue]): Either[JsonLogicException, Result[JsonLogicValue]] =
           if (list.isEmpty) JsonLogicException(s"Unexpected input for `${TimesOp.tag}`: list cannot be empty").asLeft
-          else reduceNumeric(list, _ * _).map(v => (v: JsonLogicValue).pure[Result])
+          else reduceNumeric(list, (a, b) => a * b).map(v => (v: JsonLogicValue).pure[Result])
 
         args.withMetrics { values =>
           values match {
@@ -523,13 +525,13 @@ object JsonLogicSemantics {
           values match {
             case v :: Nil =>
               promoteToNumeric(v).map { n =>
-                combineNumeric((a, _) => -a)(n, IntResult(0)).pure[Result]
+                combineNumeric((a, _) => Ratio.Zero - a)(n, IntResult(0)).pure[Result]
               }
             case l :: r :: Nil =>
               for {
                 ln <- promoteToNumeric(l)
                 rn <- promoteToNumeric(r)
-              } yield combineNumeric(_ - _)(ln, rn).pure[Result]
+              } yield combineNumeric((a, b) => a - b)(ln, rn).pure[Result]
             case _ =>
               JsonLogicException(s"Unexpected input for `${MinusOp.tag}' got $values").asLeft[Result[JsonLogicValue]]
           }
@@ -583,7 +585,7 @@ object JsonLogicSemantics {
           val toFindStr = toFind match {
             case BoolValue(value)  => value.toString
             case IntValue(value)   => value.toString
-            case FloatValue(value) => value.toString
+            case FloatValue(value) => floatToPlainString(value)
             case StrValue(value)   => value
           }
 
@@ -638,7 +640,7 @@ object JsonLogicSemantics {
               JsonLogicException(s"Unexpected input for `${CatOp.tag}` got $coll").asLeft[JsonLogicValue]
             case BoolValue(value)  => value.toString.asRight[JsonLogicException]
             case IntValue(value)   => value.toString.asRight[JsonLogicException]
-            case FloatValue(value) => value.toString.asRight[JsonLogicException]
+            case FloatValue(value) => floatToPlainString(value).asRight[JsonLogicException]
             case StrValue(value)   => value.asRight[JsonLogicException]
           }
             .map(argStrings => (StrValue(argStrings.mkString): JsonLogicValue).pure[Result])
@@ -942,7 +944,7 @@ object JsonLogicSemantics {
           case NullValue        => ""
           case BoolValue(v)     => v.toString
           case IntValue(v)      => v.toString
-          case FloatValue(v)    => v.toString
+          case FloatValue(v)    => floatToPlainString(v)
           case StrValue(v)      => v
           case ArrayValue(_)    => ""
           case MapValue(_)      => ""
@@ -1093,16 +1095,11 @@ object JsonLogicSemantics {
           values match {
             case IntValue(v) :: Nil => ((IntValue(v): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight[JsonLogicException]
             case FloatValue(v) :: Nil =>
-              val rounded = v.setScale(0, BigDecimal.RoundingMode.HALF_UP)
-              if (rounded.isValidLong) ((IntValue(rounded.toBigInt): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight
-              else ((FloatValue(rounded): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight
+              ((IntValue(v.roundHalfUp): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight
             case v :: Nil =>
               promoteToNumeric(v).map {
-                case IntResult(n) => (IntValue(n): JsonLogicValue).pure[Result]
-                case FloatResult(n) =>
-                  val rounded = n.setScale(0, BigDecimal.RoundingMode.HALF_UP)
-                  if (rounded.isValidLong) (IntValue(rounded.toBigInt): JsonLogicValue).pure[Result]
-                  else (FloatValue(rounded): JsonLogicValue).pure[Result]
+                case IntResult(n)   => (IntValue(n): JsonLogicValue).pure[Result]
+                case FloatResult(n) => (IntValue(n.roundHalfUp): JsonLogicValue).pure[Result]
               }
             case _ => JsonLogicException(s"Unexpected input to ${RoundOp.tag}, got $values").asLeft[Result[JsonLogicValue]]
           }
@@ -1113,16 +1110,11 @@ object JsonLogicSemantics {
           values match {
             case IntValue(v) :: Nil => ((IntValue(v): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight[JsonLogicException]
             case FloatValue(v) :: Nil =>
-              val floored = v.setScale(0, BigDecimal.RoundingMode.FLOOR)
-              if (floored.isValidLong) ((IntValue(floored.toBigInt): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight
-              else ((FloatValue(floored): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight
+              ((IntValue(v.floor): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight
             case v :: Nil =>
               promoteToNumeric(v).map {
-                case IntResult(n) => (IntValue(n): JsonLogicValue).pure[Result]
-                case FloatResult(n) =>
-                  val floored = n.setScale(0, BigDecimal.RoundingMode.FLOOR)
-                  if (floored.isValidLong) (IntValue(floored.toBigInt): JsonLogicValue).pure[Result]
-                  else (FloatValue(floored): JsonLogicValue).pure[Result]
+                case IntResult(n)   => (IntValue(n): JsonLogicValue).pure[Result]
+                case FloatResult(n) => (IntValue(n.floor): JsonLogicValue).pure[Result]
               }
             case _ => JsonLogicException(s"Unexpected input to ${FloorOp.tag}, got $values").asLeft[Result[JsonLogicValue]]
           }
@@ -1133,16 +1125,11 @@ object JsonLogicSemantics {
           values match {
             case IntValue(v) :: Nil => ((IntValue(v): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight[JsonLogicException]
             case FloatValue(v) :: Nil =>
-              val ceiled = v.setScale(0, BigDecimal.RoundingMode.CEILING)
-              if (ceiled.isValidLong) ((IntValue(ceiled.toBigInt): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight
-              else ((FloatValue(ceiled): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight
+              ((IntValue(v.ceil): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight
             case v :: Nil =>
               promoteToNumeric(v).map {
-                case IntResult(n) => (IntValue(n): JsonLogicValue).pure[Result]
-                case FloatResult(n) =>
-                  val ceiled = n.setScale(0, BigDecimal.RoundingMode.CEILING)
-                  if (ceiled.isValidLong) (IntValue(ceiled.toBigInt): JsonLogicValue).pure[Result]
-                  else (FloatValue(ceiled): JsonLogicValue).pure[Result]
+                case IntResult(n)   => (IntValue(n): JsonLogicValue).pure[Result]
+                case FloatResult(n) => (IntValue(n.ceil): JsonLogicValue).pure[Result]
               }
             case _ => JsonLogicException(s"Unexpected input to ${CeilOp.tag}, got $values").asLeft[Result[JsonLogicValue]]
           }
@@ -1150,40 +1137,6 @@ object JsonLogicSemantics {
 
       private def handlePowOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
         val maxSafeExponent = 999
-
-        def isNonNegativeIntExp(num: NumericResult): Boolean = num match {
-          case IntResult(e)   => e >= 0 && e.isValidInt && e <= maxSafeExponent
-          case FloatResult(e) => e.isWhole && e >= 0 && e <= maxSafeExponent
-        }
-
-        def computeExactPow(baseNum: NumericResult, expInt: Int): Either[JsonLogicException, Result[JsonLogicValue]] = {
-          val baseDecimal = baseNum.toBigDecimal
-          if (baseDecimal.isWhole) {
-            // Use BigInt.pow for exact integer result
-            val result = baseDecimal.toBigInt.pow(expInt)
-            ((IntValue(result): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight
-          } else {
-            // Use BigDecimal.pow for better precision with fractional base
-            val result = baseDecimal.pow(expInt)
-            if (result.isWhole && result.isValidLong)
-              ((IntValue(result.toBigInt): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight
-            else
-              ((FloatValue(result): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight
-          }
-        }
-
-        def computeDoublePow(baseNum: NumericResult, expDouble: Double): Either[JsonLogicException, Result[JsonLogicValue]] = {
-          val powResult = Math.pow(baseNum.toBigDecimal.toDouble, expDouble)
-          if (powResult.isInfinity) {
-            JsonLogicException(s"Power operation resulted in infinity").asLeft[Result[JsonLogicValue]]
-          } else if (powResult.isNaN) {
-            JsonLogicException(s"Power operation resulted in NaN").asLeft[Result[JsonLogicValue]]
-          } else if (powResult.isWhole && powResult.isValidInt) {
-            ((IntValue(BigInt(powResult.toInt)): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight
-          } else {
-            ((FloatValue(BigDecimal(powResult)): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight
-          }
-        }
 
         args.withMetrics { values =>
           values match {
@@ -1197,21 +1150,28 @@ object JsonLogicSemantics {
               for {
                 baseNum <- promoteToNumeric(base)
                 expNum  <- promoteToNumeric(exp)
-                result <-
-                  if (isNonNegativeIntExp(expNum)) {
-                    // Use exact arithmetic for non-negative integer exponents
-                    computeExactPow(baseNum, expNum.toBigDecimal.toInt)
-                  } else {
-                    // Fall back to Double for negative or fractional exponents
-                    val expDouble = expNum.toBigDecimal.toDouble
-                    if (expDouble.abs > maxSafeExponent) {
-                      JsonLogicException(
-                        s"Exponent magnitude ${expDouble.abs} exceeds maximum safe value $maxSafeExponent"
-                      ).asLeft[Result[JsonLogicValue]]
+                result <- expNum.toRatio.toBigIntExact match {
+                  case None =>
+                    // Deterministic VM: only integer exponents are supported (no Math.pow / irrational results).
+                    JsonLogicException(
+                      s"Exponent must be an integer for deterministic exponentiation, got ${expNum.toJsonLogicValue}"
+                    ).asLeft[Result[JsonLogicValue]]
+                  case Some(e) if e.abs > maxSafeExponent =>
+                    JsonLogicException(
+                      s"Exponent magnitude ${e.abs} exceeds maximum safe value $maxSafeExponent"
+                    ).asLeft[Result[JsonLogicValue]]
+                  case Some(e) =>
+                    val br = baseNum.toRatio
+                    if (e < 0 && br.numerator == 0) {
+                      JsonLogicException("Zero cannot be raised to a negative power").asLeft[Result[JsonLogicValue]]
                     } else {
-                      computeDoublePow(baseNum, expDouble)
+                      val powed = if (e >= 0) br.pow(e.toInt) else br.inverse.pow(-e.toInt)
+                      val jlv: JsonLogicValue =
+                        if (!baseNum.isFloat && e >= 0 && powed.isInteger) IntValue(powed.toBigInt)
+                        else FloatValue(powed)
+                      (jlv.pure[Result]: Result[JsonLogicValue]).asRight[JsonLogicException]
                     }
-                  }
+                }
               } yield result
             case _ => JsonLogicException(s"Unexpected input to ${PowOp.tag}, got $values").asLeft[Result[JsonLogicValue]]
           }
