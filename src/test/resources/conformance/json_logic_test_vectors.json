@@ -1,0 +1,238 @@
+{
+  "description": "JSON Logic VM test vectors for cross-language compatibility",
+  "version": "1.0.0",
+  "tests": [
+    {
+      "category": "constants",
+      "cases": [
+        { "expr": "null", "data": "{}", "expected": "null" },
+        { "expr": "true", "data": "{}", "expected": "true" },
+        { "expr": "false", "data": "{}", "expected": "false" },
+        { "expr": "42", "data": "{}", "expected": "42" },
+        { "expr": "3.14", "data": "{}", "expected": "3.14" },
+        { "expr": "\"hello\"", "data": "{}", "expected": "\"hello\"" },
+        { "expr": "[1, 2, 3]", "data": "{}", "expected": "[1, 2, 3]" },
+        { "expr": "{\"a\": 1, \"b\": 2}", "data": "{}", "expected": "{\"a\": 1, \"b\": 2}" }
+      ]
+    },
+    {
+      "category": "var",
+      "cases": [
+        { "expr": "{\"var\": \"x\"}", "data": "{\"x\": 42}", "expected": "42" },
+        { "expr": "{\"var\": \"a.b\"}", "data": "{\"a\": {\"b\": \"nested\"}}", "expected": "\"nested\"" },
+        { "expr": "{\"var\": \"\"}", "data": "{\"x\": 1}", "expected": "{\"x\": 1}" },
+        { "expr": "{\"var\": [\"missing\", \"default\"]}", "data": "{}", "expected": "\"default\"" },
+        { "expr": "{\"var\": 0}", "data": "[\"first\", \"second\"]", "expected": "\"first\"" },
+        { "expr": "{\"var\": \"a.b.c\"}", "data": "{\"a\": {\"b\": {\"c\": 123}}}", "expected": "123" },
+        { "expr": "{\"var\": \"missing\"}", "data": "{\"x\": 1}", "expected": "null" }
+      ]
+    },
+    {
+      "category": "arithmetic",
+      "cases": [
+        { "expr": "{\"+\": [1, 2]}", "data": "{}", "expected": "3" },
+        { "expr": "{\"+\": [1, 2, 3]}", "data": "{}", "expected": "6" },
+        { "expr": "{\"-\": [5, 3]}", "data": "{}", "expected": "2" },
+        { "expr": "{\"-\": [5]}", "data": "{}", "expected": "-5" },
+        { "expr": "{\"*\": [2, 3]}", "data": "{}", "expected": "6" },
+        { "expr": "{\"*\": [2, 3, 4]}", "data": "{}", "expected": "24" },
+        { "expr": "{\"/\": [10, 2]}", "data": "{}", "expected": "5" },
+        { "expr": "{\"/\": [7, 2]}", "data": "{}", "expected": "3.5" },
+        { "expr": "{\"%\": [10, 3]}", "data": "{}", "expected": "1" },
+        { "expr": "{\"max\": [1, 2, 3]}", "data": "{}", "expected": "3" },
+        { "expr": "{\"min\": [1, 2, 3]}", "data": "{}", "expected": "1" },
+        { "expr": "{\"abs\": [-5]}", "data": "{}", "expected": "5" },
+        { "expr": "{\"round\": [2.6]}", "data": "{}", "expected": "3" },
+        { "expr": "{\"floor\": [2.9]}", "data": "{}", "expected": "2" },
+        { "expr": "{\"ceil\": [2.1]}", "data": "{}", "expected": "3" },
+        { "expr": "{\"pow\": [2, 3]}", "data": "{}", "expected": "8" }
+      ]
+    },
+    {
+      "category": "comparison",
+      "cases": [
+        { "expr": "{\"==\": [1, 1]}", "data": "{}", "expected": "true" },
+        { "expr": "{\"==\": [1, \"1\"]}", "data": "{}", "expected": "true", "note": "loose equality with coercion" },
+        { "expr": "{\"==\": [1, 2]}", "data": "{}", "expected": "false" },
+        { "expr": "{\"===\": [1, 1]}", "data": "{}", "expected": "true" },
+        { "expr": "{\"===\": [1, \"1\"]}", "data": "{}", "expected": "false", "note": "strict equality - no coercion" },
+        { "expr": "{\"!=\": [1, 2]}", "data": "{}", "expected": "true" },
+        { "expr": "{\"!==\": [1, \"1\"]}", "data": "{}", "expected": "true" },
+        { "expr": "{\"<\": [1, 2]}", "data": "{}", "expected": "true" },
+        { "expr": "{\"<=\": [2, 2]}", "data": "{}", "expected": "true" },
+        { "expr": "{\">\": [3, 2]}", "data": "{}", "expected": "true" },
+        { "expr": "{\">=\": [2, 2]}", "data": "{}", "expected": "true" },
+        { "expr": "{\"<\": [1, 2, 3]}", "data": "{}", "expected": "true", "note": "chained comparison" },
+        { "expr": "{\"<\": [1, 3, 2]}", "data": "{}", "expected": "false", "note": "chained comparison fails" }
+      ]
+    },
+    {
+      "category": "strict_equality_int_vs_float",
+      "note": "Key metakit semantic: 1 !== 1.0 (IntValue vs FloatValue)",
+      "cases": [
+        { "expr": "{\"===\": [1, 1]}", "data": "{}", "expected": "true", "note": "int === int" },
+        { "expr": "{\"===\": [1.0, 1.0]}", "data": "{}", "expected": "true", "note": "float === float" },
+        { "expr": "{\"===\": [1, 1.5]}", "data": "{}", "expected": "false", "note": "int !== float (different values)" },
+        { "expr": "{\"==\": [1, 1.0]}", "data": "{}", "expected": "true", "note": "loose equality coerces" }
+      ]
+    },
+    {
+      "category": "logic",
+      "cases": [
+        { "expr": "{\"!\": [true]}", "data": "{}", "expected": "false" },
+        { "expr": "{\"!\": [false]}", "data": "{}", "expected": "true" },
+        { "expr": "{\"!\": [0]}", "data": "{}", "expected": "true", "note": "0 is falsy" },
+        { "expr": "{\"!\": [\"\"]}", "data": "{}", "expected": "true", "note": "empty string is falsy" },
+        { "expr": "{\"!!\": [1]}", "data": "{}", "expected": "true" },
+        { "expr": "{\"!!\": [0]}", "data": "{}", "expected": "false" },
+        { "expr": "{\"and\": [true, true]}", "data": "{}", "expected": "true" },
+        { "expr": "{\"and\": [true, false]}", "data": "{}", "expected": "false" },
+        { "expr": "{\"and\": [1, 2, 3]}", "data": "{}", "expected": "3", "note": "returns last truthy" },
+        { "expr": "{\"and\": [1, 0, 3]}", "data": "{}", "expected": "0", "note": "returns first falsy" },
+        { "expr": "{\"or\": [false, true]}", "data": "{}", "expected": "true" },
+        { "expr": "{\"or\": [false, false]}", "data": "{}", "expected": "false" },
+        { "expr": "{\"or\": [0, 1, 2]}", "data": "{}", "expected": "1", "note": "returns first truthy" }
+      ]
+    },
+    {
+      "category": "control_flow",
+      "cases": [
+        { "expr": "{\"if\": [true, \"yes\", \"no\"]}", "data": "{}", "expected": "\"yes\"" },
+        { "expr": "{\"if\": [false, \"yes\", \"no\"]}", "data": "{}", "expected": "\"no\"" },
+        { "expr": "{\"if\": [false, \"a\", true, \"b\", \"c\"]}", "data": "{}", "expected": "\"b\"", "note": "else-if chain" },
+        { "expr": "{\"if\": [false, \"a\", false, \"b\", \"c\"]}", "data": "{}", "expected": "\"c\"", "note": "falls through to else" },
+        { "expr": "{\"default\": [null, \"\", 0, \"fallback\"]}", "data": "{}", "expected": "\"fallback\"" },
+        { "expr": "{\"default\": [null, \"found\"]}", "data": "{}", "expected": "\"found\"" }
+      ]
+    },
+    {
+      "category": "string",
+      "cases": [
+        { "expr": "{\"cat\": [\"hello\", \" \", \"world\"]}", "data": "{}", "expected": "\"hello world\"" },
+        { "expr": "{\"substr\": [\"hello\", 0, 2]}", "data": "{}", "expected": "\"he\"" },
+        { "expr": "{\"substr\": [\"hello\", -2]}", "data": "{}", "expected": "\"lo\"", "note": "negative start" },
+        { "expr": "{\"lower\": [\"HELLO\"]}", "data": "{}", "expected": "\"hello\"" },
+        { "expr": "{\"upper\": [\"hello\"]}", "data": "{}", "expected": "\"HELLO\"" },
+        { "expr": "{\"trim\": [\"  hello  \"]}", "data": "{}", "expected": "\"hello\"" },
+        { "expr": "{\"split\": [\"a-b-c\", \"-\"]}", "data": "{}", "expected": "[\"a\", \"b\", \"c\"]" },
+        { "expr": "{\"startsWith\": [\"hello\", \"he\"]}", "data": "{}", "expected": "true" },
+        { "expr": "{\"endsWith\": [\"hello\", \"lo\"]}", "data": "{}", "expected": "true" }
+      ]
+    },
+    {
+      "category": "array",
+      "cases": [
+        { "expr": "{\"merge\": [[1, 2], [3, 4]]}", "data": "{}", "expected": "[1, 2, 3, 4]" },
+        { "expr": "{\"in\": [2, [1, 2, 3]]}", "data": "{}", "expected": "true" },
+        { "expr": "{\"in\": [\"world\", \"hello world\"]}", "data": "{}", "expected": "true", "note": "substring check" },
+        { "expr": "{\"slice\": [[1, 2, 3, 4], 1, 3]}", "data": "{}", "expected": "[2, 3]" },
+        { "expr": "{\"reverse\": [[1, 2, 3]]}", "data": "{}", "expected": "[3, 2, 1]" },
+        { "expr": "{\"unique\": [[1, 2, 2, 3, 3, 3]]}", "data": "{}", "expected": "[1, 2, 3]" },
+        { "expr": "{\"flatten\": [[[1, 2], [3, 4]]]}", "data": "{}", "expected": "[1, 2, 3, 4]" }
+      ]
+    },
+    {
+      "category": "array_iteration",
+      "cases": [
+        { 
+          "expr": "{\"map\": [{\"var\": \"items\"}, {\"*\": [{\"var\": \"\"}, 2]}]}", 
+          "data": "{\"items\": [1, 2, 3]}", 
+          "expected": "[2, 4, 6]",
+          "note": "var '' returns current item"
+        },
+        { 
+          "expr": "{\"filter\": [{\"var\": \"items\"}, {\">\": [{\"var\": \"\"}, 2]}]}", 
+          "data": "{\"items\": [1, 2, 3, 4]}", 
+          "expected": "[3, 4]"
+        },
+        { 
+          "expr": "{\"reduce\": [{\"var\": \"items\"}, {\"+\": [{\"var\": \"accumulator\"}, {\"var\": \"current\"}]}, 0]}", 
+          "data": "{\"items\": [1, 2, 3, 4]}", 
+          "expected": "10"
+        },
+        { 
+          "expr": "{\"all\": [{\"var\": \"items\"}, {\">\": [{\"var\": \"\"}, 0]}]}", 
+          "data": "{\"items\": [1, 2, 3]}", 
+          "expected": "true"
+        },
+        { 
+          "expr": "{\"some\": [{\"var\": \"items\"}, {\">\": [{\"var\": \"\"}, 2]}]}", 
+          "data": "{\"items\": [1, 2, 3]}", 
+          "expected": "true"
+        },
+        { 
+          "expr": "{\"none\": [{\"var\": \"items\"}, {\"<\": [{\"var\": \"\"}, 0]}]}", 
+          "data": "{\"items\": [1, 2, 3]}", 
+          "expected": "true"
+        },
+        { 
+          "expr": "{\"all\": [[], {\">\": [{\"var\": \"\"}, 0]}]}", 
+          "data": "{}", 
+          "expected": "false",
+          "note": "all on empty array returns false"
+        }
+      ]
+    },
+    {
+      "category": "object",
+      "cases": [
+        { "expr": "{\"keys\": [{\"var\": \"obj\"}]}", "data": "{\"obj\": {\"a\": 1, \"b\": 2}}", "expected": "[\"a\", \"b\"]" },
+        { "expr": "{\"values\": [{\"var\": \"obj\"}]}", "data": "{\"obj\": {\"a\": 1, \"b\": 2}}", "expected": "[1, 2]" },
+        { "expr": "{\"get\": [{\"var\": \"obj\"}, \"a\"]}", "data": "{\"obj\": {\"a\": 42}}", "expected": "42" },
+        { "expr": "{\"get\": [{\"var\": \"obj\"}, \"missing\", \"default\"]}", "data": "{\"obj\": {}}", "expected": "\"default\"" },
+        { "expr": "{\"has\": [{\"var\": \"obj\"}, \"a\"]}", "data": "{\"obj\": {\"a\": 1}}", "expected": "true" },
+        { "expr": "{\"has\": [{\"var\": \"obj\"}, \"missing\"]}", "data": "{\"obj\": {}}", "expected": "false" }
+      ]
+    },
+    {
+      "category": "typeof",
+      "cases": [
+        { "expr": "{\"typeof\": [42]}", "data": "{}", "expected": "\"int\"" },
+        { "expr": "{\"typeof\": [3.14]}", "data": "{}", "expected": "\"float\"" },
+        { "expr": "{\"typeof\": [\"hello\"]}", "data": "{}", "expected": "\"string\"" },
+        { "expr": "{\"typeof\": [true]}", "data": "{}", "expected": "\"bool\"" },
+        { "expr": "{\"typeof\": [null]}", "data": "{}", "expected": "\"null\"" },
+        { "expr": "{\"typeof\": [{\"var\": \"arr\"}]}", "data": "{\"arr\": [1, 2]}", "expected": "\"array\"" },
+        { "expr": "{\"typeof\": [{\"var\": \"obj\"}]}", "data": "{\"obj\": {\"a\": 1}}", "expected": "\"map\"" }
+      ]
+    },
+    {
+      "category": "let_bindings",
+      "cases": [
+        { 
+          "expr": "{\"let\": [{\"x\": 5}, {\"var\": \"x\"}]}", 
+          "data": "{}", 
+          "expected": "5"
+        },
+        { 
+          "expr": "{\"let\": [{\"x\": 5}, {\"+\": [{\"var\": \"x\"}, 1]}]}", 
+          "data": "{}", 
+          "expected": "6"
+        },
+        { 
+          "expr": "{\"let\": [{\"doubled\": {\"*\": [{\"var\": \"x\"}, 2]}}, {\"+\": [{\"var\": \"doubled\"}, 1]}]}", 
+          "data": "{\"x\": 5}", 
+          "expected": "11",
+          "note": "bindings can reference outer scope"
+        }
+      ]
+    },
+    {
+      "category": "complex",
+      "cases": [
+        {
+          "expr": "{\"if\": [{\">\": [{\"var\": \"score\"}, 90]}, \"A\", {\">\": [{\"var\": \"score\"}, 80]}, \"B\", {\">\": [{\"var\": \"score\"}, 70]}, \"C\", \"F\"]}",
+          "data": "{\"score\": 85}",
+          "expected": "\"B\"",
+          "note": "grade calculator"
+        },
+        {
+          "expr": "{\"map\": [{\"var\": \"users\"}, {\"cat\": [{\"var\": \"name\"}, \" (\", {\"var\": \"age\"}, \")\"]}]}",
+          "data": "{\"users\": [{\"name\": \"Alice\", \"age\": 30}, {\"name\": \"Bob\", \"age\": 25}]}",
+          "expected": "[\"Alice (30)\", \"Bob (25)\"]",
+          "note": "transform objects to strings"
+        }
+      ]
+    }
+  ]
+}
