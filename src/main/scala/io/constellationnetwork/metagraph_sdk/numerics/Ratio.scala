@@ -22,13 +22,14 @@ package io.constellationnetwork.metagraph_sdk.numerics
 
 import scala.annotation.tailrec
 
-/** Exact rational `numerator / denominator`, gcd-reduced with a strictly positive denominator at construction time.
-  *
-  * Used as the JSON Logic VM's numeric backbone so that the Scala, Rust, and WASM evaluators compute byte-identical results
-  * regardless of JVM/CPU/JIT — eliminating the IEEE-754 nondeterminism that Double/BigDecimal-with-MathContext would introduce.
-  * All arithmetic is exact; the only rounding happens at canonical serialization (RFC 8785 shortest-double), which is itself
-  * deterministic.
-  */
+/**
+ * Exact rational `numerator / denominator`, gcd-reduced with a strictly positive denominator at construction time.
+ *
+ * Used as the JSON Logic VM's numeric backbone so that the Scala, Rust, and WASM evaluators compute byte-identical results
+ * regardless of JVM/CPU/JIT — eliminating the IEEE-754 nondeterminism that Double/BigDecimal-with-MathContext would introduce.
+ * All arithmetic is exact; the only rounding happens at canonical serialization (RFC 8785 shortest-double), which is itself
+ * deterministic.
+ */
 case class Ratio(numerator: BigInt, denominator: BigInt, greatestCommonDenominator: BigInt) {
 
   override def toString(): String =
@@ -68,14 +69,15 @@ object Ratio {
   /** Exact conversion from a terminating decimal: BigDecimal `v` == unscaledValue * 10^(-scale). No precision loss. */
   def fromBigDecimal(v: BigDecimal): Ratio = {
     val unscaled = BigInt(v.bigDecimal.unscaledValue)
-    val scale    = v.bigDecimal.scale
+    val scale = v.bigDecimal.scale
     if (scale >= 0) apply(unscaled, BigInt(10).pow(scale))
     else apply(unscaled * BigInt(10).pow(-scale), BigInt(1))
   }
 
-  /** Convert a Double to Ratio with `prec` decimal digits of precision. Lossy; intended only for parsing Double-typed
-    * configuration at boot. After this point the value never touches Double again.
-    */
+  /**
+   * Convert a Double to Ratio with `prec` decimal digits of precision. Lossy; intended only for parsing Double-typed
+   * configuration at boot. After this point the value never touches Double again.
+   */
   def apply(double: Double, prec: Int): Ratio = {
     val d = BigInt(10).pow(prec)
     val n = (BigDecimal(double).setScale(prec, BigDecimal.RoundingMode.DOWN) * BigDecimal(d)).toBigInt

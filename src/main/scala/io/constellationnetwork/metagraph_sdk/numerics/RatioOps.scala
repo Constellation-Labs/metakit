@@ -98,8 +98,8 @@ object RatioOps {
 
       /** Round half away from zero — matches java.math BigDecimal RoundingMode.HALF_UP. */
       def roundHalfUp: BigInt = {
-        val n   = ratio.numerator.abs
-        val d   = ratio.denominator
+        val n = ratio.numerator.abs
+        val d = ratio.denominator
         val mag = (n * 2 + d) / (d * 2) // floor(|x| + 1/2), all positive => truncation == floor
         ratio.numerator.signum * mag
       }
