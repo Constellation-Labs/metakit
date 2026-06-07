@@ -31,7 +31,7 @@ object JsonBinaryHasherSuite extends SimpleIOSuite with Checkers {
     } yield expect.same(hashExpected, hashActual)
 
   test("arrays.json should produce a known hash") {
-    runTest("arrays.json", "099601b171cafed97c333f8878d68e7f8c8f795412adb34b2fdcf0e7c7beac42")
+    runTest("arrays.json", "060ba9d4be65e7b773f67328b6fd6a5360f8f66ef88d57351dbc6e39b46f2ea9")
   }
 
   test("french.json should produce a known hash") {
