@@ -18,14 +18,14 @@ import weaver.SimpleIOSuite
 
 /**
  * End-to-end over the single assembly path: `CommittedApp.makeL0` produces a
- * `BaseDataApplicationL0Service` whose calculated-state surface is the committed cell --
- * `hashCalculatedState` is the pure derivation, `setCalculatedState` commits (and asserts), and the
- * drop-in `/committed/...` routes serve atomically-consistent reads.
+ * `BaseDataApplicationL0Service` whose on-chain type carries the breadcrumb (emitted by `combine`,
+ * validated against the local commitment), whose `hashCalculatedState` commits the live catalog,
+ * and whose drop-in `/committed/...` routes serve atomically-consistent reads.
  */
 object CommittedAppSuite extends SimpleIOSuite {
   import ToyFixtures._
 
-  // The committed service never touches the node context; tests run without one.
+  // The committed service reads the node context defensively; tests run without one.
   implicit private val ctx: L0NodeContext[IO] = null
 
   private def ord(n: Long): SnapshotOrdinal = SnapshotOrdinal.unsafeApply(n)
@@ -64,11 +64,57 @@ object CommittedAppSuite extends SimpleIOSuite {
   private def get(service: BaseDataApplicationL0Service[IO], path: String): IO[Response[IO]] =
     service.routes.orNotFound.run(Request[IO](Method.GET, Uri.unsafeFromString(path)))
 
-  test("hashCalculatedState is the pure two-tier derivation") {
+  test("genesis on-chain state carries the genesis breadcrumb (correct by construction)") {
+    for {
+      service  <- makeService
+      expected <- CommittedState.make[IO, ToyState](s0).flatMap(_.committed)
+    } yield
+      service.genesis.onChain match {
+        case CommittedOnChain(ToyPub(0), breadcrumb) =>
+          expect.all(
+            breadcrumb.ordinal == SnapshotOrdinal.MinValue,
+            breadcrumb.roots.mptRoot == expected.roots.mptRoot,
+            breadcrumb.roots.catalogRoot == expected.roots.catalogRoot
+          )
+        case other => failure(s"genesis onChain is not a CommittedOnChain with the dev PUB inside: $other")
+      }
+  }
+
+  test("combine emits the next breadcrumb; the dev combiner sees only the inner PUB") {
+    for {
+      service <- makeService
+      out     <- service.combine(service.genesis, List.empty)
+      // committing the same transition produces the same breadcrumb
+      reference <- CommittedState.make[IO, ToyState](s0).flatMap(st => st.setCommitted(ord(1), s0))
+    } yield
+      out.onChain match {
+        case CommittedOnChain(ToyPub(0), breadcrumb) =>
+          expect.all(breadcrumb.ordinal == ord(1), breadcrumb.roots == reference.roots)
+        case other => failure(s"combine did not emit a CommittedOnChain: $other")
+      }
+  }
+
+  test("combine rejects a forged incoming breadcrumb (follower-side transition validation)") {
+    for {
+      service <- makeService
+      honest = service.genesis
+      forgedBreadcrumb = honest.onChain match {
+        case CommittedOnChain(inner, b: CommittedBreadcrumb) =>
+          CommittedOnChain(
+            inner.asInstanceOf[ToyPub],
+            b.copy(roots = b.roots.copy(mptRoot = io.constellationnetwork.security.hash.Hash.empty))
+          )
+        case other => throw new RuntimeException(s"unexpected onChain: $other")
+      }
+      result <- service.combine(honest.copy(onChain = forgedBreadcrumb), List.empty).attempt
+    } yield expect(result.left.exists(_.isInstanceOf[CommittedStateError.BreadcrumbMismatch]))
+  }
+
+  test("hashCalculatedState commits the live catalog: the transition hash, not a pure-value hash") {
     for {
       service  <- makeService
       h        <- service.hashCalculatedState(ToyPrv(s1))
-      expected <- CommittedCommitment.deriveHash[IO, ToyPrv](ToyPrv(s1))
+      expected <- CommittedState.make[IO, ToyState](s0).flatMap(_.hashFor(s1, None))
     } yield expect(h == expected)
   }
 
@@ -82,16 +128,17 @@ object CommittedAppSuite extends SimpleIOSuite {
 
   test("GET /committed/root reflects the committed ordinal, roots, and consensus hash") {
     for {
-      service      <- makeService
-      _            <- service.setCalculatedState(ord(1), ToyPrv(s1))
-      res          <- get(service, "/committed/root")
-      json         <- res.as[Json]
-      expectedHash <- CommittedCommitment.deriveHash[IO, ToyPrv](ToyPrv(s1))
+      service   <- makeService
+      _         <- service.setCalculatedState(ord(1), ToyPrv(s1))
+      res       <- get(service, "/committed/root")
+      json      <- res.as[Json]
+      reference <- CommittedState.make[IO, ToyState](s0).flatMap(st => st.setCommitted(ord(1), s1))
     } yield
       expect.all(
         res.status == Status.Ok,
         json.hcursor.downField("ordinal").as[SnapshotOrdinal] == Right(ord(1)),
-        json.hcursor.downField("calculatedStateHash").as[String] == Right(expectedHash.value)
+        json.hcursor.downField("calculatedStateHash").as[String] == Right(reference.roots.combinedHash.value),
+        json.hcursor.downField("hydrated").as[Boolean] == Right(true)
       )
   }
 
@@ -139,6 +186,25 @@ object CommittedAppSuite extends SimpleIOSuite {
       )
   }
 
+  test("GET /committed/proof-ordinal/:ordinal serves a verifiable catalog attestation") {
+    for {
+      service <- makeService
+      _       <- service.setCalculatedState(ord(1), ToyPrv(s1))
+      res     <- get(service, "/committed/proof-ordinal/0")
+      json    <- res.as[Json]
+      proof   <- IO.fromEither(json.hcursor.downField("proof").as[OrdinalCatalogProof])
+      root    <- IO.fromEither(json.hcursor.downField("catalogRoot").as[io.constellationnetwork.metagraph_sdk.crypto.smt.SparseMerkleRoot])
+      attestation <- OrdinalCatalogProofVerifier
+        .verify[IO](root, proof, CommittedConfig.DefaultEpochSize)
+        .flatMap(IO.fromEither(_))
+      genesisRoots <- CommittedState.make[IO, ToyState](s0).flatMap(_.committed)
+    } yield
+      expect.all(
+        res.status == Status.Ok,
+        attestation == OrdinalAttestation.CommittedAt(0L, genesisRoots.roots.mptRoot)
+      )
+  }
+
   test("GET /committed/delta/:ordinal serves retained deltas and 404s evicted ones") {
     for {
       service <- makeService
@@ -149,13 +215,29 @@ object CommittedAppSuite extends SimpleIOSuite {
     } yield expect.all(hit.status == Status.Ok, delta.ordinal == ord(1), miss.status == Status.NotFound)
   }
 
-  test("GET /committed/snapshot is a valid replication seed") {
+  test("GET /committed/snapshot is a valid replication seed; GET /committed/catalog matches it") {
     for {
       service  <- makeService
       _        <- service.setCalculatedState(ord(1), ToyPrv(s1))
       res      <- get(service, "/committed/snapshot")
       snapshot <- res.as[CommittedSnapshot]
+      catRes   <- get(service, "/committed/catalog")
+      contents <- catRes.as[CatalogContents]
       replica  <- CommittedReplica.fromSnapshot[IO](snapshot).flatMap(IO.fromEither(_))
-    } yield expect.all(res.status == Status.Ok, replica.ordinal == ord(1), replica.roots == snapshot.roots)
+    } yield
+      expect.all(
+        res.status == Status.Ok,
+        replica.ordinal == ord(1),
+        replica.roots == snapshot.roots,
+        contents == snapshot.catalog
+      )
+  }
+
+  test("CommittedOnChain round-trips through the service's on-chain codec") {
+    for {
+      service <- makeService
+      bytes   <- service.serializeState(service.genesis.onChain)
+      decoded <- service.deserializeState(bytes)
+    } yield expect(decoded == Right(service.genesis.onChain))
   }
 }

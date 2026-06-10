@@ -16,7 +16,7 @@ import weaver.SimpleIOSuite
 /**
  * Proof-surface tests: single-key / batch / namespace-prefix proofs against the committed MPT root
  * (verified with the existing verifiers AND through the JLVM's `mpt_prefix_verify` hex formats),
- * plus SMT catalog membership (current + historical) and first-class NON-membership.
+ * plus the TOP catalog name proofs and the ordinal attestations of the epoch rollup.
  */
 object CommittedProofSuite extends SimpleIOSuite {
   import ToyFixtures._
@@ -81,29 +81,22 @@ object CommittedProofSuite extends SimpleIOSuite {
     } yield expect.all(complete == Right(BoolValue(true)), incomplete == Right(BoolValue(false)))
   }
 
-  test("SMT catalog: current + historical membership, and NON-membership of an absent ordinal") {
+  test("TOP catalog: current:mpt binds the state-dict root; an unknown family is provably absent") {
     for {
       st <- CommittedState.make[IO, ToyState](s0)
-      c1 <- st.setCommitted(ord(1), s1)
+      _  <- st.setCommitted(ord(1), s1)
       c2 <- st.setCommitted(ord(2), s2)
       verifier = SparseMerkleVerifier.make[IO]
 
       currentProof <- c2.proveCatalog(CommitCatalog.CurrentMptName).flatMap(IO.fromEither(_))
-      current      <- verifier.verify(c2.roots.smtRoot, currentProof).flatMap(IO.fromEither(_))
+      current      <- verifier.verify(c2.roots.catalogRoot, currentProof).flatMap(IO.fromEither(_))
 
-      historicalProof <- c2.proveCatalog(CommitCatalog.ordinalName(ord(1))).flatMap(IO.fromEither(_))
-      historical      <- verifier.verify(c2.roots.smtRoot, historicalProof).flatMap(IO.fromEither(_))
-
-      absentProof <- c2.proveCatalog(CommitCatalog.ordinalName(ord(999999))).flatMap(IO.fromEither(_))
-      absent      <- verifier.verify(c2.roots.smtRoot, absentProof).flatMap(IO.fromEither(_))
+      absentProof <- c2.proveCatalog("shadow:poseidon").flatMap(IO.fromEither(_))
+      absent      <- verifier.verify(c2.roots.catalogRoot, absentProof).flatMap(IO.fromEither(_))
     } yield
       expect.all(
         current.value match {
           case SparseMerkleEntry.Present(_, value) => value.sameElements(CommitCatalog.rootValueBytes(c2.roots.mptRoot))
-          case _                                   => false
-        },
-        historical.value match {
-          case SparseMerkleEntry.Present(_, value) => value.sameElements(CommitCatalog.rootValueBytes(c1.roots.mptRoot))
           case _                                   => false
         },
         absentProof.isInstanceOf[SparseMerkleProof.Absence],
@@ -112,5 +105,41 @@ object CommittedProofSuite extends SimpleIOSuite {
           case _                           => false
         }
       )
+  }
+
+  test("ordinal attestations: historical membership at every ordinal, and NON-membership of an absent one") {
+    for {
+      st           <- CommittedState.make[IO, ToyState](s0)
+      c1           <- st.setCommitted(ord(1), s1)
+      c2           <- st.setCommitted(ord(2), s2)
+      genesisRoots <- CommittedState.make[IO, ToyState](s0).flatMap(_.committed).map(_.roots)
+
+      p0 <- c2.proveOrdinal(ord(0)).flatMap(IO.fromEither(_))
+      a0 <- OrdinalCatalogProofVerifier.verify[IO](c2.roots.catalogRoot, p0, CommittedConfig.DefaultEpochSize).flatMap(IO.fromEither(_))
+
+      p1 <- c2.proveOrdinal(ord(1)).flatMap(IO.fromEither(_))
+      a1 <- OrdinalCatalogProofVerifier.verify[IO](c2.roots.catalogRoot, p1, CommittedConfig.DefaultEpochSize).flatMap(IO.fromEither(_))
+
+      pAbsent <- c2.proveOrdinal(ord(999999)).flatMap(IO.fromEither(_))
+      aAbsent <- OrdinalCatalogProofVerifier
+        .verify[IO](c2.roots.catalogRoot, pAbsent, CommittedConfig.DefaultEpochSize)
+        .flatMap(IO.fromEither(_))
+    } yield
+      expect.all(
+        a0 == OrdinalAttestation.CommittedAt(0L, genesisRoots.mptRoot),
+        a1 == OrdinalAttestation.CommittedAt(1L, c1.roots.mptRoot),
+        aAbsent == OrdinalAttestation.NotCommitted(999999L)
+      )
+  }
+
+  test("ordinal proof JSON round-trips (route payload format)") {
+    for {
+      st    <- CommittedState.make[IO, ToyState](s0)
+      _     <- st.setCommitted(ord(1), s1)
+      c     <- st.committed
+      proof <- c.proveOrdinal(ord(0)).flatMap(IO.fromEither(_))
+      decoded = proof.asJson.as[OrdinalCatalogProof]
+      // SparseMerkleProof.Inclusion carries Array[Byte] (reference equality); compare re-encoded JSON
+    } yield expect(decoded.map(_.asJson) == Right(proof.asJson))
   }
 }

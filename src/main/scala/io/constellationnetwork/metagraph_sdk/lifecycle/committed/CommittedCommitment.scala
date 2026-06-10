@@ -1,36 +1,37 @@
 package io.constellationnetwork.metagraph_sdk.lifecycle.committed
 
 import cats.MonadThrow
-import cats.effect.Sync
 import cats.syntax.all._
 
 import scala.collection.immutable.SortedMap
 
 import io.constellationnetwork.metagraph_sdk.crypto.mpt.impl.StatelessMerklePatriciaProducer
 import io.constellationnetwork.metagraph_sdk.crypto.mpt.{MerklePatriciaNode, MerklePatriciaTrie}
-import io.constellationnetwork.metagraph_sdk.crypto.smt.SparseMerkleRoot
-import io.constellationnetwork.metagraph_sdk.crypto.smt.impl.InMemorySparseMerkleTree
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher
-import io.constellationnetwork.security.hash.Hash
 
 import io.circe.Json
 
 /**
- * Pure derivations for the two-tier commitment -- everything here is a function of the entry set
- * (or of an existing trie plus a delta), with NO dependence on node-local history.
+ * Pure derivations for tier 1 of the commitment -- the state-dict MPT is a function of the entry
+ * set (or of an existing trie plus a delta) alone.
  *
  * ==The `hashCalculatedState` decision==
- * `hashCalculatedState(state)` must be a PURE function of the state VALUE: tessellation calls it on
- * freshly deserialized state during snapshot download, where the node has no local history yet, and
- * every node must agree on the hash. The live SMT catalog, however, accumulates HISTORICAL
- * `ordinal:<N>` entries, so its root is a function of history, not of the value.
+ * `hashCalculatedState = sha256(mptRoot || liveCatalogRoot)` where the live catalog commits the
+ * FULL root history (epoch rollup, [[EpochCatalog]]). The catalog root is NOT derivable from the
+ * state value -- it is history -- so the hash implementation sources it from one of two places,
+ * matching tessellation's two call orderings:
  *
- * Resolution: [[deriveHash]] = `CommittedRoots.combine(mptRoot, canonicalCatalogRoot)` where the
- * CANONICAL catalog contains exactly one entry, `sha256("current:mpt") -> mptRoot`. That is pure in
- * the value, still binds tier 2's key scheme and hashing discipline into the consensus hash, and
- * loses nothing: each historical `ordinal:<N>` root was the `current:mpt` root at ordinal N and is
- * therefore anchored by snapshot N's own calculated-state proof. The LIVE catalog (with history) is
- * a node-local, verifiable index exposed via `/committed/root` and SMT proofs.
+ *   - STEADY STATE (consensus accept/consume: the snapshot being hashed is NOT yet in the local
+ *     snapshot storage, and the committed cell sits at its parent): derive the TRANSITION from the
+ *     cell -- `catalogRoot_N = compose(advance(catalog_{N-1}, ordinal:<N-1> -> mptRoot_{N-1}),
+ *     current:mpt -> mptRoot(state))`.
+ *   - BOOTSTRAP/DOWNLOAD (the snapshot IS already stored -- tessellation prepends it before
+ *     fetching calculated state -- and the cell is behind): read the CONSTANT on-chain BREADCRUMB
+ *     from that signed snapshot and use its attested `catalogRoot` directly. O(1), no replay: the
+ *     Ethereum-header trust model.
+ *
+ * See `CommittedApp` for the wiring and `docs/committed-namespaces.md` for the full soundness
+ * argument over tessellation's call orderings.
  */
 object CommittedCommitment {
 
@@ -70,21 +71,4 @@ object CommittedCommitment {
         else producer.insert(afterRemoves, upserts).rethrow
     } yield result
   }
-
-  /** Root of the CANONICAL (single-entry) catalog: `{ sha256("current:mpt") -> mptRoot }`. */
-  def canonicalCatalogRoot[F[_]: Sync: JsonBinaryHasher](mptRoot: Hash): F[SparseMerkleRoot] =
-    InMemorySparseMerkleTree
-      .make[F](Map(CommitCatalog.currentMptKey -> CommitCatalog.rootValueBytes(mptRoot)))
-      .flatMap(_.root)
-
-  /** The canonical commitment pair, derived purely from the state value. */
-  def deriveRoots[F[_]: Sync: JsonBinaryHasher, S: CommittedView](state: S): F[CommittedRoots] =
-    for {
-      trie    <- buildTrie[F](CommittedView[S].entries(state))
-      smtRoot <- canonicalCatalogRoot[F](trie.rootNode.digest)
-    } yield CommittedRoots(trie.rootNode.digest, smtRoot)
-
-  /** The consensus-facing calculated-state hash: `combine(mptRoot, canonicalCatalogRoot)`. Pure in the value. */
-  def deriveHash[F[_]: Sync: JsonBinaryHasher, S: CommittedView](state: S): F[Hash] =
-    deriveRoots[F, S](state).map(_.combinedHash)
 }
