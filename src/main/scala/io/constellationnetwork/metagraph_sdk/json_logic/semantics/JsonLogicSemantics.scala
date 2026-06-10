@@ -16,6 +16,14 @@ import io.constellationnetwork.metagraph_sdk.numerics.RatioOps.implicits._
 trait JsonLogicSemantics[F[_], Result[_]] {
   def getVar(key: String, ctx: Option[JsonLogicValue] = None): F[Either[JsonLogicException, Result[JsonLogicValue]]]
   def applyOp(op: JsonLogicOp): List[Result[JsonLogicValue]] => F[Either[JsonLogicException, Result[JsonLogicValue]]]
+
+  /**
+   * Flat per-node charge for ops the runtime dispatches LAZILY (`if` / `let`) without ever
+   * reaching [[applyOp]]. The runtime invokes this once at the dispatch site, BEFORE the
+   * node's children are evaluated. `None` (the default) means the semantics meters nothing;
+   * gas-aware semantics return the base-cost consumption against the shared gas ref.
+   */
+  def chargeBase(op: JsonLogicOp): Option[F[Either[JsonLogicException, Unit]]] = None
 }
 
 object JsonLogicSemantics {

@@ -93,6 +93,20 @@ object JsonLogicRuntime {
     ctx: Option[JsonLogicValue]
   )(implicit sem: JsonLogicSemantics[F, Result]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
 
+    // Same lazy-dispatch base charge as the tail-recursive runtime: if/let never reach
+    // sem.applyOp, so their flat base cost (no depth penalty) is charged once per node here.
+    def chargeBaseThen(op: JsonLogicOp)(
+      proceed: => F[Either[JsonLogicException, Result[JsonLogicValue]]]
+    ): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
+      sem.chargeBase(op) match {
+        case None => proceed
+        case Some(charge) =>
+          charge.flatMap {
+            case Right(()) => proceed
+            case Left(err) => err.asLeft[Result[JsonLogicValue]].pure[F]
+          }
+      }
+
     def evaluateExpression(
       expr: JsonLogicExpression,
       currentCtx: Option[JsonLogicValue]
@@ -162,14 +176,14 @@ object JsonLogicRuntime {
                 .pure[F]
           }
 
-        evaluateIfElse(args)
+        chargeBaseThen(JsonLogicOp.IfElseOp)(evaluateIfElse(args))
 
       case ApplyExpression(JsonLogicOp.LetOp, args) =>
         // Both surface forms (array of [name, expr] pairs and the object form
         // {name: expr, ...}) desugar to the same ordered binding list. Bindings are
         // evaluated sequentially, each in the context of previous bindings, and the
         // result expression sees all bindings in scope (mirrors Rust `eval_let`).
-        JsonLogicRuntime.normalizeLetArgs(args) match {
+        chargeBaseThen(JsonLogicOp.LetOp)(JsonLogicRuntime.normalizeLetArgs(args) match {
           case Right((bindings, resultExpr)) =>
             def processBindings(
               remaining: List[(String, JsonLogicExpression)],
@@ -204,7 +218,7 @@ object JsonLogicRuntime {
 
           case Left(error) =>
             error.asLeft[Result[JsonLogicValue]].pure[F]
-        }
+        })
 
       case ApplyExpression(op, args) =>
         args.zipWithIndex.traverse {
@@ -282,6 +296,22 @@ object JsonLogicRuntime {
     type Stack = List[Frame]
     val initStack: Stack = List(Eval(program, None))
 
+    // `if` / `let` are dispatched lazily below and never reach sem.applyOp, so their flat
+    // base cost is charged here, once per node, BEFORE any child is evaluated (no depth
+    // penalty: depth is undefined at the lazy dispatch site — see GasAwareSemantics).
+    // Untaken branches still cost nothing. No-op for non-metering semantics.
+    def chargeBaseThen(op: JsonLogicOp)(
+      proceed: => F[Either[Stack, Either[JsonLogicException, Result[JsonLogicValue]]]]
+    ): F[Either[Stack, Either[JsonLogicException, Result[JsonLogicValue]]]] =
+      sem.chargeBase(op) match {
+        case None => proceed
+        case Some(charge) =>
+          charge.flatMap {
+            case Right(()) => proceed
+            case Left(err) => err.asLeft[Result[JsonLogicValue]].asRight[Stack].pure[F]
+          }
+      }
+
     Monad[F].tailRecM[Stack, Either[JsonLogicException, Result[JsonLogicValue]]](initStack) {
       case Nil =>
         JsonLogicException("Empty stack: no final result!")
@@ -349,39 +379,43 @@ object JsonLogicRuntime {
       //   - object form: {"let": [{name: expr, ...},   resultExpr]}
       // Each binding is evaluated sequentially with prior bindings already in scope.
       case Eval(ApplyExpression(JsonLogicOp.LetOp, args), contOpt) :: tail =>
-        JsonLogicRuntime.normalizeLetArgs(args) match {
-          case Right((bindings, resultExpr)) =>
-            bindings match {
-              case Nil =>
-                // No bindings, just evaluate result.
-                (Eval(resultExpr, contOpt) :: tail).asLeft[Either[JsonLogicException, Result[JsonLogicValue]]].pure[F]
-              case (name, valueExpr) :: rest =>
-                val restPairs = rest.map { case (n, e) => ArrayExpression(ConstExpression(StrValue(n)) :: e :: Nil) }
-                val letCont = LetContinuation(name, restPairs, resultExpr, Map.empty, contOpt, ctx)
-                (EvalLet(valueExpr, letCont) :: tail).asLeft[Either[JsonLogicException, Result[JsonLogicValue]]].pure[F]
-            }
-          case Left(err) =>
-            err.asLeft[Result[JsonLogicValue]].asRight[Stack].pure[F]
+        chargeBaseThen(JsonLogicOp.LetOp) {
+          JsonLogicRuntime.normalizeLetArgs(args) match {
+            case Right((bindings, resultExpr)) =>
+              bindings match {
+                case Nil =>
+                  // No bindings, just evaluate result.
+                  (Eval(resultExpr, contOpt) :: tail).asLeft[Either[JsonLogicException, Result[JsonLogicValue]]].pure[F]
+                case (name, valueExpr) :: rest =>
+                  val restPairs = rest.map { case (n, e) => ArrayExpression(ConstExpression(StrValue(n)) :: e :: Nil) }
+                  val letCont = LetContinuation(name, restPairs, resultExpr, Map.empty, contOpt, ctx)
+                  (EvalLet(valueExpr, letCont) :: tail).asLeft[Either[JsonLogicException, Result[JsonLogicValue]]].pure[F]
+              }
+            case Left(err) =>
+              err.asLeft[Result[JsonLogicValue]].asRight[Stack].pure[F]
+          }
         }
 
       // Handle IfElseOp with lazy evaluation of branches
       case Eval(ApplyExpression(JsonLogicOp.IfElseOp, args), contOpt) :: tail =>
-        if (args.length < 2) {
-          JsonLogicException(s"Invalid arguments for if/else operation: expected at least 2 args, got ${args.length}")
-            .asLeft[Result[JsonLogicValue]]
-            .asRight[Stack]
-            .pure[F]
-        } else {
-          val newCont = Continuation(
-            JsonLogicOp.IfElseOp,
-            Nil,
-            args.tail,
-            contOpt,
-            isArray = false,
-            mapKeys = List.empty,
-            isIfElse = true
-          )
-          (Eval(args.head, Some(newCont)) :: tail).asLeft[Either[JsonLogicException, Result[JsonLogicValue]]].pure[F]
+        chargeBaseThen(JsonLogicOp.IfElseOp) {
+          if (args.length < 2) {
+            JsonLogicException(s"Invalid arguments for if/else operation: expected at least 2 args, got ${args.length}")
+              .asLeft[Result[JsonLogicValue]]
+              .asRight[Stack]
+              .pure[F]
+          } else {
+            val newCont = Continuation(
+              JsonLogicOp.IfElseOp,
+              Nil,
+              args.tail,
+              contOpt,
+              isArray = false,
+              mapKeys = List.empty,
+              isIfElse = true
+            )
+            (Eval(args.head, Some(newCont)) :: tail).asLeft[Either[JsonLogicException, Result[JsonLogicValue]]].pure[F]
+          }
         }
 
       case Eval(ApplyExpression(op, args), contOpt) :: tail =>
