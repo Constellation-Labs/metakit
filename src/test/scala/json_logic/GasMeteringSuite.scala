@@ -1,10 +1,11 @@
 package json_logic
 
-import cats.effect.IO
+import cats.effect.{IO, Ref, Sync}
 
 import io.constellationnetwork.metagraph_sdk.json_logic.core._
 import io.constellationnetwork.metagraph_sdk.json_logic.gas._
-import io.constellationnetwork.metagraph_sdk.json_logic.runtime.JsonLogicEvaluator
+import io.constellationnetwork.metagraph_sdk.json_logic.runtime.{JsonLogicEvaluator, JsonLogicRuntime, ResultContext}
+import io.constellationnetwork.metagraph_sdk.json_logic.semantics.GasAwareSemantics
 
 import org.scalacheck.Gen
 import weaver.SimpleIOSuite
@@ -869,6 +870,117 @@ object GasMeteringSuite extends SimpleIOSuite with Checkers {
       expect(
         three.gasUsed.amount - two.gasUsed.amount == GasConfig.Default.blsAggregatePerKey.amount,
         s"3-key (${three.gasUsed.amount}) should exceed 2-key (${two.gasUsed.amount}) by exactly one per-key charge"
+      )
+  }
+
+  // ===========================================================================
+  // Charge-once / pre-charge mechanics (see GasAwareSemantics).
+  // ===========================================================================
+
+  test("nested arithmetic charges each op exactly once: sum of per-op costs + depth penalties, no compounding") {
+    val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+    // {"+":[{"+":[{"+":[1,2]},3]},4]}
+    val expr = ApplyExpression(
+      JsonLogicOp.AddOp,
+      List(
+        ApplyExpression(
+          JsonLogicOp.AddOp,
+          List(
+            ApplyExpression(JsonLogicOp.AddOp, List(ConstExpression(IntValue(1)), ConstExpression(IntValue(2)))),
+            ConstExpression(IntValue(3))
+          )
+        ),
+        ConstExpression(IntValue(4))
+      )
+    )
+    val config = GasConfig.Default
+    // Each `+` charges exactly once: add base + depthPenalty(opDepth) + sizeCost(#args - 1).
+    // An ancestor must NOT re-consume its already-paid subtree (the old double-charge bug).
+    def opCharge(depth: Long): Long =
+      config.add.amount + config.depthPenalty(depth).amount + config.sizeCost(1L).amount
+    val expected = opCharge(1) + opCharge(2) + opCharge(3) // (5+5+1) + (5+10+1) + (5+15+1) = 48
+
+    evaluator
+      .evaluateWithGas(expr, MapValue.empty, None, GasLimit.Default, config)
+      .flatMap(IO.fromEither)
+      .map { result =>
+        expect.all(
+          result.value == IntValue(10),
+          result.gasUsed.amount == expected
+        )
+      }
+  }
+
+  test("bn254_pairing pre-charges the per-pair cost: OOG is raised before the pairing runs") {
+    val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+    // Two MALFORMED pairs: if the pairing primitive ever ran, it would reject the
+    // points with a non-gas JsonLogicException (see sanity run below). Observing
+    // GasExhaustedException at the tiny limit therefore proves the per-pair charge
+    // is consumed BEFORE the primitive is invoked.
+    val malformedPair = ArrayValue(List(StrValue("0xdead"), StrValue("0xbeef")))
+    val expr = ApplyExpression(
+      JsonLogicOp.Bn254PairingOp,
+      List(ConstExpression(ArrayValue(List(malformedPair, malformedPair))))
+    )
+    val config = GasConfig.Default
+    // Covers base + depth penalty + ONE per-pair charge, but not the second pair.
+    val tinyLimit = GasLimit(
+      config.bn254Pairing.amount + config.depthPenalty(1).amount + config.bn254PairingPerPair.amount
+    )
+
+    for {
+      overBudget <- evaluator.evaluateWithGas(expr, MapValue.empty, None, tinyLimit, config)
+      sanity     <- evaluator.evaluateWithGas(expr, MapValue.empty, None, GasLimit.Unlimited, config)
+    } yield {
+      val oogBeforePairing = overBudget match {
+        case Left(_: GasExhaustedException) => success
+        case other                          => failure(s"Expected GasExhaustedException before the pairing ran, got: $other")
+      }
+      val primitiveWouldReject = sanity match {
+        case Left(_: GasExhaustedException) => failure("Sanity run must not exhaust gas")
+        case Left(_)                        => success // pairing ran and rejected the malformed points
+        case Right(v)                       => failure(s"Malformed pairs must not verify, got: $v")
+      }
+      oogBeforePairing && primitiveWouldReject
+    }
+  }
+
+  test("reported gasUsed equals the gas-ref delta (gas limit minus remaining)") {
+    val expr = ApplyExpression(
+      JsonLogicOp.AddOp,
+      List(
+        ApplyExpression(JsonLogicOp.TimesOp, List(ConstExpression(IntValue(2)), ConstExpression(IntValue(3)))),
+        VarExpression(Left("x"))
+      )
+    )
+    val data = MapValue(Map("x" -> IntValue(4)))
+    val limit = GasLimit(10_000)
+    val config = GasConfig.Default
+
+    // Drive the gas-aware semantics over an externally owned ref (the same wiring
+    // JsonLogicEvaluator.evaluateWithGas uses) to observe actual consumption.
+    def evalWithRef(ref: Ref[IO, GasLimit])(
+      e: JsonLogicExpression,
+      c: Option[JsonLogicValue],
+      d: Int
+    ): IO[Either[JsonLogicException, ResultContext.WithGas[JsonLogicValue]]] = {
+      val sem = GasAwareSemantics.makeWithRef[IO](data, ref, config, (e2, c2, d2) => evalWithRef(ref)(e2, c2, d2), d)
+      JsonLogicRuntime.evaluate(e, c)(Sync[IO], ResultContext.gasContext, sem)
+    }
+
+    for {
+      ref       <- Ref.of[IO, GasLimit](limit)
+      _         <- evalWithRef(ref)(expr, None, 0).flatMap(IO.fromEither)
+      remaining <- ref.get
+      reported <- JsonLogicEvaluator
+        .tailRecursive[IO]
+        .evaluateWithGas(expr, data, None, limit, config)
+        .flatMap(IO.fromEither)
+    } yield
+      expect.all(
+        reported.value == IntValue(10),
+        reported.gasUsed.amount > 0,
+        reported.gasUsed.amount == limit.amount - remaining.amount
       )
   }
 }

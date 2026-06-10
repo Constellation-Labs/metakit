@@ -92,10 +92,15 @@ object JsonLogicEvaluator {
             })
         }
 
-        evaluateGasAware(expr, ctx, 0, data).map {
-          case Left(err) => err.asLeft[EvaluationResult[JsonLogicValue]]
+        evaluateGasAware(expr, ctx, 0, data).flatMap {
+          case Left(err)               => err.asLeft[EvaluationResult[JsonLogicValue]].pure[F]
           case Right((value, metrics)) =>
-            EvaluationResult(value, GasUsed(metrics.cost.amount), metrics.depth, metrics.opCount.toLong).asRight[JsonLogicException]
+            // Report gasUsed as the gas-ref delta: the gas that was ACTUALLY consumed
+            // (each op charged exactly once at evaluation time, see GasAwareSemantics).
+            gasLimitRef.get.map { remaining =>
+              EvaluationResult(value, GasUsed(gasLimit.amount - remaining.amount), metrics.depth, metrics.opCount.toLong)
+                .asRight[JsonLogicException]
+            }
         }
       }
 
