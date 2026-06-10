@@ -8,6 +8,7 @@ import cats.effect.IO
 import io.constellationnetwork.metagraph_sdk.json_logic.core.JsonLogicValue.showJsonLogicValue
 import io.constellationnetwork.metagraph_sdk.json_logic.core._
 import io.constellationnetwork.metagraph_sdk.json_logic.runtime.JsonLogicEvaluator
+import io.constellationnetwork.metagraph_sdk.numerics.Ratio
 
 import io.circe.{Decoder, parser}
 import weaver.SimpleIOSuite
@@ -44,20 +45,20 @@ object SharedVectorConformanceSuite extends SimpleIOSuite {
   final case class Category(category: String, note: Option[String], cases: List[VecCase])
   final case class VecCase(expr: String, data: String, expected: String, note: Option[String])
 
-  private implicit val caseDecoder: Decoder[VecCase] = Decoder.forProduct4(
+  implicit private val caseDecoder: Decoder[VecCase] = Decoder.forProduct4(
     "expr",
     "data",
     "expected",
     "note"
   )(VecCase.apply)
 
-  private implicit val categoryDecoder: Decoder[Category] = Decoder.forProduct3(
+  implicit private val categoryDecoder: Decoder[Category] = Decoder.forProduct3(
     "category",
     "note",
     "cases"
   )(Category.apply)
 
-  private implicit val vectorsDecoder: Decoder[Vectors] = Decoder.forProduct3(
+  implicit private val vectorsDecoder: Decoder[Vectors] = Decoder.forProduct3(
     "description",
     "version",
     "tests"
@@ -84,8 +85,8 @@ object SharedVectorConformanceSuite extends SimpleIOSuite {
       case (StrValue(x), StrValue(y))     => x == y
       case (IntValue(x), IntValue(y))     => x == y
       case (FloatValue(x), FloatValue(y)) => x == y
-      case (IntValue(x), FloatValue(y))   => BigDecimal(x) == y
-      case (FloatValue(x), IntValue(y))   => x == BigDecimal(y)
+      case (IntValue(x), FloatValue(y))   => Ratio(x) == y
+      case (FloatValue(x), IntValue(y))   => x == Ratio(y)
       case (ArrayValue(xs), ArrayValue(ys)) =>
         xs.length == ys.length && xs.zip(ys).forall { case (p, q) => structEq(p, q) }
       case (MapValue(xs), MapValue(ys)) =>
@@ -118,19 +119,19 @@ object SharedVectorConformanceSuite extends SimpleIOSuite {
    *     as used by the conformance vectors").
    */
   private val KnownDivergences: Set[(String, String)] = Set(
-    "object" -> """{"get": [{"var": "obj"}, "missing", "default"]}""",
+    "object"       -> """{"get": [{"var": "obj"}, "missing", "default"]}""",
     "let_bindings" -> """{"let": [{"x": 5}, {"var": "x"}]}""",
     "let_bindings" -> """{"let": [{"x": 5}, {"+": [{"var": "x"}, 1]}]}""",
     "let_bindings" -> """{"let": [{"doubled": {"*": [{"var": "x"}, 2]}}, {"+": [{"var": "doubled"}, 1]}]}"""
   )
 
-  private final case class CaseOutcome(
-    category:     String,
-    expr:         String,
-    label:        String,
-    structPass:   Boolean,
-    textPass:     Boolean,
-    detail:       String
+  final private case class CaseOutcome(
+    category: String,
+    expr: String,
+    label: String,
+    structPass: Boolean,
+    textPass: Boolean,
+    detail: String
   ) {
     def isKnownDivergence: Boolean = KnownDivergences.contains((category, expr))
   }
@@ -159,9 +160,9 @@ object SharedVectorConformanceSuite extends SimpleIOSuite {
           case Left(evalErr) =>
             outcome(structPass = false, textPass = false, s"$label\n    EVAL-ERR: ${evalErr.getMessage}")
           case Right(result) =>
-            val sOk      = structEq(result, expected)
+            val sOk = structEq(result, expected)
             val rendered = showJsonLogicValue.show(result)
-            val tOk      = rendered == c.expected
+            val tOk = rendered == c.expected
             val detail =
               s"""$label
                  |    data     = ${c.data}
@@ -177,16 +178,16 @@ object SharedVectorConformanceSuite extends SimpleIOSuite {
   vectors.tests.foreach { cat =>
     test(s"[${cat.category}] shared vectors") {
       cat.cases.traverseOutcomes(cat.category).map { outcomes =>
-        val total      = outcomes.length
+        val total = outcomes.length
         val structPass = outcomes.count(_.structPass)
-        val textPass   = outcomes.count(_.textPass)
+        val textPass = outcomes.count(_.textPass)
 
         val (known, enforced) = outcomes.partition(_.isKnownDivergence)
 
         // Enforced cases (everything not on the documented-divergence allowlist)
         // MUST pass. Structural is authoritative (matches the Rust/TS oracles);
         // textual is a secondary rendering-format check.
-        val structFailures   = enforced.filterNot(_.structPass)
+        val structFailures = enforced.filterNot(_.structPass)
         val textOnlyFailures = enforced.filter(o => o.structPass && !o.textPass)
 
         // xfail guard: each known divergence must STILL be failing. If one starts
@@ -196,7 +197,7 @@ object SharedVectorConformanceSuite extends SimpleIOSuite {
 
         val header =
           s"[${cat.category}] struct ${structPass}/${total}, text ${textPass}/${total}" +
-            (if (known.nonEmpty) s", known-divergences ${known.length}" else "")
+          (if (known.nonEmpty) s", known-divergences ${known.length}" else "")
 
         val structMsg =
           if (structFailures.isEmpty) ""
@@ -208,7 +209,7 @@ object SharedVectorConformanceSuite extends SimpleIOSuite {
           if (resolvedDivergences.isEmpty) ""
           else
             "\n  known-divergence(s) now PASSING (remove from KnownDivergences):\n" +
-              resolvedDivergences.map(o => "  " + o.detail).mkString("\n")
+            resolvedDivergences.map(o => "  " + o.detail).mkString("\n")
 
         expect(structFailures.isEmpty, s"$header$structMsg$textMsg")
           .and(expect(textOnlyFailures.isEmpty, s"$header$structMsg$textMsg"))
@@ -218,7 +219,7 @@ object SharedVectorConformanceSuite extends SimpleIOSuite {
   }
 
   // Small helper to evaluate all cases in a category sequentially.
-  private implicit class CaseListOps(cs: List[VecCase]) {
+  implicit private class CaseListOps(cs: List[VecCase]) {
     def traverseOutcomes(category: String): IO[List[CaseOutcome]] =
       cs.foldRight(IO.pure(List.empty[CaseOutcome])) { (c, acc) =>
         for {
