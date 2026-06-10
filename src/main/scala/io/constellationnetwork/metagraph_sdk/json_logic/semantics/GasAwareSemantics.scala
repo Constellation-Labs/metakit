@@ -173,6 +173,9 @@ object GasAwareSemantics {
         case BlsVerifyOp          => config.blsVerify
         case BlsAggregateVerifyOp => config.blsAggregateVerify
         case SchnorrVerifyOp      => config.schnorrVerify
+        case SmtVerifyOp          => config.smtVerify
+        case MptVerifyOp          => config.mptVerify
+        case MptPrefixVerifyOp    => config.mptPrefixVerify
       }
 
       private def getAdditionalCost(op: JsonLogicOp, args: List[JsonLogicValue], result: JsonLogicValue): GasCost =
@@ -297,6 +300,32 @@ object GasAwareSemantics {
             args match {
               case ArrayValue(pks) :: _ :: _ :: Nil => gasConfig.blsAggregatePerKey * pks.size.toLong
               case _                                => GasCost.Zero
+            }
+          // smt_verify cost scales with the authentication-path depth (#siblings in the proof).
+          case SmtVerifyOp =>
+            args match {
+              case _ :: MapValue(proof) :: Nil =>
+                proof.get("siblings") match {
+                  case Some(ArrayValue(siblings)) => gasConfig.smtPerSibling * siblings.size.toLong
+                  case _                          => GasCost.Zero
+                }
+              case _ => GasCost.Zero
+            }
+          // mpt_verify cost scales with the number of nodes in the proof witness.
+          case MptVerifyOp =>
+            args match {
+              case _ :: _ :: _ :: MapValue(proof) :: Nil =>
+                proof.get("witness") match {
+                  case Some(ArrayValue(witness)) => gasConfig.mptPerNode * witness.size.toLong
+                  case _                         => GasCost.Zero
+                }
+              case _ => GasCost.Zero
+            }
+          // mpt_prefix_verify cost scales with the number of entries proven complete under the prefix.
+          case MptPrefixVerifyOp =>
+            args match {
+              case _ :: _ :: MapValue(entries) :: _ :: Nil => gasConfig.mptPrefixPerEntry * entries.size.toLong
+              case _                                       => GasCost.Zero
             }
           case _ => GasCost.Zero
         }

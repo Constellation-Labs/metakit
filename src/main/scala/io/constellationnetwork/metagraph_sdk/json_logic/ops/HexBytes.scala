@@ -173,6 +173,22 @@ object HexBytes {
   def parseScalar(hex: String, role: String): Either[JsonLogicException, BigInt] =
     parseBytes(hex, Some(ScalarBytes), role).map(bytes => BigInt(1, bytes))
 
+  /**
+   * Validate a `0x`-prefixed lowercase hex string and return its raw hex body (no `0x`), allowing an
+   * ODD number of nibbles.
+   *
+   * Used for auth-DB (MPT/SMT) keys and prefixes, which are nibble-granular paths -- unlike the
+   * byte-array arguments of the wave-1/2 crypto ops, a key/prefix may have an odd nibble count (a
+   * 1-nibble prefix is legal). The body may be empty (the empty prefix). Returns the lowercase body so
+   * it can be handed straight to `Hex(_)`.
+   */
+  def parseNibbleHex(hex: String, role: String): Either[JsonLogicException, String] =
+    Either.cond(
+      HexPattern.matches(hex),
+      hex.substring(2),
+      JsonLogicException(s"$role: malformed hex (expected lowercase ^0x[0-9a-f]*$$): '$hex'")
+    )
+
   /** Encode raw bytes as a lowercase `0x`-prefixed hex string (exactly `bytes.length` bytes wide). */
   def encodeBytes(bytes: Array[Byte]): String =
     "0x" + bytes.map(b => f"${b & 0xff}%02x").mkString

@@ -1,5 +1,8 @@
 package io.constellationnetwork.metagraph_sdk.crypto.mpt
 
+import cats.MonadThrow
+
+import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher
 import io.constellationnetwork.security.hash.Hash
 
 import io.circe.syntax.EncoderOps
@@ -11,6 +14,19 @@ object MerklePatriciaCommitment {
   final case class Leaf(remaining: Seq[Nibble], dataDigest: Hash) extends MerklePatriciaCommitment
   final case class Branch(pathsDigest: Map[Nibble, Hash]) extends MerklePatriciaCommitment
   final case class Extension(shared: Seq[Nibble], childDigest: Hash) extends MerklePatriciaCommitment
+
+  /**
+   * The prefixed node-commitment digest of a commitment, computed exactly as the producer and the
+   * single/batch verifiers do (`computeDigest(commitment.asJson, <typePrefix>)`). Exposed here so the
+   * `mpt_prefix_verify` soundness checks (per-key value binding + prefix-subtree completeness) can
+   * address witness commitments by their digest using the SAME canonical bytes the verifier folds on.
+   */
+  def commitmentDigest[F[_]: MonadThrow: JsonBinaryHasher](commitment: MerklePatriciaCommitment): F[Hash] =
+    commitment match {
+      case leaf: Leaf     => JsonBinaryHasher[F].computeDigest(leaf.asJson, MerklePatriciaNode.LeafPrefix)
+      case branch: Branch => JsonBinaryHasher[F].computeDigest(branch.asJson, MerklePatriciaNode.BranchPrefix)
+      case ext: Extension => JsonBinaryHasher[F].computeDigest(ext.asJson, MerklePatriciaNode.ExtensionPrefix)
+    }
 
   object Leaf {
 
