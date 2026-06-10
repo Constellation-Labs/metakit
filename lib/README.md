@@ -1,4 +1,4 @@
-# Vendored BouncyCastle 1.85 beta (DO NOT MERGE TO A PUBLISHED RELEASE AS-IS)
+# Vendored BouncyCastle 1.85 beta (build/test-time only — never published)
 
 These are **beta / snapshot** BouncyCastle 1.85 jars, vendored because the
 BLS12-381 API metakit's eth2-ciphersuite BLS primitive depends on
@@ -6,6 +6,30 @@ BLS12-381 API metakit's eth2-ciphersuite BLS primitive depends on
 `BLS12_381ProofOfPossession`, `BLS12_381Serialization`, `BLS12_381Aggregation`,
 …) exists **only** in the 1.85 line and is not yet published as a stable
 managed artifact.
+
+## Scope: the BLS backend is OPTIONAL at runtime
+
+The jars in this directory are used to **build and test** metakit only. They
+are sbt *unmanaged* jars: they are never part of the published artifact, never
+appear in the POM, and the published metakit carries **no BouncyCastle 1.85
+requirement**. Whether a consumer's classpath has the backend is checked at
+runtime by `io.constellationnetwork.metagraph_sdk.crypto.bls.BlsBackend`
+(probed once on first BLS use, result cached):
+
+- **Backend absent** (the default for consumers of the published artifact):
+  the JLVM opcodes `bls_verify` / `bls_aggregate_verify` return the
+  deterministic error
+  `"<op> unavailable: BouncyCastle 1.85 BLS backend not on classpath"`
+  as a `Left(JsonLogicException)` — they never throw, never leak a
+  `NoClassDefFoundError`, and the rest of metakit (including every other
+  crypto opcode) is completely unaffected.
+- **Backend present** (this repo's own build/tests; a consumer that vendors
+  the exact sha256-pinned jars below with the same `build.sbt` exclusion hack;
+  or, in the future, the managed BC 1.85 Maven Central artifacts): the BLS
+  opcodes work normally.
+
+The Rust (`blst`) and TypeScript (`@noble/curves`) implementations have their
+own managed BLS backends and are unaffected by any of this.
 
 ## Pinned hashes (enforced in CI)
 
@@ -73,7 +97,9 @@ release-blocking checklist item:
 
 ## How they are wired in (build.sbt)
 
-sbt auto-adds `<project>/lib/*.jar` to the classpath via `unmanagedBase`. The
+sbt auto-adds `<project>/lib/*.jar` to the **local build and test** classpath
+via `unmanagedBase`; unmanaged jars are not published and add nothing to the
+POM (see "Scope" above for the runtime contract consumers get instead). The
 `tessellation-sdk` managed dependency pulls BouncyCastle **1.70**
 (`bcprov`/`bcpkix`/`bcutil-jdk15on`) transitively; that 1.70 line does **not**
 contain the `org.bouncycastle.crypto.bls` package and, left on the classpath,
@@ -103,7 +129,9 @@ Central, as soon as they exist:
    `"org.bouncycastle" % "bcpkix-jdk18on" % "1.85"`) dependencies (plain `%` —
    these are Java artifacts).
 
-Nothing in `Bls12381.scala` or the BLS tests changes.
+Nothing in `Bls12381.scala`, `BlsBackend.scala` (the runtime gate simply
+always reports available once the backend is a managed dependency) or the BLS
+tests changes.
 
 ## Ciphersuite (the byte-identity contract)
 

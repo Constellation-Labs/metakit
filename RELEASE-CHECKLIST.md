@@ -71,17 +71,24 @@ Include this paragraph (or equivalent) in the release notes:
 > required because the BLS12-381 API (`org.bouncycastle.crypto.bls.*`) behind
 > metakit's eth2-ciphersuite BLS primitive exists only in the unreleased 1.85
 > line. The exact bytes are sha256-pinned in `lib/README.md` and enforced in
-> CI. IMPORTANT for consumers: the vendored `lib/` jars are unmanaged and are
-> NOT part of the published metakit artifact — the published POM excludes the
-> transitive BC 1.70 artifacts but ships no replacement. A consumer that
-> exercises the BLS primitive (`bls_verify` / `bls_aggregate_verify`) MUST
-> vendor the same sha256-pinned jars with the same `build.sbt` exclusion hack
-> (see `lib/README.md`), or those code paths fail with `NoClassDefFoundError`
-> at runtime. Consumers that never touch BLS are unaffected (the classes load
-> lazily on first use). These jars
-> will be replaced with the managed `org.bouncycastle:*:1.85` Maven Central
-> artifacts the moment BC publishes a stable 1.85; see `lib/README.md` for the
-> migration delta and the deferred source-verification checklist.
+> CI. The jars are **build/test-time only**: unmanaged jars are never part of
+> the published metakit artifact, so published metakit has **no BouncyCastle
+> requirement** (the POM excludes the transitive BC 1.70 artifacts and ships
+> no replacement). The JVM BLS backend is therefore OPTIONAL at runtime: a
+> runtime gate (`io.constellationnetwork.metagraph_sdk.crypto.bls.BlsBackend`,
+> probed once on first BLS use, cached) makes the BLS opcodes (`bls_verify` /
+> `bls_aggregate_verify`) gracefully unavailable on a backend-less classpath —
+> they return the deterministic error
+> `"<op> unavailable: BouncyCastle 1.85 BLS backend not on classpath"` instead
+> of throwing `NoClassDefFoundError`. A consumer that wants the BLS opcodes to
+> actually verify supplies the backend: either the same sha256-pinned jars
+> with the same `build.sbt` exclusion hack (see `lib/README.md`), or — once BC
+> publishes a stable 1.85 to Maven Central — the managed
+> `org.bouncycastle:*:1.85` artifacts. Everything else in metakit is
+> unaffected either way, and the Rust (`blst`) / TypeScript (`@noble/curves`)
+> implementations have their own managed BLS backends and are not impacted.
+> See `lib/README.md` for the migration delta and the deferred
+> source-verification checklist.
 
 Release-blocking sub-items (tracked in `lib/README.md`):
 
@@ -137,6 +144,10 @@ Release-blocking sub-items (tracked in `lib/README.md`):
 - BLS12-381 reworked to the eth2 proof-of-possession ciphersuite on
   BouncyCastle 1.85, byte-matching tessellation-bls (#33). See the BC beta
   disclosure above.
+- JVM BLS backend made OPTIONAL at runtime (`BlsBackend` gate): published
+  metakit carries no BC requirement; `bls_verify` / `bls_aggregate_verify`
+  return a deterministic "unavailable" error on a backend-less classpath
+  instead of throwing `NoClassDefFoundError` (this PR).
 
 ### Std / hardening
 

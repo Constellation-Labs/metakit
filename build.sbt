@@ -46,8 +46,17 @@ lazy val commonSettings = Seq(
   // TRANSITIVELY; we drop that here so only the vendored 1.85 jdk18on jars provide
   // org.bouncycastle on the classpath -- otherwise the 1.70 classes shadow the 1.85 ones and
   // the org.bouncycastle.crypto.bls package is missing at compile time.
+  //
+  // OPTIONAL-BACKEND CONTRACT: the lib/ jars are BUILD- and TEST-time only. Unmanaged jars are
+  // never published and never appear in the POM, so the released metakit artifact carries NO
+  // BouncyCastle 1.85 requirement. The runtime gate
+  // (io.constellationnetwork.metagraph_sdk.crypto.bls.BlsBackend) probes the classpath on first
+  // BLS use: consumers without the jars get a deterministic
+  // "<op> unavailable: BouncyCastle 1.85 BLS backend not on classpath" JsonLogicException from
+  // the bls_verify / bls_aggregate_verify opcodes instead of a NoClassDefFoundError crash.
   // MIGRATION DELTA when 1.85 is published: delete ./lib/*.jar, drop this excludeDependencies
-  // block, and add a managed `org.bouncycastle %% bcprov-jdk18on % 1.85` dependency.
+  // block, and add a managed `org.bouncycastle %% bcprov-jdk18on % 1.85` dependency (the
+  // BlsBackend gate then always reports available and needs no change).
   excludeDependencies ++= Seq(
     ExclusionRule("org.bouncycastle", "bcprov-jdk15on"),
     ExclusionRule("org.bouncycastle", "bcpkix-jdk15on"),
