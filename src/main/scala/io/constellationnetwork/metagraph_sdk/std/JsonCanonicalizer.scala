@@ -32,6 +32,28 @@ trait JsonCanonicalizer[F[_]] {
 object JsonCanonicalizer {
 
   /**
+   * RFC 8785 object-key ordering: lexicographic comparison of the keys' UTF-16
+   * code units (compared as UTF-16BE bytes). This is the SINGLE source of truth
+   * for canonical key ordering; the canonicalizer ([[TreeOrderedMap]]) sorts object
+   * keys with it, and the JSON Logic runtime reuses it to evaluate object-form
+   * `let` bindings in the same order (crypto-determinism: byte-identical with the
+   * Rust `canonical::utf16_cmp` and the TS canonicalizer's default key sort).
+   */
+  val keyOrdering: Ordering[String] = new Ordering[String] {
+    def compare(a: String, b: String): Int = {
+      val aBytes = a.getBytes("UTF-16BE")
+      val bBytes = b.getBytes("UTF-16BE")
+      val minLength = aBytes.length.min(bBytes.length)
+
+      LazyList
+        .range(0, minLength)
+        .map(i => (aBytes(i) & 0xff) - (bBytes(i) & 0xff))
+        .find(_ != 0)
+        .getOrElse(aBytes.length - bBytes.length)
+    }
+  }
+
+  /**
    * JSON Canonicalization following RFC 8785
    * https://datatracker.ietf.org/doc/html/rfc8785
    */
@@ -121,23 +143,8 @@ private object NumberToJson {
 
 private object TreeOrderedMap {
 
-  def from[V](map: Map[String, V]): SortedMap[String, V] = {
-    implicit val ordering: Ordering[String] = new Ordering[String] {
-      def compare(a: String, b: String): Int = {
-        val aBytes = a.getBytes("UTF-16BE")
-        val bBytes = b.getBytes("UTF-16BE")
-        val minLength = aBytes.length.min(bBytes.length)
-
-        LazyList
-          .range(0, minLength)
-          .map(i => (aBytes(i) & 0xff) - (bBytes(i) & 0xff))
-          .find(_ != 0)
-          .getOrElse(aBytes.length - bBytes.length)
-      }
-    }
-
-    SortedMap.empty[String, V](ordering) ++ map
-  }
+  def from[V](map: Map[String, V]): SortedMap[String, V] =
+    SortedMap.empty[String, V](JsonCanonicalizer.keyOrdering) ++ map
 }
 
 object DoubleCoreSerializer {

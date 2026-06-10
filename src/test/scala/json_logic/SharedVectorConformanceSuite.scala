@@ -105,25 +105,12 @@ object SharedVectorConformanceSuite extends SimpleIOSuite {
    *
    * Keyed by (category, raw expr string). Documented for review:
    *
-   *   - object / `{"get": [map, key, default]}`: Scala `get` only accepts the
-   *     2-arg `[map, key]` form (missing key -> null) and errors on a 3rd
-   *     `default` arg. Rust/TS accept the 3-arg default form
-   *     (see metakit-sdk rust/jlvm-core/src/eval.rs::op_get, which explicitly
-   *     notes "Scala handleGetOp only supports [Map, Str]").
-   *
-   *   - let_bindings / object-form `{"let": [{name: expr, ...}, result]}`: Scala
-   *     `let` only accepts the array-of-pairs form
-   *     `{"let": [[[name, expr], ...], result]}`. Rust/TS additionally accept the
-   *     object form used by the vectors
-   *     (see rust/jlvm-core/src/eval.rs::eval_let "convenience object form ...
-   *     as used by the conformance vectors").
+   * There are currently no known divergences: the previous `get` 3-arg-default and
+   * object-form `let` gaps were closed to match the Rust/TS reference impls
+   * (rust/jlvm-core/src/eval.rs::op_get and ::eval_let), so every shared vector is
+   * now enforced as PASSING.
    */
-  private val KnownDivergences: Set[(String, String)] = Set(
-    "object"       -> """{"get": [{"var": "obj"}, "missing", "default"]}""",
-    "let_bindings" -> """{"let": [{"x": 5}, {"var": "x"}]}""",
-    "let_bindings" -> """{"let": [{"x": 5}, {"+": [{"var": "x"}, 1]}]}""",
-    "let_bindings" -> """{"let": [{"doubled": {"*": [{"var": "x"}, 2]}}, {"+": [{"var": "doubled"}, 1]}]}"""
-  )
+  private val KnownDivergences: Set[(String, String)] = Set.empty
 
   final private case class CaseOutcome(
     category: String,

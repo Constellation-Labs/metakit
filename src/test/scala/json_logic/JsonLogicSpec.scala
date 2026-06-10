@@ -2744,6 +2744,59 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
     }
   }
 
+  // `get` matches Rust `op_get` (rust/jlvm-core/src/eval.rs): 2-arg returns the
+  // value or null; 3-arg returns the value or the supplied default.
+
+  test("`get` returns value for present key (2-arg)") {
+    val exprStr = """{"get": [{"var": "obj"}, "a"]}"""
+    val dataStr = """{"obj": {"a": 42}}"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(42))
+    }
+  }
+
+  test("`get` returns null for missing key (2-arg)") {
+    val exprStr = """{"get": [{"var": "obj"}, "missing"]}"""
+    val dataStr = """{"obj": {"a": 42}}"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, NullValue)
+    }
+  }
+
+  test("`get` returns value for present key, ignoring default (3-arg)") {
+    val exprStr = """{"get": [{"var": "obj"}, "a", "default"]}"""
+    val dataStr = """{"obj": {"a": 42}}"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(42))
+    }
+  }
+
+  test("`get` returns default for missing key (3-arg)") {
+    val exprStr = """{"get": [{"var": "obj"}, "missing", "default"]}"""
+    val dataStr = """{"obj": {}}"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, StrValue("default"))
+    }
+  }
+
+  test("`get` 3-arg default may be any value type") {
+    val exprStr = """{"get": [{"var": "obj"}, "missing", 99]}"""
+    val dataStr = """{"obj": {}}"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, IntValue(99))
+    }
+  }
+
   test("`has` returns true when map contains key") {
     val exprStr = """{"has": [{"a": 1, "b": 2}, "a"]}"""
     val dataStr = """null"""

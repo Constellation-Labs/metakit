@@ -100,4 +100,68 @@ object LetOpSuite extends SimpleIOSuite {
       Some(MapValue(Map("original" -> IntValue(50))))
     )
   }
+
+  // --- object form: {"let": [{name: expr, ...}, result]} -------------------
+  // Mirrors Rust `eval_let` / the TS evaluator, which accept the convenience
+  // object form alongside the array-of-pairs form. Used by the shared vectors.
+
+  test("let object form with single binding") {
+    expectResult(
+      """{"let": [{"x": 5}, {"var": "x"}]}""",
+      IntValue(5)
+    )
+  }
+
+  test("let object form binding used in result expression") {
+    expectResult(
+      """{"let": [{"x": 5}, {"+": [{"var": "x"}, 1]}]}""",
+      IntValue(6)
+    )
+  }
+
+  test("let object form binding references outer scope") {
+    expectResult(
+      """{"let": [{"doubled": {"*": [{"var": "x"}, 2]}}, {"+": [{"var": "doubled"}, 1]}]}""",
+      IntValue(11),
+      Some(MapValue(Map("x" -> IntValue(5))))
+    )
+  }
+
+  test("let object form preserves original context") {
+    expectResult(
+      """{"let": [{"x": 100}, {"+": [{"var": "x"}, {"var": "original"}]}]}""",
+      IntValue(150),
+      Some(MapValue(Map("original" -> IntValue(50))))
+    )
+  }
+
+  // --- object form: RFC-8785 sorted-key binding order ----------------------
+  // A JSON object has no inherent member order, so object-form `let` evaluates
+  // bindings in RFC-8785 sorted-key order (UTF-16 code units) for crypto-determinism,
+  // byte-identical with the Rust and TS impls. Each binding sees prior (sorted) ones.
+
+  test("let object form evaluates bindings in sorted-key order (a before b)") {
+    // Insertion order has `b` first referencing the not-yet-bound `a`; sorted order
+    // binds `a` (=1) first, so `b` = a + 1 = 2. Insertion order would fail on unbound `a`.
+    expectResult(
+      """{"let": [{"b": {"+": [{"var": "a"}, 1]}, "a": 1}, {"var": "b"}]}""",
+      IntValue(2)
+    )
+  }
+
+  test("let object form sorts keys by UTF-16 code units (non-ASCII)") {
+    // 'a' (U+0061) sorts before 'ä' (U+00E4), so a=1 then ä = a + 1 = 2.
+    expectResult(
+      """{"let": [{"ä": {"+": [{"var": "a"}, 1]}, "a": 1}, {"var": "ä"}]}""",
+      IntValue(2)
+    )
+  }
+
+  test("let array form keeps explicit insertion order (unchanged)") {
+    // Array form preserves the listed order: `a` then `b`, b references a.
+    expectResult(
+      """{"let": [[["a", 1], ["b", {"+": [{"var": "a"}, 1]}]], {"var": "b"}]}""",
+      IntValue(2)
+    )
+  }
 }
