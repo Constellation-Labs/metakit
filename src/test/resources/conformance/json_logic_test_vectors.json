@@ -1,6 +1,6 @@
 {
   "description": "JSON Logic VM test vectors for cross-language compatibility",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "tests": [
     {
       "category": "constants",
@@ -309,7 +309,8 @@
         { "expr": "{\"typeof\": [{\"pow\": [3, -1]}]}", "data": "{}", "expected": "\"float\"", "note": "negative exponent on an int base yields an exact rational Float" },
         { "expr": "{\"*\": [4611686018427387904, 4]}", "data": "{}", "expected": "18446744073709551616", "note": "2^62 * 4 = 2^64: integral results stay int at any magnitude (no float demotion past i64/Long)" },
         { "expr": "{\"typeof\": [{\"*\": [4611686018427387904, 4]}]}", "data": "{}", "expected": "\"int\"" },
-        { "expr": "{\">\": [18446744073709551616, 9223372036854775807]}", "data": "{}", "expected": "true", "note": "comparison beyond 2^63 is exact (2^64 > i64::MAX)" }
+        { "expr": "{\">\": [18446744073709551616, 9223372036854775807]}", "data": "{}", "expected": "true", "note": "comparison beyond 2^63 is exact (2^64 > i64::MAX)" },
+        { "expr": "{\"+\": [\"1e-2000000000\"]}", "data": "{}", "error": true, "note": "string->number coercion bounds the effective decimal scale at 10000 (Rust Ratio::MAX_DECIMAL_SCALE): a huge exponent must error in every impl, never materialize 10^|scale|" }
       ]
     },
     {
