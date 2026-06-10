@@ -91,4 +91,12 @@ object JsonLogicOp extends Enum[JsonLogicOp] with CirceEnum[JsonLogicOp] {
   case object PmtVerifyOp extends JsonLogicOp("pmt_verify")
   case object Groth16VerifyOp extends JsonLogicOp("groth16_verify")
   case object EcVrfVerifyOp extends JsonLogicOp("ecvrf_verify")
+
+  // ZK / Crypto Operations -- second wave (BN254 curve, BLS12-381, Schnorr)
+  case object Bn254AddOp extends JsonLogicOp("bn254_add")
+  case object Bn254MulOp extends JsonLogicOp("bn254_mul")
+  case object Bn254PairingOp extends JsonLogicOp("bn254_pairing")
+  case object BlsVerifyOp extends JsonLogicOp("bls_verify")
+  case object BlsAggregateVerifyOp extends JsonLogicOp("bls_aggregate_verify")
+  case object SchnorrVerifyOp extends JsonLogicOp("schnorr_verify")
 }
