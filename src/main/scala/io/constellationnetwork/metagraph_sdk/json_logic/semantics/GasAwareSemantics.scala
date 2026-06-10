@@ -23,6 +23,10 @@ import io.constellationnetwork.metagraph_sdk.json_logic.runtime.ResultContext
  *   - `outputScaledCost` is the residual component that can only be observed on the produced
  *     value (split piece count, flatten/slice/merge output size, substr output length). It is
  *     consumed AFTER the primitive; the work it prices is bounded by already-paid-for inputs.
+ *   - The lazily-dispatched control-flow ops (`if` / `let`) never reach `applyOp`; the runtime
+ *     charges their flat base cost (NO depth penalty — depth is undefined at the lazy dispatch
+ *     site) via `chargeBase` once per node, before any child is evaluated. Untaken branches
+ *     still cost nothing.
  *   - Variable accesses consume `varAccess + pathSegments` at lookup time.
  *   - Total consumption (the gas-ref delta) is the authoritative gasUsed reported by the
  *     evaluator.
@@ -74,6 +78,19 @@ object GasAwareSemantics {
             case Left(err)       => (limit, (err: JsonLogicException).asLeft[Unit])
           }
         }
+
+      /**
+       * Flat per-node base charge for the lazily-dispatched control-flow ops (`if` / `let`),
+       * consumed by the runtime at the dispatch site BEFORE any child is evaluated. These ops
+       * never reach `applyOp`, and their depth (max evaluated-child metric depth + 1, the input
+       * to `depthPenalty` everywhere else) is undefined at dispatch by construction — children
+       * are unevaluated and if/let are depth-transparent in the metrics flow — so the charge is
+       * the base cost ONLY, with no depth penalty (see the schedule comment in GasConfig).
+       * Evaluated children (condition / bindings / taken branch) still pay for themselves;
+       * untaken branches still pay nothing.
+       */
+      override def chargeBase(op: JsonLogicOp): Option[F[Either[JsonLogicException, Unit]]] =
+        Some(consumeGas(getOpCost(op)(gasConfig)))
 
       override def getVar(
         key: String,

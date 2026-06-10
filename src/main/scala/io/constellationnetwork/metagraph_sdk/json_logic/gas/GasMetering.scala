@@ -127,6 +127,14 @@ case class GasConfig(
   // EXACTLY ONCE against the shared gas ref:
   //   base(op) + depthPenalty(depth) + inputScaledCost(args) [+ outputScaledCost(result)].
   // Children pay for themselves when they are evaluated; ancestors never re-charge their subtree.
+  //
+  // Control flow (`if` / `let`, both priced by `ifElse`). The runtime dispatches these LAZILY
+  // and they never reach applyOp, so the runtime charges their flat base cost once per node at
+  // the dispatch site, BEFORE any child is evaluated. They carry NO depth penalty: the penalty's
+  // input everywhere else is max(evaluated-child metric depth) + 1, which is undefined at the
+  // lazy dispatch site (children unevaluated; if/let are depth-transparent in the metrics flow),
+  // so base-only is the deliberate, documented choice. Evaluated children (condition, bindings,
+  // the taken branch) pay for themselves as usual; untaken branches pay nothing.
   // The base, depth, and input-scaled components are consumed BEFORE the primitive runs, so
   // out-of-gas is raised before any input-scaled work (Miller loops, BLS aggregation, proof
   // folds, string building) is performed. Only residual components that are observable solely on
