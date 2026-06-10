@@ -101,72 +101,78 @@ object GasAwareSemantics {
         }
 
       private def getOpCost(op: JsonLogicOp)(config: GasConfig): GasCost = op match {
-        case NoOp            => GasCost.Zero
-        case MissingNoneOp   => config.exists
-        case ExistsOp        => config.exists
-        case MissingSomeOp   => config.missingSome
-        case IfElseOp        => config.ifElse
-        case LetOp           => config.ifElse // Similar cost to if/else (control flow)
-        case EqOp            => config.eq
-        case EqStrictOp      => config.eqStrict
-        case NEqOp           => config.neq
-        case NEqStrictOp     => config.neqStrict
-        case NotOp           => config.not
-        case NOp             => config.doubleNot
-        case OrOp            => config.or
-        case AndOp           => config.and
-        case Lt              => config.lt
-        case Leq             => config.leq
-        case Gt              => config.gt
-        case Geq             => config.geq
-        case ModuloOp        => config.modulo
-        case MaxOp           => config.max
-        case MinOp           => config.min
-        case AddOp           => config.add
-        case TimesOp         => config.times
-        case MinusOp         => config.minus
-        case DivOp           => config.div
-        case MergeOp         => config.merge
-        case InOp            => config.in
-        case CatOp           => config.cat
-        case SubStrOp        => config.substr
-        case MapOp           => config.map
-        case FilterOp        => config.filter
-        case ReduceOp        => config.reduce
-        case AllOp           => config.all
-        case NoneOp          => config.none
-        case SomeOp          => config.some
-        case MapValuesOp     => config.mapValues
-        case MapKeysOp       => config.mapKeys
-        case GetOp           => config.get
-        case IntersectOp     => config.intersect
-        case CountOp         => config.count
-        case LengthOp        => config.length
-        case FindOp          => config.find
-        case LowerOp         => config.lower
-        case UpperOp         => config.upper
-        case JoinOp          => config.join
-        case SplitOp         => config.split
-        case DefaultOp       => config.default
-        case UniqueOp        => config.unique
-        case SliceOp         => config.slice
-        case ReverseOp       => config.reverse
-        case FlattenOp       => config.flatten
-        case TrimOp          => config.trim
-        case StartsWithOp    => config.startsWith
-        case EndsWithOp      => config.endsWith
-        case AbsOp           => config.abs
-        case RoundOp         => config.round
-        case FloorOp         => config.floor
-        case CeilOp          => config.ceil
-        case PowOp           => config.pow
-        case HasOp           => config.has
-        case EntriesOp       => config.entries
-        case TypeOfOp        => config.typeOf
-        case PoseidonOp      => config.poseidon
-        case PmtVerifyOp     => config.pmtVerify
-        case Groth16VerifyOp => config.groth16Verify
-        case EcVrfVerifyOp   => config.ecvrfVerify
+        case NoOp                 => GasCost.Zero
+        case MissingNoneOp        => config.exists
+        case ExistsOp             => config.exists
+        case MissingSomeOp        => config.missingSome
+        case IfElseOp             => config.ifElse
+        case LetOp                => config.ifElse // Similar cost to if/else (control flow)
+        case EqOp                 => config.eq
+        case EqStrictOp           => config.eqStrict
+        case NEqOp                => config.neq
+        case NEqStrictOp          => config.neqStrict
+        case NotOp                => config.not
+        case NOp                  => config.doubleNot
+        case OrOp                 => config.or
+        case AndOp                => config.and
+        case Lt                   => config.lt
+        case Leq                  => config.leq
+        case Gt                   => config.gt
+        case Geq                  => config.geq
+        case ModuloOp             => config.modulo
+        case MaxOp                => config.max
+        case MinOp                => config.min
+        case AddOp                => config.add
+        case TimesOp              => config.times
+        case MinusOp              => config.minus
+        case DivOp                => config.div
+        case MergeOp              => config.merge
+        case InOp                 => config.in
+        case CatOp                => config.cat
+        case SubStrOp             => config.substr
+        case MapOp                => config.map
+        case FilterOp             => config.filter
+        case ReduceOp             => config.reduce
+        case AllOp                => config.all
+        case NoneOp               => config.none
+        case SomeOp               => config.some
+        case MapValuesOp          => config.mapValues
+        case MapKeysOp            => config.mapKeys
+        case GetOp                => config.get
+        case IntersectOp          => config.intersect
+        case CountOp              => config.count
+        case LengthOp             => config.length
+        case FindOp               => config.find
+        case LowerOp              => config.lower
+        case UpperOp              => config.upper
+        case JoinOp               => config.join
+        case SplitOp              => config.split
+        case DefaultOp            => config.default
+        case UniqueOp             => config.unique
+        case SliceOp              => config.slice
+        case ReverseOp            => config.reverse
+        case FlattenOp            => config.flatten
+        case TrimOp               => config.trim
+        case StartsWithOp         => config.startsWith
+        case EndsWithOp           => config.endsWith
+        case AbsOp                => config.abs
+        case RoundOp              => config.round
+        case FloorOp              => config.floor
+        case CeilOp               => config.ceil
+        case PowOp                => config.pow
+        case HasOp                => config.has
+        case EntriesOp            => config.entries
+        case TypeOfOp             => config.typeOf
+        case PoseidonOp           => config.poseidon
+        case PmtVerifyOp          => config.pmtVerify
+        case Groth16VerifyOp      => config.groth16Verify
+        case EcVrfVerifyOp        => config.ecvrfVerify
+        case Bn254AddOp           => config.bn254Add
+        case Bn254MulOp           => config.bn254Mul
+        case Bn254PairingOp       => config.bn254Pairing
+        case BlsVerifyOp          => config.blsVerify
+        case BlsAggregateVerifyOp => config.blsAggregateVerify
+        case SchnorrVerifyOp      => config.schnorrVerify
       }
 
       private def getAdditionalCost(op: JsonLogicOp, args: List[JsonLogicValue], result: JsonLogicValue): GasCost =
@@ -276,6 +282,21 @@ object GasAwareSemantics {
             args match {
               case _ :: _ :: _ :: ArrayValue(siblings) :: Nil => gasConfig.pmtPerSibling * siblings.size.toLong
               case _                                          => GasCost.Zero
+            }
+          // bn254_pairing cost scales with the number of (G1, G2) pairs (each adds a Miller loop).
+          // Mirror CryptoOps.bn254Pairing's single-vs-list disambiguation: a lone
+          // ArrayValue is the pairs list only when every element is itself a pair (array).
+          case Bn254PairingOp =>
+            args match {
+              case ArrayValue(pairs) :: Nil if pairs.forall(_.isInstanceOf[ArrayValue]) =>
+                gasConfig.bn254PairingPerPair * pairs.size.toLong
+              case list => gasConfig.bn254PairingPerPair * list.size.toLong
+            }
+          // bls_aggregate_verify cost scales with the number of public keys summed into the aggregate.
+          case BlsAggregateVerifyOp =>
+            args match {
+              case ArrayValue(pks) :: _ :: _ :: Nil => gasConfig.blsAggregatePerKey * pks.size.toLong
+              case _                                => GasCost.Zero
             }
           case _ => GasCost.Zero
         }

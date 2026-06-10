@@ -136,6 +136,23 @@ case class GasConfig(
   pmtPerSibling: GasCost = GasCost(300),
   groth16Verify: GasCost = GasCost(250_000),
   ecvrfVerify: GasCost = GasCost(50_000),
+  // ZK / crypto opcodes -- second wave (BN254 curve, BLS12-381, Schnorr). Costs follow the
+  // wave-1 scale (groth16Verify = 250k, ecvrfVerify = 50k) and are the DoS bound for the VM:
+  //   - bn254Pairing is the most expensive: a flat base plus a per-pair cost (bn254PairingPerPair,
+  //     charged in the gas-aware layer), since each pair adds a Miller loop; the final exponentiation
+  //     is amortized once across the product,
+  //   - blsVerify / blsAggregateVerify are high (hash-to-curve + two pairings); aggregation adds a
+  //     per-key cost (blsAggregatePerKey) for each extra public key summed into the aggregate,
+  //   - schnorrVerify is medium (two BN254 scalar multiplications + a point add + a SHA-256),
+  //   - bn254Mul (a scalar multiplication) is far more expensive than bn254Add (a single point add).
+  bn254Add: GasCost = GasCost(500),
+  bn254Mul: GasCost = GasCost(40_000),
+  bn254Pairing: GasCost = GasCost(45_000),
+  bn254PairingPerPair: GasCost = GasCost(35_000),
+  blsVerify: GasCost = GasCost(120_000),
+  blsAggregateVerify: GasCost = GasCost(120_000),
+  blsAggregatePerKey: GasCost = GasCost(15_000),
+  schnorrVerify: GasCost = GasCost(45_000),
   const: GasCost = GasCost.Zero,
   varAccess: GasCost = GasCost(2),
   depthPenaltyMultiplier: Long = 5L,

@@ -1,6 +1,7 @@
 package io.constellationnetwork.metagraph_sdk.json_logic.ops
 
 import cats.syntax.either._
+import cats.syntax.traverse._
 
 import io.constellationnetwork.metagraph_sdk.crypto.zk.poseidon.Poseidon
 import io.constellationnetwork.metagraph_sdk.json_logic.core.JsonLogicException
@@ -32,8 +33,24 @@ object HexBytes {
   /** Byte width of a BN254 Fr field element. */
   val FrBytes: Int = 32
 
+  /** Byte width of a single BN254 (alt_bn128) base-field coordinate. */
+  val FqBytes: Int = 32
+
+  /** Byte width of a serialized BN254 G1 point (`x || y`, 32B each). */
+  val G1Bytes: Int = 64
+
+  /** Byte width of a serialized BN254 G2 point (EIP-197 order, 4 x 32B). */
+  val G2Bytes: Int = 128
+
+  /** Byte width of a 256-bit big-endian scalar (e.g. a Schnorr response `s`). */
+  val ScalarBytes: Int = 32
+
   /** The BN254 / alt_bn128 scalar field modulus, shared with [[Poseidon.R]]. */
   val Modulus: BigInt = Poseidon.R
+
+  /** The BN254 / alt_bn128 base-field (Fp) modulus P. */
+  val BaseFieldModulus: BigInt =
+    BigInt("21888242871839275222246405745257275088696311157297823662689037894645226208583")
 
   private val HexPattern = "^0x[0-9a-f]*$".r
 
@@ -90,9 +107,82 @@ object HexBytes {
       )
     }
 
+  /**
+   * Parse a 32-byte hex string into a canonical BN254 base-field (Fq) coordinate
+   * (`0 <= value < P`). Rejects wrong width and non-canonical (`>= P`) values.
+   */
+  def parseFq(hex: String, role: String): Either[JsonLogicException, BigInt] =
+    parseBytes(hex, Some(FqBytes), role).flatMap { bytes =>
+      val value = BigInt(1, bytes)
+      Either.cond(
+        value < BaseFieldModulus,
+        value,
+        JsonLogicException(
+          s"$role: not a canonical BN254 base-field element (must be < P): $value"
+        )
+      )
+    }
+
+  /**
+   * Parse a 64-byte hex string into a BN254 G1 affine coordinate pair `(x, y)`.
+   * Each 32-byte half is validated as a canonical Fq element (`< P`). The
+   * all-zero point `(0, 0)` is the EVM point-at-infinity and is accepted here;
+   * on-curve membership is enforced by the caller (it is trivially satisfied by
+   * `(0, 0)`).
+   */
+  def parseG1(hex: String, role: String): Either[JsonLogicException, (BigInt, BigInt)] =
+    parseBytes(hex, Some(G1Bytes), role).flatMap { bytes =>
+      val x = BigInt(1, bytes.slice(0, FqBytes))
+      val y = BigInt(1, bytes.slice(FqBytes, G1Bytes))
+      for {
+        _ <- Either.cond(x < BaseFieldModulus, (), JsonLogicException(s"$role: x not in base field (>= P): $x"))
+        _ <- Either.cond(y < BaseFieldModulus, (), JsonLogicException(s"$role: y not in base field (>= P): $y"))
+      } yield (x, y)
+    }
+
+  /**
+   * Parse a 128-byte hex string into a BN254 G2 affine point in EIP-197 byte
+   * order, i.e. each Fp2 coordinate is serialized imaginary-part-first:
+   * `x.c1 || x.c0 || y.c1 || y.c0`. Returns `(xReal, xImag, yReal, yImag)` (the
+   * Besu / SP1 `(real, imag)` convention), so the caller can build a
+   * `Bn254.G2(xReal, xImag, yReal, yImag)` directly. Each 32-byte limb is
+   * validated as a canonical Fq element (`< P`).
+   */
+  def parseG2(hex: String, role: String): Either[JsonLogicException, (BigInt, BigInt, BigInt, BigInt)] =
+    parseBytes(hex, Some(G2Bytes), role).flatMap { bytes =>
+      def limb(i: Int): BigInt = BigInt(1, bytes.slice(i * FqBytes, (i + 1) * FqBytes))
+      // EIP-197 order: imaginary-before-real for each Fp2 coordinate.
+      val xImag = limb(0)
+      val xReal = limb(1)
+      val yImag = limb(2)
+      val yReal = limb(3)
+      val all = List("x.imag" -> xImag, "x.real" -> xReal, "y.imag" -> yImag, "y.real" -> yReal)
+      all.traverse {
+        case (name, v) =>
+          Either.cond(v < BaseFieldModulus, (), JsonLogicException(s"$role: $name not in base field (>= P): $v"))
+      }
+        .map(_ => (xReal, xImag, yReal, yImag))
+    }
+
+  /**
+   * Parse a 32-byte hex string into a non-negative big-endian scalar with NO
+   * field-canonicity constraint (any 256-bit value is accepted). Used for
+   * Schnorr responses and similar values that are reduced mod the group order
+   * by the consuming primitive.
+   */
+  def parseScalar(hex: String, role: String): Either[JsonLogicException, BigInt] =
+    parseBytes(hex, Some(ScalarBytes), role).map(bytes => BigInt(1, bytes))
+
   /** Encode raw bytes as a lowercase `0x`-prefixed hex string (exactly `bytes.length` bytes wide). */
   def encodeBytes(bytes: Array[Byte]): String =
     "0x" + bytes.map(b => f"${b & 0xff}%02x").mkString
+
+  /** Encode a BN254 G1 point `(x, y)` as a 64-byte `0x`-hex string (`x || y`, 32B each). */
+  def encodeG1(x: BigInt, y: BigInt): Either[JsonLogicException, String] =
+    for {
+      xs <- encodeUInt(x, FqBytes)
+      ys <- encodeUInt(y, FqBytes)
+    } yield "0x" + xs.substring(2) + ys.substring(2)
 
   /** Encode a non-negative `BigInt` as a `0x`-prefixed, big-endian, zero-padded hex of `width` bytes. */
   def encodeUInt(value: BigInt, width: Int): Either[JsonLogicException, String] =

@@ -818,4 +818,56 @@ object GasMeteringSuite extends SimpleIOSuite with Checkers {
         s"Large intersect (${largeResult.gasUsed.amount}) should cost more than small intersect (${smallResult.gasUsed.amount})"
       )
   }
+
+  // ===========================================================================
+  // Wave-2 ZK / crypto opcode gas costs.
+  // ===========================================================================
+
+  test("GasConfig.Default wave-2 crypto costs follow the documented ordering") {
+    val c = GasConfig.Default
+    IO.pure(
+      expect.all(
+        c.bn254Add == GasCost(500),
+        c.bn254Mul == GasCost(40_000),
+        c.bn254Pairing == GasCost(45_000),
+        c.bn254PairingPerPair == GasCost(35_000),
+        c.blsVerify == GasCost(120_000),
+        c.blsAggregateVerify == GasCost(120_000),
+        c.blsAggregatePerKey == GasCost(15_000),
+        c.schnorrVerify == GasCost(45_000),
+        // ordering: mul >> add; a multi-pair pairing grows past blsVerify; blsVerify > schnorr.
+        c.bn254Mul.amount > c.bn254Add.amount,
+        (c.bn254Pairing + c.bn254PairingPerPair * 3L).amount > c.blsVerify.amount,
+        c.blsVerify.amount > c.schnorrVerify.amount,
+        // the per-pair marginal cost is the steepest crypto charge in the config.
+        c.bn254PairingPerPair.amount > c.blsAggregatePerKey.amount
+      )
+    )
+  }
+
+  test("bls_aggregate_verify gas scales with the number of public keys (per-key charge)") {
+    val evaluator = JsonLogicEvaluator.tailRecursive[IO]
+    // Use well-formed (97-byte) but bogus keys and a well-formed (49-byte) bogus
+    // aggregate signature so the op returns Right(false) -- the per-key cost is
+    // applied on success, so the values must parse cleanly.
+    val zeroPk = "0x" + "0" * (97 * 2)
+    val zeroSig = "0x" + "0" * (49 * 2)
+    def aggExpr(nKeys: Int): ApplyExpression =
+      ApplyExpression(
+        JsonLogicOp.BlsAggregateVerifyOp,
+        List(
+          ConstExpression(ArrayValue(List.fill(nKeys)(StrValue(zeroPk)))),
+          ConstExpression(StrValue("0xabcd")),
+          ConstExpression(StrValue(zeroSig))
+        )
+      )
+    for {
+      two   <- evaluator.evaluateWithGas(aggExpr(2), MapValue.empty, None, GasLimit.Unlimited, GasConfig.Default).flatMap(IO.fromEither)
+      three <- evaluator.evaluateWithGas(aggExpr(3), MapValue.empty, None, GasLimit.Unlimited, GasConfig.Default).flatMap(IO.fromEither)
+    } yield
+      expect(
+        three.gasUsed.amount - two.gasUsed.amount == GasConfig.Default.blsAggregatePerKey.amount,
+        s"3-key (${three.gasUsed.amount}) should exceed 2-key (${two.gasUsed.amount}) by exactly one per-key charge"
+      )
+  }
 }
