@@ -31,20 +31,20 @@ object CommittedBootstrapSuite extends SimpleIOSuite {
 
   test("O(1) bootstrap: hashCalculatedState is verifiable from state + breadcrumb alone") {
     for {
-      src   <- source(5)
-      cSrc  <- src.committed
+      src  <- source(5)
+      cSrc <- src.committed
       bc = cSrc.breadcrumb
 
       fresh <- CommittedState.make[IO, ToyState](state(0), config)
       // the downloading node has NO history; it hashes the fetched state with the attested breadcrumb
-      h     <- fresh.hashFor(state(5), Some(bc))
+      h <- fresh.hashFor(state(5), Some(bc))
     } yield expect(h == cSrc.roots.combinedHash)
   }
 
   test("seeding adopts the attested roots; the catalog starts unhydrated") {
     for {
-      src  <- source(5)
-      cSrc <- src.committed
+      src    <- source(5)
+      cSrc   <- src.committed
       fresh  <- CommittedState.make[IO, ToyState](state(0), config)
       seeded <- fresh.setCommitted(ord(5), state(5), Some(cSrc.breadcrumb))
     } yield
@@ -58,9 +58,9 @@ object CommittedBootstrapSuite extends SimpleIOSuite {
 
   test("seeding rejects a state that does not reproduce the attested mptRoot, and a breadcrumb for another ordinal") {
     for {
-      src  <- source(5)
-      cSrc <- src.committed
-      fresh <- CommittedState.make[IO, ToyState](state(0), config)
+      src          <- source(5)
+      cSrc         <- src.committed
+      fresh        <- CommittedState.make[IO, ToyState](state(0), config)
       wrongState   <- fresh.setCommitted(ord(5), state(4), Some(cSrc.breadcrumb)).attempt
       wrongOrdinal <- fresh.setCommitted(ord(6), state(5), Some(cSrc.breadcrumb)).attempt
       noBreadcrumb <- fresh.setCommitted(ord(5), state(5), None).attempt
@@ -74,10 +74,10 @@ object CommittedBootstrapSuite extends SimpleIOSuite {
 
   test("an unhydrated node cannot derive transitions (combine) until hydrated") {
     for {
-      src  <- source(5)
-      cSrc <- src.committed
-      fresh  <- CommittedState.make[IO, ToyState](state(0), config)
-      seeded <- fresh.setCommitted(ord(5), state(5), Some(cSrc.breadcrumb))
+      src     <- source(5)
+      cSrc    <- src.committed
+      fresh   <- CommittedState.make[IO, ToyState](state(0), config)
+      seeded  <- fresh.setCommitted(ord(5), state(5), Some(cSrc.breadcrumb))
       attempt <- fresh.advanceWork(seeded.breadcrumb, ToyState.view.entries(state(6))).attempt
     } yield expect(attempt.left.exists(_.isInstanceOf[CommittedStateError.BreadcrumbUnresolvable]))
   }
@@ -97,9 +97,9 @@ object CommittedBootstrapSuite extends SimpleIOSuite {
       hydrated <- fresh.hydrate(contents).flatMap(IO.fromEither(_))
 
       // after hydration the node derives the SAME next commitment as the source
-      _      <- src.setCommitted(ord(6), state(6))
-      cSrc6  <- src.committed
-      c6     <- fresh.setCommitted(ord(6), state(6))
+      _     <- src.setCommitted(ord(6), state(6))
+      cSrc6 <- src.committed
+      c6    <- fresh.setCommitted(ord(6), state(6))
     } yield
       expect.all(
         rejected.left.exists(_.isInstanceOf[CommittedStateError.HydrationRootMismatch]),
@@ -233,7 +233,7 @@ object CommittedBootstrapSuite extends SimpleIOSuite {
       stillAt2 <- src.committed
 
       // ...and an independent chain that COMMITS each step derives identical breadcrumbs
-      other <- source(5)
+      other  <- source(5)
       cOther <- other.committed
     } yield
       expect.all(

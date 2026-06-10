@@ -39,7 +39,7 @@ final class CatalogJournal[F[_]: MonadThrow] private (store: Collection[F, Strin
   /** Record a seal: persist `epoch:<E> -> root` and prune the sealed ordinals from the hot window. */
   def recordSeal(event: EpochCatalog.SealEvent): F[Unit] =
     store.put(CommitCatalog.epochName(event.epoch), event.root.value.asJson) >>
-      store.removeBatch(event.sealedOrdinals.map(CommitCatalog.ordinalName))
+    store.removeBatch(event.sealedOrdinals.map(CommitCatalog.ordinalName))
 
   /** Replace the journal wholesale (used when hydration installs a fresher catalog). */
   def reset(hot: SortedMap[Long, Hash], level1: SortedMap[Long, Hash]): F[Unit] =
@@ -53,16 +53,14 @@ final class CatalogJournal[F[_]: MonadThrow] private (store: Collection[F, Strin
   /** The persisted `(hot ordinal -> mptRoot, sealed epoch -> root)` maps. */
   def contents: F[(SortedMap[Long, Hash], SortedMap[Long, Hash])] =
     store.dump.flatMap { pairs =>
-      pairs
-        .traverse {
-          case (name, json) =>
-            json.as[Hash].liftTo[F].map(name -> _)
-        }
-        .map { decoded =>
-          val hot = decoded.collect { case (CatalogJournal.OrdinalName(n), h) => n -> h }
-          val level1 = decoded.collect { case (CatalogJournal.EpochName(e), h) => e -> h }
-          (SortedMap.from(hot), SortedMap.from(level1))
-        }
+      pairs.traverse {
+        case (name, json) =>
+          json.as[Hash].liftTo[F].map(name -> _)
+      }.map { decoded =>
+        val hot = decoded.collect { case (CatalogJournal.OrdinalName(n), h) => n -> h }
+        val level1 = decoded.collect { case (CatalogJournal.EpochName(e), h) => e -> h }
+        (SortedMap.from(hot), SortedMap.from(level1))
+      }
     }
 }
 

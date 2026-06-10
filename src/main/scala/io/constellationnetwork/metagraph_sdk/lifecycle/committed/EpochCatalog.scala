@@ -73,19 +73,20 @@ final case class EpochCatalog[F[_]] private (
             .insert(epochKey(epochIndex), rootValueBytes(hotRoot))
             .flatMap(EpochCatalog.requireInMemory[F])
           emptyHot <- InMemorySparseMerkleTree.empty[F]
-          retained = (sealedTrees + (epochIndex -> EpochCatalog.SealedEpoch(hotEntries, hotTree)))
+          retained = sealedTrees + (epochIndex -> EpochCatalog.SealedEpoch(hotEntries, hotTree))
           pruned = retained.drop((retained.size - retention).max(0))
-        } yield (
-          copy(
-            epochIndex = targetEpoch,
-            hotEntries = SortedMap.empty[Long, Hash],
-            hotTree = emptyHot,
-            level1Entries = level1Entries + (epochIndex -> hotRoot.value),
-            level1Tree = newLevel1,
-            sealedTrees = pruned
-          ),
-          EpochCatalog.SealEvent(epochIndex, hotRoot, hotEntries.keySet.toList).some
-        )
+        } yield
+          (
+            copy(
+              epochIndex = targetEpoch,
+              hotEntries = SortedMap.empty[Long, Hash],
+              hotTree = emptyHot,
+              level1Entries = level1Entries + (epochIndex -> hotRoot.value),
+              level1Tree = newLevel1,
+              sealedTrees = pruned
+            ),
+            EpochCatalog.SealEvent(epochIndex, hotRoot, hotEntries.keySet.toList).some
+          )
 
     sealedStep.flatMap {
       case (catalog, seal) =>
@@ -178,16 +179,17 @@ object EpochCatalog {
     for {
       hot    <- InMemorySparseMerkleTree.empty[F]
       level1 <- InMemorySparseMerkleTree.empty[F]
-    } yield EpochCatalog(
-      config.epochSize,
-      config.sealedEpochRetention,
-      0L,
-      SortedMap.empty,
-      hot,
-      SortedMap.empty,
-      level1,
-      SortedMap.empty
-    )
+    } yield
+      EpochCatalog(
+        config.epochSize,
+        config.sealedEpochRetention,
+        0L,
+        SortedMap.empty,
+        hot,
+        SortedMap.empty,
+        level1,
+        SortedMap.empty
+      )
 
   /**
    * Rebuild a catalog from transported [[CatalogContents]] (hydration / replication). Validates
@@ -231,21 +233,24 @@ object EpochCatalog {
         mismatch = rebuiltSealed.collectFirst {
           case (epoch, _, root) if !contents.level1.get(epoch).contains(root.value) => epoch
         }
-      } yield mismatch match {
-        case Some(epoch) =>
-          (CommittedStateError.MalformedCatalogContents(s"sealed epoch $epoch contents do not reproduce its level-1 root"): CommittedStateError).asLeft
-        case None =>
-          EpochCatalog(
-            epochSize,
-            config.sealedEpochRetention,
-            epochIndex,
-            contents.hot,
-            hot,
-            contents.level1,
-            level1,
-            SortedMap.from(rebuiltSealed.map { case (e, s, _) => e -> s })
-          ).asRight[CommittedStateError]
-      }
+      } yield
+        mismatch match {
+          case Some(epoch) =>
+            (CommittedStateError.MalformedCatalogContents(
+              s"sealed epoch $epoch contents do not reproduce its level-1 root"
+            ): CommittedStateError).asLeft
+          case None =>
+            EpochCatalog(
+              epochSize,
+              config.sealedEpochRetention,
+              epochIndex,
+              contents.hot,
+              hot,
+              contents.level1,
+              level1,
+              SortedMap.from(rebuiltSealed.map { case (e, s, _) => e -> s })
+            ).asRight[CommittedStateError]
+        }
     }
   }
 

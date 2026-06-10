@@ -122,8 +122,8 @@ object EpochCatalogSuite extends SimpleIOSuite {
     for {
       r <- driveTo(3, config)
       (st, _) = r
-      c     <- st.committed
-      proof <- c.proveOrdinal(ord(999)).flatMap(IO.fromEither(_)) // absence proof, epoch keyed by size 2
+      c      <- st.committed
+      proof  <- c.proveOrdinal(ord(999)).flatMap(IO.fromEither(_)) // absence proof, epoch keyed by size 2
       result <- OrdinalCatalogProofVerifier.verify[IO](c.roots.catalogRoot, proof, 3)
     } yield expect(result.isLeft)
   }
@@ -136,7 +136,7 @@ object EpochCatalogSuite extends SimpleIOSuite {
       cAtFour = cs(4)
       oldProof <- cAtFour.proveOrdinal(ord(0)).flatMap(IO.fromEither(_))
 
-      c5 <- st.setCommitted(ord(5), state(5)) // seals epoch 1 -> retention evicts epoch 0's tree
+      c5           <- st.setCommitted(ord(5), state(5)) // seals epoch 1 -> retention evicts epoch 0's tree
       freshAttempt <- c5.proveOrdinal(ord(0))
 
       epochs5 = epochsOf(c5)
@@ -149,7 +149,7 @@ object EpochCatalogSuite extends SimpleIOSuite {
       expect.all(
         freshAttempt.left.exists(_.isInstanceOf[CommittedProofError.EpochPruned]),
         epochs5.level1Entries.keySet == Set(0L, 1L), // roots never pruned
-        epochs5.sealedTrees.keySet == Set(1L),       // serving cache pruned to last K
+        epochs5.sealedTrees.keySet == Set(1L), // serving cache pruned to last K
         oldStillValid == OrdinalAttestation.CommittedAt(0L, cs(0).roots.mptRoot)
       )
   }

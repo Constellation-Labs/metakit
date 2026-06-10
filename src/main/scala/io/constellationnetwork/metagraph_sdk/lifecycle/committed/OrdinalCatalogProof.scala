@@ -168,8 +168,7 @@ object CommittedProofError {
       )
 
   /** The catalog is seeded from a breadcrumb but not hydrated: contents unknown, proofs unavailable. */
-  case object CatalogNotHydrated
-      extends CommittedProofError("catalog is breadcrumb-seeded but not hydrated; POST /committed/hydrate first")
+  case object CatalogNotHydrated extends CommittedProofError("catalog is breadcrumb-seeded but not hydrated; POST /committed/hydrate first")
 
   final case class ProofUnavailable(cause: SparseMerkleProofError)
       extends CommittedProofError(s"failed to produce catalog proof: ${cause.getMessage}")
