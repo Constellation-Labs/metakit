@@ -111,7 +111,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
     for {
       leafMap <- (0 to 31).toList.traverse(el => el.computeDigest.map(hash => Hex(hash.value) -> el)).map(_.toMap)
       trie    <- MerklePatriciaTrie.make[IO, Int](leafMap)
-    } yield expect(trie.rootNode.digest == Hash("2c225239414a82ea1b72061de98199f90e910106b9e9896bd6df4cc74e6c39a0"))
+    } yield expect(trie.rootNode.digest == Hash("66658b9b010e472c26323576a2cdea0b04b619509c60161932260ea00cc9d0c8"))
 
   }
 
@@ -121,7 +121,7 @@ object MerklePatriciaTrieSuite extends SimpleIOSuite with Checkers {
       trie      <- MerklePatriciaTrie.make[IO, Int](leafMap)
       newLeaves <- (-31 to -0).toList.traverse(el => el.computeDigest.map(hash => Hex(hash.value) -> el)).map(_.toMap)
       trie2     <- MerklePatriciaProducer.stateless[IO].insert(trie, newLeaves).flatMap(IO.fromEither(_))
-    } yield expect(trie2.rootNode.digest == Hash("f01117b41e875b6f432e12a10b340ddd0cafa077a4b9b82aed688695adf58c45"))
+    } yield expect(trie2.rootNode.digest == Hash("921e485e4dab7d4a23ec4136afe8944ef177b3a38cb546195c1e860315c04c97"))
   }
 
   test("create then remove produces a trie with a known root digest") {

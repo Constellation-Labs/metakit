@@ -168,11 +168,18 @@ class StatelessMerklePatriciaProducer[F[_]: JsonBinaryHasher: MonadThrow] extend
         ): InsertState).asLeft[Either[MerklePatriciaError, MerklePatriciaNode]].pure[F]
       } else {
         (for {
-          newExtension <- MerklePatriciaNode.Extension[F](sharedRemaining.tail, extensionNode.child)
-          newLeaf      <- MerklePatriciaNode.Leaf[F](keyRemaining.tail, data)
+          // When the existing extension diverges at its very last shared nibble, the remaining
+          // shared path is empty. A zero-length Extension is degenerate (it duplicates its child
+          // structurally while changing the digest), which makes the resulting trie depend on
+          // insertion order. In that case the surviving subtree is simply the extension's child
+          // Branch, with no extension wrapper.
+          existingSubtree <-
+            if (sharedRemaining.tail.isEmpty) (extensionNode.child: MerklePatriciaNode).pure[F]
+            else MerklePatriciaNode.Extension[F](sharedRemaining.tail, extensionNode.child).widen[MerklePatriciaNode]
+          newLeaf <- MerklePatriciaNode.Leaf[F](keyRemaining.tail, data)
           branchNode <- MerklePatriciaNode.Branch[F](
             Map(
-              sharedRemaining.head -> newExtension,
+              sharedRemaining.head -> existingSubtree,
               keyRemaining.head    -> newLeaf
             )
           )
