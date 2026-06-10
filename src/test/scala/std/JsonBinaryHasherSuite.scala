@@ -30,6 +30,10 @@ object JsonBinaryHasherSuite extends SimpleIOSuite with Checkers {
       hashExpected = Hash(expected)
     } yield expect.same(hashExpected, hashActual)
 
+  // arrays.json contains an object field `"10": null`. The codec drops null OBJECT fields BEFORE
+  // canonicalizing (schema-evolution-safe — lets you add optional fields without changing the hash of
+  // prior data; matches ottochain-sdk `drop-nulls.ts` and released metakit 1.7.0's null-dropping). The
+  // canonical form is therefore [56,{"1":[],"d":true}] (the null `"10"` removed, keys sorted).
   test("arrays.json should produce a known hash") {
     runTest("arrays.json", "060ba9d4be65e7b773f67328b6fd6a5360f8f66ef88d57351dbc6e39b46f2ea9")
   }
