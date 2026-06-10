@@ -11,6 +11,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Verify vendored BouncyCastle jar pins
+        # Same pins as ci.yml (source of truth: lib/README.md). This is the
+        # build that compiles the PUBLISHED artifact against these jars, so the
+        # check must run here, not only on PRs.
+        run: |
+          sha256sum -c <<'EOF'
+          03b4a7656d6aedcff28626e26c1645f4b9956bf0c6d614ee0fba3241a2ced5b8  lib/bcprov-jdk18on-1.85-SNAPSHOT.jar
+          8ec6507c99806587ec739f1e1c710226326f81aecfd8dccad4f6c5753a3e5349  lib/bcpkix-jdk18on-1.85-SNAPSHOT.jar
+          EOF
+
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
