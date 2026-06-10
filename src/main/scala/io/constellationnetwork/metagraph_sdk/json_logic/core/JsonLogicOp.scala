@@ -99,4 +99,11 @@ object JsonLogicOp extends Enum[JsonLogicOp] with CirceEnum[JsonLogicOp] {
   case object BlsVerifyOp extends JsonLogicOp("bls_verify")
   case object BlsAggregateVerifyOp extends JsonLogicOp("bls_aggregate_verify")
   case object SchnorrVerifyOp extends JsonLogicOp("schnorr_verify")
+
+  // ZK / Crypto Operations -- third wave (clear-text authenticated databases: SMT + MPT).
+  // Unlike the Poseidon/BN254 verifiers above (field-element hex), these tries store circe JSON;
+  // proofs and values are JSON-encoded, while roots/keys/prefixes remain hex.
+  case object SmtVerifyOp extends JsonLogicOp("smt_verify")
+  case object MptVerifyOp extends JsonLogicOp("mpt_verify")
+  case object MptPrefixVerifyOp extends JsonLogicOp("mpt_prefix_verify")
 }

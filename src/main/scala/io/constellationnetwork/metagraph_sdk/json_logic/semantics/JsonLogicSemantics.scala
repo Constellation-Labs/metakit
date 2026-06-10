@@ -1,13 +1,13 @@
 package io.constellationnetwork.metagraph_sdk.json_logic.semantics
 
-import cats.Monad
 import cats.syntax.all._
+import cats.{Monad, MonadThrow}
 
 import io.constellationnetwork.metagraph_sdk.json_logic.core.JsonLogicOp._
 import io.constellationnetwork.metagraph_sdk.json_logic.core._
 import io.constellationnetwork.metagraph_sdk.json_logic.ops.CoercionOps._
-import io.constellationnetwork.metagraph_sdk.json_logic.ops.CryptoOps
 import io.constellationnetwork.metagraph_sdk.json_logic.ops.NumericOps._
+import io.constellationnetwork.metagraph_sdk.json_logic.ops.{AuthDbOps, CryptoOps}
 import io.constellationnetwork.metagraph_sdk.json_logic.runtime.ResultContext._
 import io.constellationnetwork.metagraph_sdk.json_logic.runtime.{JsonLogicRuntime, ResultContext}
 import io.constellationnetwork.metagraph_sdk.numerics.Ratio
@@ -25,7 +25,7 @@ object JsonLogicSemantics {
 
   def apply[F[_], Result[_]](implicit ev: JsonLogicSemantics[F, Result]): JsonLogicSemantics[F, Result] = ev
 
-  def make[F[_]: Monad, Result[_]: ResultContext](
+  def make[F[_]: MonadThrow, Result[_]: ResultContext](
     vars: JsonLogicValue,
     evaluationStrategy: EvaluationCallback[F, Result]
   ): JsonLogicSemantics[F, Result] =
@@ -157,6 +157,9 @@ object JsonLogicSemantics {
           case BlsVerifyOp          => handleBlsVerifyOp
           case BlsAggregateVerifyOp => handleBlsAggregateVerifyOp
           case SchnorrVerifyOp      => handleSchnorrVerifyOp
+          case SmtVerifyOp          => handleSmtVerifyOp
+          case MptVerifyOp          => handleMptVerifyOp
+          case MptPrefixVerifyOp    => handleMptPrefixVerifyOp
         }
 
       private def isFieldMissing(field: JsonLogicValue): F[Option[JsonLogicValue]] = field match {
@@ -1274,6 +1277,24 @@ object JsonLogicSemantics {
       private def handleSchnorrVerifyOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>
           CryptoOps.schnorrVerify(values).map(_.pure[Result])
+        }
+
+      // WAVE 3 -- auth-DB verifiers. Unlike the pure CryptoOps above, these run in F (the verifiers
+      // are F[_]: MonadThrow: JsonBinaryHasher), so the handler awaits the effectful Either result and
+      // lifts the value into Result, preserving the upstream metrics via withMetrics.
+      private def handleSmtVerifyOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
+        args.withMetrics { values =>
+          AuthDbOps.smtVerify[F](values).map(_.map(_.pure[Result]))
+        }
+
+      private def handleMptVerifyOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
+        args.withMetrics { values =>
+          AuthDbOps.mptVerify[F](values).map(_.map(_.pure[Result]))
+        }
+
+      private def handleMptPrefixVerifyOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
+        args.withMetrics { values =>
+          AuthDbOps.mptPrefixVerify[F](values).map(_.map(_.pure[Result]))
         }
 
       // Let is handled specially in the runtime; this should not be reached

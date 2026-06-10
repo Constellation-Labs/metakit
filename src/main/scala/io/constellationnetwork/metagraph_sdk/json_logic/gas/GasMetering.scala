@@ -153,6 +153,20 @@ case class GasConfig(
   blsAggregateVerify: GasCost = GasCost(120_000),
   blsAggregatePerKey: GasCost = GasCost(15_000),
   schnorrVerify: GasCost = GasCost(45_000),
+  // ZK / crypto opcodes -- third wave (clear-text authenticated databases: SMT + MPT). These run an
+  // authentication-path / witness fold that hashes one canonical-JSON commitment per node, so cost is
+  // a flat base plus a per-element charge (charged in the gas-aware layer):
+  //   - smt_verify cost scales with the proof DEPTH (#siblings on the authentication path),
+  //   - mpt_verify cost scales with the #nodes in the proof witness,
+  //   - mpt_prefix_verify cost scales with the #entries proven complete under the prefix.
+  // The scale sits between pmt_verify (Poseidon path) and the pairing ops: each per-element step is a
+  // canonical-bytes SHA-256, materially cheaper than a Miller loop but dearer than a Poseidon round.
+  smtVerify: GasCost = GasCost(500),
+  smtPerSibling: GasCost = GasCost(400),
+  mptVerify: GasCost = GasCost(500),
+  mptPerNode: GasCost = GasCost(400),
+  mptPrefixVerify: GasCost = GasCost(1_000),
+  mptPrefixPerEntry: GasCost = GasCost(800),
   const: GasCost = GasCost.Zero,
   varAccess: GasCost = GasCost(2),
   depthPenaltyMultiplier: Long = 5L,
