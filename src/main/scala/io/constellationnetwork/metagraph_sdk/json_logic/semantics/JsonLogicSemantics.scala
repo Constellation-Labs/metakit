@@ -6,6 +6,7 @@ import cats.syntax.all._
 import io.constellationnetwork.metagraph_sdk.json_logic.core.JsonLogicOp._
 import io.constellationnetwork.metagraph_sdk.json_logic.core._
 import io.constellationnetwork.metagraph_sdk.json_logic.ops.CoercionOps._
+import io.constellationnetwork.metagraph_sdk.json_logic.ops.CryptoOps
 import io.constellationnetwork.metagraph_sdk.json_logic.ops.NumericOps._
 import io.constellationnetwork.metagraph_sdk.json_logic.runtime.ResultContext._
 import io.constellationnetwork.metagraph_sdk.json_logic.runtime.{JsonLogicRuntime, ResultContext}
@@ -84,68 +85,72 @@ object JsonLogicSemantics {
 
       override def applyOp(op: JsonLogicOp): List[Result[JsonLogicValue]] => F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         op match {
-          case NoOp          => _ => JsonLogicException("Got unexpected NoOp!").asLeft[Result[JsonLogicValue]].pure[F]
-          case MissingNoneOp => handleMissingNone
-          case ExistsOp      => handleExists
-          case MissingSomeOp => handleMissingSome
-          case IfElseOp      => handleIfElseOp
-          case LetOp         => handleLetOp
-          case EqOp          => handleEqOp
-          case EqStrictOp    => handleEqStrictOp
-          case NEqOp         => handleNEqOp
-          case NEqStrictOp   => handleNEqStrictOp
-          case NotOp         => handleNotOp
-          case NOp           => handleNOp
-          case OrOp          => handleOrOp
-          case AndOp         => handleAndOp
-          case Lt            => handleLt
-          case Leq           => handleLeq
-          case Gt            => handleGt
-          case Geq           => handleGeq
-          case ModuloOp      => handleModuloOp
-          case MaxOp         => handleMaxOp
-          case MinOp         => handleMinOp
-          case AddOp         => handleAddOp
-          case TimesOp       => handleTimesOp
-          case MinusOp       => handleMinusOp
-          case DivOp         => handleDivOp
-          case MergeOp       => handleMergeOp
-          case InOp          => handleInOp
-          case CatOp         => handleCatOp
-          case SubStrOp      => handleSubstrOp
-          case MapOp         => handleMapOp
-          case FilterOp      => handleFilterOp
-          case ReduceOp      => handleReduceOp
-          case AllOp         => handleAllOp
-          case NoneOp        => handleNoneOp
-          case SomeOp        => handleSomeOp
-          case MapValuesOp   => handleMapValuesOp
-          case MapKeysOp     => handleMapKeysOp
-          case GetOp         => handleGetOp
-          case IntersectOp   => handleIntersectOp
-          case CountOp       => handleCountOp
-          case LengthOp      => handleLengthOp
-          case FindOp        => handleFindOp
-          case LowerOp       => handleLowerOp
-          case UpperOp       => handleUpperOp
-          case JoinOp        => handleJoinOp
-          case SplitOp       => handleSplitOp
-          case DefaultOp     => handleDefaultOp
-          case UniqueOp      => handleUniqueOp
-          case SliceOp       => handleSliceOp
-          case ReverseOp     => handleReverseOp
-          case FlattenOp     => handleFlattenOp
-          case TrimOp        => handleTrimOp
-          case StartsWithOp  => handleStartsWithOp
-          case EndsWithOp    => handleEndsWithOp
-          case AbsOp         => handleAbsOp
-          case RoundOp       => handleRoundOp
-          case FloorOp       => handleFloorOp
-          case CeilOp        => handleCeilOp
-          case PowOp         => handlePowOp
-          case HasOp         => handleHasOp
-          case EntriesOp     => handleEntriesOp
-          case TypeOfOp      => handleTypeOfOp
+          case NoOp            => _ => JsonLogicException("Got unexpected NoOp!").asLeft[Result[JsonLogicValue]].pure[F]
+          case MissingNoneOp   => handleMissingNone
+          case ExistsOp        => handleExists
+          case MissingSomeOp   => handleMissingSome
+          case IfElseOp        => handleIfElseOp
+          case LetOp           => handleLetOp
+          case EqOp            => handleEqOp
+          case EqStrictOp      => handleEqStrictOp
+          case NEqOp           => handleNEqOp
+          case NEqStrictOp     => handleNEqStrictOp
+          case NotOp           => handleNotOp
+          case NOp             => handleNOp
+          case OrOp            => handleOrOp
+          case AndOp           => handleAndOp
+          case Lt              => handleLt
+          case Leq             => handleLeq
+          case Gt              => handleGt
+          case Geq             => handleGeq
+          case ModuloOp        => handleModuloOp
+          case MaxOp           => handleMaxOp
+          case MinOp           => handleMinOp
+          case AddOp           => handleAddOp
+          case TimesOp         => handleTimesOp
+          case MinusOp         => handleMinusOp
+          case DivOp           => handleDivOp
+          case MergeOp         => handleMergeOp
+          case InOp            => handleInOp
+          case CatOp           => handleCatOp
+          case SubStrOp        => handleSubstrOp
+          case MapOp           => handleMapOp
+          case FilterOp        => handleFilterOp
+          case ReduceOp        => handleReduceOp
+          case AllOp           => handleAllOp
+          case NoneOp          => handleNoneOp
+          case SomeOp          => handleSomeOp
+          case MapValuesOp     => handleMapValuesOp
+          case MapKeysOp       => handleMapKeysOp
+          case GetOp           => handleGetOp
+          case IntersectOp     => handleIntersectOp
+          case CountOp         => handleCountOp
+          case LengthOp        => handleLengthOp
+          case FindOp          => handleFindOp
+          case LowerOp         => handleLowerOp
+          case UpperOp         => handleUpperOp
+          case JoinOp          => handleJoinOp
+          case SplitOp         => handleSplitOp
+          case DefaultOp       => handleDefaultOp
+          case UniqueOp        => handleUniqueOp
+          case SliceOp         => handleSliceOp
+          case ReverseOp       => handleReverseOp
+          case FlattenOp       => handleFlattenOp
+          case TrimOp          => handleTrimOp
+          case StartsWithOp    => handleStartsWithOp
+          case EndsWithOp      => handleEndsWithOp
+          case AbsOp           => handleAbsOp
+          case RoundOp         => handleRoundOp
+          case FloorOp         => handleFloorOp
+          case CeilOp          => handleCeilOp
+          case PowOp           => handlePowOp
+          case HasOp           => handleHasOp
+          case EntriesOp       => handleEntriesOp
+          case TypeOfOp        => handleTypeOfOp
+          case PoseidonOp      => handlePoseidonOp
+          case PmtVerifyOp     => handlePmtVerifyOp
+          case Groth16VerifyOp => handleGroth16VerifyOp
+          case EcVrfVerifyOp   => handleEcVrfVerifyOp
         }
 
       private def isFieldMissing(field: JsonLogicValue): F[Option[JsonLogicValue]] = field match {
@@ -1213,6 +1218,26 @@ object JsonLogicSemantics {
             case value :: Nil => (StrValue(value.tag): JsonLogicValue).pure[Result].asRight[JsonLogicException]
             case _            => JsonLogicException(s"Unexpected input to ${TypeOfOp.tag}, got $values").asLeft[Result[JsonLogicValue]]
           }
+        }
+
+      private def handlePoseidonOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
+        args.withMetrics { values =>
+          CryptoOps.poseidon(values).map(_.pure[Result])
+        }
+
+      private def handlePmtVerifyOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
+        args.withMetrics { values =>
+          CryptoOps.pmtVerify(values).map(_.pure[Result])
+        }
+
+      private def handleGroth16VerifyOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
+        args.withMetrics { values =>
+          CryptoOps.groth16Verify(values).map(_.pure[Result])
+        }
+
+      private def handleEcVrfVerifyOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
+        args.withMetrics { values =>
+          CryptoOps.ecVrfVerify(values).map(_.pure[Result])
         }
 
       // Let is handled specially in the runtime; this should not be reached
