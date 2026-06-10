@@ -847,11 +847,12 @@ object GasMeteringSuite extends SimpleIOSuite with Checkers {
 
   test("bls_aggregate_verify gas scales with the number of public keys (per-key charge)") {
     val evaluator = JsonLogicEvaluator.tailRecursive[IO]
-    // Use well-formed (97-byte) but bogus keys and a well-formed (49-byte) bogus
-    // aggregate signature so the op returns Right(false) -- the per-key cost is
-    // applied on success, so the values must parse cleanly.
-    val zeroPk = "0x" + "0" * (97 * 2)
-    val zeroSig = "0x" + "0" * (49 * 2)
+    // Use well-formed (48-byte compressed-G1) but bogus keys and a well-formed
+    // (96-byte compressed-G2) bogus aggregate signature so the op returns
+    // Right(false) -- the per-key cost is applied on success, so the values must
+    // parse cleanly.
+    val zeroPk = "0x" + "0" * (48 * 2)
+    val zeroSig = "0x" + "0" * (96 * 2)
     def aggExpr(nKeys: Int): ApplyExpression =
       ApplyExpression(
         JsonLogicOp.BlsAggregateVerifyOp,

@@ -6,7 +6,7 @@ import java.security.MessageDigest
 import cats.syntax.either._
 import cats.syntax.traverse._
 
-import io.constellationnetwork.metagraph_sdk.crypto.bls.MiraclBls12381
+import io.constellationnetwork.metagraph_sdk.crypto.bls.Bls12381
 import io.constellationnetwork.metagraph_sdk.crypto.vrf.MiraclEcVrf25519
 import io.constellationnetwork.metagraph_sdk.crypto.zk.merkle.{PoseidonMerkleProof, PoseidonMerkleTree}
 import io.constellationnetwork.metagraph_sdk.crypto.zk.poseidon.Poseidon
@@ -260,7 +260,8 @@ object CryptoOps {
   }
 
   // ---------------------------------------------------------------------------
-  // bls_verify: [pkHex(97B G2), msgHex, sigHex(49B G1)] -> bool.
+  // bls_verify: [pkHex(48B G1), msgHex, sigHex(96B G2)] -> bool.
+  //   Eth2 / IETF ProofOfPossession ciphersuite (BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_).
   // ---------------------------------------------------------------------------
 
   def blsVerify(values: List[JsonLogicValue]): Either[JsonLogicException, JsonLogicValue] =
@@ -270,17 +271,18 @@ object CryptoOps {
           pkHex  <- expectStr("bls_verify pk")(pkV)
           msgHex <- expectStr("bls_verify msg")(msgV)
           sigHex <- expectStr("bls_verify sig")(sigV)
-          pk     <- HexBytes.parseBytes(pkHex, Some(MiraclBls12381.PublicKeyBytes), "bls_verify pk")
+          pk     <- HexBytes.parseBytes(pkHex, Some(Bls12381.PublicKeyBytes), "bls_verify pk")
           msg    <- HexBytes.parseBytes(msgHex, None, "bls_verify msg")
-          sig    <- HexBytes.parseBytes(sigHex, Some(MiraclBls12381.SignatureBytes), "bls_verify sig")
-        } yield BoolValue(MiraclBls12381.verify(pk, msg, sig))
+          sig    <- HexBytes.parseBytes(sigHex, Some(Bls12381.SignatureBytes), "bls_verify sig")
+        } yield BoolValue(Bls12381.verify(pk, msg, sig))
       case _ =>
-        JsonLogicException(s"bls_verify: expected [pkHex(97B), msgHex, sigHex(49B)], got $values").asLeft
+        JsonLogicException(s"bls_verify: expected [pkHex(48B), msgHex, sigHex(96B)], got $values").asLeft
     }
 
   // ---------------------------------------------------------------------------
-  // bls_aggregate_verify: [[pkHex(97B), ...], msgHex, aggSigHex(49B)] -> bool.
-  //   SAME-message N-of-N aggregation (threshold / multisig case).
+  // bls_aggregate_verify: [[pkHex(48B), ...], msgHex, aggSigHex(96B)] -> bool.
+  //   SAME-message N-of-N aggregation (threshold / multisig case) via the Eth2
+  //   ProofOfPossession fastAggregateVerify.
   // ---------------------------------------------------------------------------
 
   def blsAggregateVerify(values: List[JsonLogicValue]): Either[JsonLogicException, JsonLogicValue] =
@@ -293,14 +295,14 @@ object CryptoOps {
           pks <- pksV.zipWithIndex.traverse {
             case (pkV, i) =>
               expectStr(s"bls_aggregate_verify pk[$i]")(pkV)
-                .flatMap(HexBytes.parseBytes(_, Some(MiraclBls12381.PublicKeyBytes), s"bls_aggregate_verify pk[$i]"))
+                .flatMap(HexBytes.parseBytes(_, Some(Bls12381.PublicKeyBytes), s"bls_aggregate_verify pk[$i]"))
           }
           msg    <- HexBytes.parseBytes(msgHex, None, "bls_aggregate_verify msg")
-          aggSig <- HexBytes.parseBytes(sigHex, Some(MiraclBls12381.SignatureBytes), "bls_aggregate_verify aggSig")
-        } yield BoolValue(MiraclBls12381.aggregateVerify(pks, msg, aggSig))
+          aggSig <- HexBytes.parseBytes(sigHex, Some(Bls12381.SignatureBytes), "bls_aggregate_verify aggSig")
+        } yield BoolValue(Bls12381.fastAggregateVerify(pks, msg, aggSig))
       case _ =>
         JsonLogicException(
-          s"bls_aggregate_verify: expected [[pkHex(97B), ...], msgHex, aggSigHex(49B)], got $values"
+          s"bls_aggregate_verify: expected [[pkHex(48B), ...], msgHex, aggSigHex(96B)], got $values"
         ).asLeft
     }
 
