@@ -15,7 +15,18 @@ import io.constellationnetwork.metagraph_sdk.numerics.RatioOps.implicits._
 
 trait JsonLogicSemantics[F[_], Result[_]] {
   def getVar(key: String, ctx: Option[JsonLogicValue] = None): F[Either[JsonLogicException, Result[JsonLogicValue]]]
-  def applyOp(op: JsonLogicOp): List[Result[JsonLogicValue]] => F[Either[JsonLogicException, Result[JsonLogicValue]]]
+
+  /**
+   * Apply `op` to its (already evaluated) arguments. `depth` is the runtime recursion depth of
+   * the applying node (see [[JsonLogicRuntime.MaxEvalDepth]]): handlers that run callbacks
+   * (map / filter / reduce / ...) resume nested evaluation FROM it, so the depth guard counts
+   * callback runs exactly like the Rust reference's shared depth cell.
+   */
+  def applyOp(op: JsonLogicOp, depth: Int): List[Result[JsonLogicValue]] => F[Either[JsonLogicException, Result[JsonLogicValue]]]
+
+  /** Depth-less convenience overload: applies at recursion depth 0 (top of tree). */
+  def applyOp(op: JsonLogicOp): List[Result[JsonLogicValue]] => F[Either[JsonLogicException, Result[JsonLogicValue]]] =
+    applyOp(op, 0)
 
   /**
    * Flat per-node charge for ops the runtime dispatches LAZILY (`if` / `let`) without ever
@@ -28,8 +39,13 @@ trait JsonLogicSemantics[F[_], Result[_]] {
 
 object JsonLogicSemantics {
 
+  /**
+   * Nested-evaluation callback. The third argument is the runtime recursion depth the nested
+   * run resumes FROM (its root expression then evaluates at `depth + 1`), threading the
+   * [[JsonLogicRuntime.MaxEvalDepth]] guard across callback boundaries.
+   */
   type EvaluationCallback[F[_], Result[_]] =
-    (JsonLogicExpression, Option[JsonLogicValue]) => F[Either[JsonLogicException, Result[JsonLogicValue]]]
+    (JsonLogicExpression, Option[JsonLogicValue], Int) => F[Either[JsonLogicException, Result[JsonLogicValue]]]
 
   def apply[F[_], Result[_]](implicit ev: JsonLogicSemantics[F, Result]): JsonLogicSemantics[F, Result] = ev
 
@@ -91,13 +107,16 @@ object JsonLogicSemantics {
         }
       }
 
-      override def applyOp(op: JsonLogicOp): List[Result[JsonLogicValue]] => F[Either[JsonLogicException, Result[JsonLogicValue]]] =
+      override def applyOp(
+        op: JsonLogicOp,
+        depth: Int
+      ): List[Result[JsonLogicValue]] => F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         op match {
           case NoOp                 => _ => JsonLogicException("Got unexpected NoOp!").asLeft[Result[JsonLogicValue]].pure[F]
           case MissingNoneOp        => handleMissingNone
           case ExistsOp             => handleExists
           case MissingSomeOp        => handleMissingSome
-          case IfElseOp             => handleIfElseOp
+          case IfElseOp             => handleIfElseOp(_, depth)
           case LetOp                => handleLetOp
           case EqOp                 => handleEqOp
           case EqStrictOp           => handleEqStrictOp
@@ -122,19 +141,19 @@ object JsonLogicSemantics {
           case InOp                 => handleInOp
           case CatOp                => handleCatOp
           case SubStrOp             => handleSubstrOp
-          case MapOp                => handleMapOp
-          case FilterOp             => handleFilterOp
-          case ReduceOp             => handleReduceOp
-          case AllOp                => handleAllOp
-          case NoneOp               => handleNoneOp
-          case SomeOp               => handleSomeOp
+          case MapOp                => handleMapOp(_, depth)
+          case FilterOp             => handleFilterOp(_, depth)
+          case ReduceOp             => handleReduceOp(_, depth)
+          case AllOp                => handleAllOp(_, depth)
+          case NoneOp               => handleNoneOp(_, depth)
+          case SomeOp               => handleSomeOp(_, depth)
           case MapValuesOp          => handleMapValuesOp
           case MapKeysOp            => handleMapKeysOp
           case GetOp                => handleGetOp
           case IntersectOp          => handleIntersectOp
-          case CountOp              => handleCountOp
+          case CountOp              => handleCountOp(_, depth)
           case LengthOp             => handleLengthOp
-          case FindOp               => handleFindOp
+          case FindOp               => handleFindOp(_, depth)
           case LowerOp              => handleLowerOp
           case UpperOp              => handleUpperOp
           case JoinOp               => handleJoinOp
@@ -242,7 +261,7 @@ object JsonLogicSemantics {
         }).map(_.map(v => ResultContext[Result].flatMap(combined)(_ => v.pure[Result])))
       }
 
-      private def handleIfElseOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
+      private def handleIfElseOp(args: List[Result[JsonLogicValue]], depth: Int): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
         val combined = ResultContext[Result].sequence(args)
         val values = ResultContext[Result].extract(combined)
 
@@ -258,7 +277,9 @@ object JsonLogicSemantics {
 
           selectedBranch match {
             case Some(branchExpr) =>
-              evaluationStrategy(branchExpr, None).map(_.map(branchResult => ResultContext[Result].flatMap(combined)(_ => branchResult)))
+              evaluationStrategy(branchExpr, None, depth).map(
+                _.map(branchResult => ResultContext[Result].flatMap(combined)(_ => branchResult))
+              )
             case None => JsonLogicException("failed during if/else evaluation").asLeft[Result[JsonLogicValue]].pure[F]
           }
         }
@@ -673,34 +694,39 @@ object JsonLogicSemantics {
 
       private def handleSubstrOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
 
-        def impl(str: String, start: Int, length: Int): Either[JsonLogicException, Result[JsonLogicValue]] =
+        // i64-saturating index semantics, byte-matching Rust `op_substr` (eval.rs): start/length accept the
+        // full i64 range (values beyond it error via safeToI64), index arithmetic saturates at the i64
+        // bounds, and the clamps below make saturation equivalent to exact (unbounded) arithmetic.
+        def impl(str: String, start: Long, length: Long): Either[JsonLogicException, Result[JsonLogicValue]] =
           for {
             s <- Option(str).toRight(JsonLogicException("substr expects a non-null string"))
-            strLen = s.length
-            rawStart = if (start < 0) strLen + start else start
-            startIdx = Math.max(0, Math.min(rawStart, strLen))
-            endIdx = if (length >= 0) Math.min(startIdx + length, strLen) else Math.max(0, strLen + length)
-            substr = if (startIdx >= strLen || endIdx <= startIdx) "" else s.substring(startIdx, endIdx)
+            strLen = s.length.toLong
+            rawStart = if (start < 0L) saturatingAddI64(strLen, start) else start
+            startIdx = Math.max(0L, Math.min(rawStart, strLen))
+            endIdx =
+              if (length >= 0L) Math.min(saturatingAddI64(startIdx, length), strLen)
+              else Math.max(0L, saturatingAddI64(strLen, length))
+            substr = if (startIdx >= strLen || endIdx <= startIdx) "" else s.substring(startIdx.toInt, endIdx.toInt)
           } yield (StrValue(substr): JsonLogicValue).pure[Result]
 
         args.withMetrics {
           case StrValue(str) :: IntValue(start) :: Nil =>
-            safeToInt(start, "substr start").flatMap(s => impl(str, s, str.length))
+            safeToI64(start, "substr start").flatMap(s => impl(str, s, str.length.toLong))
           case StrValue(str) :: IntValue(start) :: IntValue(length) :: Nil =>
             for {
-              s <- safeToInt(start, "substr start")
-              l <- safeToInt(length, "substr length")
+              s <- safeToI64(start, "substr start")
+              l <- safeToI64(length, "substr length")
               r <- impl(str, s, l)
             } yield r
           case _ => JsonLogicException(s"Unexpected input to `${SubStrOp.tag}` got $values").asLeft[Result[JsonLogicValue]]
         }
       }
 
-      private def handleMapOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
+      private def handleMapOp(args: List[Result[JsonLogicValue]], depth: Int): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
 
         def impl(arr: List[JsonLogicValue], expr: JsonLogicExpression): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
           arr
-            .traverse(el => evaluationStrategy(expr, el.some))
+            .traverse(el => evaluationStrategy(expr, el.some, depth))
             .map(_.sequence.map(_.sequence.map(ArrayValue(_))))
 
         args.extractValues match {
@@ -709,14 +735,14 @@ object JsonLogicSemantics {
         }
       }
 
-      private def handleFilterOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
+      private def handleFilterOp(args: List[Result[JsonLogicValue]], depth: Int): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
 
         def impl(
           arr: List[JsonLogicValue],
           expr: JsonLogicExpression
         ): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
           arr.traverse { el =>
-            evaluationStrategy(expr, el.some).map {
+            evaluationStrategy(expr, el.some, depth).map {
               case Right(result) =>
                 (el, result.extractValue.isTruthy).asRight[JsonLogicException]
               case Left(err) => err.asLeft[(JsonLogicValue, Boolean)]
@@ -734,7 +760,7 @@ object JsonLogicSemantics {
         }
       }
 
-      private def handleReduceOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
+      private def handleReduceOp(args: List[Result[JsonLogicValue]], depth: Int): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
 
         def impl(
           arr: List[JsonLogicValue],
@@ -745,7 +771,7 @@ object JsonLogicSemantics {
             accEither match {
               case Left(err) => err.asLeft[Result[JsonLogicValue]].pure[F]
               case Right(accResult) =>
-                evaluationStrategy(expr, MapValue(Map("current" -> item, "accumulator" -> accResult.extractValue)).some).map {
+                evaluationStrategy(expr, MapValue(Map("current" -> item, "accumulator" -> accResult.extractValue)).some, depth).map {
                   case Right(newResult) =>
                     val RC = ResultContext[Result]
                     val combined = RC.flatMap(accResult)(_ => newResult)
@@ -767,14 +793,14 @@ object JsonLogicSemantics {
         }
       }
 
-      private def handleAllOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
+      private def handleAllOp(args: List[Result[JsonLogicValue]], depth: Int): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
 
         def impl(
           arr: List[JsonLogicValue],
           expr: JsonLogicExpression
         ): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
           arr.traverse { el =>
-            evaluationStrategy(expr, el.some).map {
+            evaluationStrategy(expr, el.some, depth).map {
               case Right(result) => result.map(_.isTruthy).asRight[JsonLogicException]
               case Left(err)     => err.asLeft[Result[Boolean]]
             }
@@ -790,14 +816,14 @@ object JsonLogicSemantics {
         }
       }
 
-      private def handleNoneOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
+      private def handleNoneOp(args: List[Result[JsonLogicValue]], depth: Int): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
 
         def impl(
           arr: List[JsonLogicValue],
           expr: JsonLogicExpression
         ): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
           arr.traverse { el =>
-            evaluationStrategy(expr, el.some).map {
+            evaluationStrategy(expr, el.some, depth).map {
               case Right(result) => result.map(v => !v.isTruthy).asRight[JsonLogicException]
               case Left(err)     => err.asLeft[Result[Boolean]]
             }
@@ -813,7 +839,7 @@ object JsonLogicSemantics {
         }
       }
 
-      private def handleSomeOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
+      private def handleSomeOp(args: List[Result[JsonLogicValue]], depth: Int): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
 
         def impl(
           arr: List[JsonLogicValue],
@@ -821,7 +847,7 @@ object JsonLogicSemantics {
           threshold: Int
         ): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
           arr.traverse { el =>
-            evaluationStrategy(expr, el.some).map {
+            evaluationStrategy(expr, el.some, depth).map {
               case Right(result) =>
                 result.extractValue.isTruthy.asRight[JsonLogicException]
               case Left(err) => err.asLeft[Boolean]
@@ -887,7 +913,7 @@ object JsonLogicSemantics {
         }
       }
 
-      private def handleCountOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
+      private def handleCountOp(args: List[Result[JsonLogicValue]], depth: Int): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
 
         def countSimple(arr: List[JsonLogicValue]): Either[JsonLogicException, Result[JsonLogicValue]] =
           (IntValue(arr.length): JsonLogicValue).pure[Result].asRight[JsonLogicException]
@@ -897,7 +923,7 @@ object JsonLogicSemantics {
           expr: JsonLogicExpression
         ): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
           arr.traverse { el =>
-            evaluationStrategy(expr, el.some).map {
+            evaluationStrategy(expr, el.some, depth).map {
               case Right(result) => result.extractValue.isTruthy.asRight[JsonLogicException]
               case Left(err)     => err.asLeft[Boolean]
             }
@@ -923,7 +949,7 @@ object JsonLogicSemantics {
           }
         }
 
-      private def handleFindOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
+      private def handleFindOp(args: List[Result[JsonLogicValue]], depth: Int): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
 
         def impl(
           arr: List[JsonLogicValue],
@@ -934,7 +960,7 @@ object JsonLogicSemantics {
               case (Right(acc @ Some(_)), _) =>
                 (acc.asRight[JsonLogicException]: Either[JsonLogicException, Option[JsonLogicValue]]).pure[F]
               case (Right(None), el) =>
-                evaluationStrategy(expr, el.some).map {
+                evaluationStrategy(expr, el.some, depth).map {
                   case Right(result) =>
                     (if (result.extractValue.isTruthy) Some(el) else None).asRight[JsonLogicException]
                   case Left(err) => err.asLeft[Option[JsonLogicValue]]
@@ -1030,20 +1056,27 @@ object JsonLogicSemantics {
 
       private def handleSliceOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>
+          // i64-saturating index semantics, byte-matching Rust `op_slice` (eval.rs): start/end accept the
+          // full i64 range (values beyond it error via safeToI64) and the saturating add + clamps yield
+          // the same indices as exact arithmetic (see handleSubstrOp for the same hazard).
+          def clampIndex(idx: Long, len: Long): Long =
+            if (idx < 0L) Math.max(0L, saturatingAddI64(len, idx)) else Math.min(idx, len)
+
           values match {
             case ArrayValue(arr) :: IntValue(start) :: Nil =>
-              safeToInt(start, "slice start").map { s =>
-                val startIdx = if (s < 0) Math.max(0, arr.length + s) else s
-                (ArrayValue(arr.drop(startIdx)): JsonLogicValue).pure[Result]
+              safeToI64(start, "slice start").map { s =>
+                val startIdx = clampIndex(s, arr.length.toLong)
+                (ArrayValue(arr.drop(startIdx.toInt)): JsonLogicValue).pure[Result]
               }
             case ArrayValue(arr) :: IntValue(start) :: IntValue(end) :: Nil =>
               for {
-                s <- safeToInt(start, "slice start")
-                e <- safeToInt(end, "slice end")
+                s <- safeToI64(start, "slice start")
+                e <- safeToI64(end, "slice end")
               } yield {
-                val startIdx = if (s < 0) Math.max(0, arr.length + s) else s
-                val endIdx = if (e < 0) Math.max(0, arr.length + e) else e
-                (ArrayValue(arr.slice(startIdx, endIdx)): JsonLogicValue).pure[Result]
+                val len = arr.length.toLong
+                val startIdx = clampIndex(s, len)
+                val endIdx = clampIndex(e, len)
+                (ArrayValue(arr.slice(startIdx.toInt, endIdx.toInt)): JsonLogicValue).pure[Result]
               }
             case _ => JsonLogicException(s"Unexpected input to ${SliceOp.tag}, got $values").asLeft[Result[JsonLogicValue]]
           }
@@ -1317,10 +1350,11 @@ object JsonLogicSemantics {
 
     def evaluateWith(
       program: JsonLogicExpression,
-      ctx: Option[JsonLogicValue]
+      ctx: Option[JsonLogicValue],
+      baseDepth: Int = 0
     ): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
       implicit val implicitSem: JsonLogicSemantics[F, Result] = sem
-      JsonLogicRuntime.evaluate(program, ctx)
+      JsonLogicRuntime.evaluate(program, ctx, baseDepth)
     }
   }
 }

@@ -47,18 +47,19 @@ object JsonLogicEvaluator {
     ): F[Either[JsonLogicException, JsonLogicValue]] = {
 
       def evalFn: JsonLogicSemantics.EvaluationCallback[F, cats.Id] =
-        (e, c) => evaluateRecursive(e, c, data)
+        (e, c, d) => evaluateRecursive(e, c, data, d)
 
       def evaluateRecursive(
         expression: JsonLogicExpression,
         context: Option[JsonLogicValue],
-        vars: JsonLogicValue
+        vars: JsonLogicValue,
+        baseDepth: Int
       ): F[Either[JsonLogicException, JsonLogicValue]] = {
         val semantics = JsonLogicSemantics.make[F, cats.Id](vars, evalFn)
-        JsonLogicRuntime.evaluate(expression, context)(MonadThrow[F], ResultContext.idContext, semantics)
+        JsonLogicRuntime.evaluate(expression, context, baseDepth)(MonadThrow[F], ResultContext.idContext, semantics)
       }
 
-      evaluateRecursive(expr, ctx, data)
+      evaluateRecursive(expr, ctx, data, 0)
     }
 
     override def evaluateWithGas(
@@ -73,26 +74,28 @@ object JsonLogicEvaluator {
           expression: JsonLogicExpression,
           context: Option[JsonLogicValue],
           depth: Int,
+          recDepth: Int,
           vars: JsonLogicValue
         ): F[Either[JsonLogicException, ResultContext.WithGas[JsonLogicValue]]] = {
 
           def evalFn(
             e: JsonLogicExpression,
             c: Option[JsonLogicValue],
-            d: Int
+            d: Int,
+            rd: Int
           ): F[Either[JsonLogicException, ResultContext.WithGas[JsonLogicValue]]] =
-            evaluateGasAware(e, c, d, vars)
+            evaluateGasAware(e, c, d, rd, vars)
 
           val semantics = GasAwareSemantics.makeWithRef[F](vars, gasLimitRef, gasConfig, evalFn, depth)
           JsonLogicRuntime
-            .evaluate(expression, context)(Sync[F], ResultContext.gasContext, semantics)
+            .evaluate(expression, context, recDepth)(Sync[F], ResultContext.gasContext, semantics)
             .map(_.map {
               case (value, metrics) =>
                 (value, metrics.withDepth(depth + 1).incrementOps)
             })
         }
 
-        evaluateGasAware(expr, ctx, 0, data).flatMap {
+        evaluateGasAware(expr, ctx, 0, 0, data).flatMap {
           case Left(err)               => err.asLeft[EvaluationResult[JsonLogicValue]].pure[F]
           case Right((value, metrics)) =>
             // Report gasUsed as the gas-ref delta: the gas that was ACTUALLY consumed
@@ -129,18 +132,19 @@ object JsonLogicEvaluator {
     ): F[Either[JsonLogicException, JsonLogicValue]] = {
 
       def evalFn: JsonLogicSemantics.EvaluationCallback[F, cats.Id] =
-        (e, c) => evaluateRecursive(e, c, data)
+        (e, c, d) => evaluateRecursive(e, c, data, d)
 
       def evaluateRecursive(
         expression: JsonLogicExpression,
         context: Option[JsonLogicValue],
-        vars: JsonLogicValue
+        vars: JsonLogicValue,
+        baseDepth: Int
       ): F[Either[JsonLogicException, JsonLogicValue]] = {
         val semantics = JsonLogicSemantics.make[F, cats.Id](vars, evalFn)
-        JsonLogicRuntime.evaluateDirect(expression, context)(MonadThrow[F], ResultContext.idContext, semantics)
+        JsonLogicRuntime.evaluateDirect(expression, context, baseDepth)(MonadThrow[F], ResultContext.idContext, semantics)
       }
 
-      evaluateRecursive(expr, ctx, data)
+      evaluateRecursive(expr, ctx, data, 0)
     }
 
     override def evaluateWithGas(

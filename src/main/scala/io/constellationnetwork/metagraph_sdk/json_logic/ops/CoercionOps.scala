@@ -53,8 +53,14 @@ object CoercionOps {
   private def safeParseBigDecimal(s: String): Option[BigDecimal] =
     if (s.length > MaxNumericStringLength) None
     else
-      try Some(BigDecimal(s))
-      catch { case _: NumberFormatException => None }
+      try {
+        val bd = BigDecimal(s)
+        // Mirror the Rust reference (coercion.rs `safe_parse_decimal` -> `Ratio::parse_decimal`):
+        // an effective decimal scale beyond NumericOps.MaxDecimalScale fails to parse, so the
+        // coerced comparison is simply `false` (never an error, never a 10^|scale| memory bomb).
+        if (math.abs(bd.bigDecimal.scale.toLong) > NumericOps.MaxDecimalScale.toLong) None
+        else Some(bd)
+      } catch { case _: NumberFormatException => None }
 
   def compareCoercedValues(l: CoercedValue, r: CoercedValue): Either[JsonLogicException, Boolean] =
     (l, r) match {

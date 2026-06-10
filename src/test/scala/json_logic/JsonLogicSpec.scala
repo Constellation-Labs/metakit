@@ -3162,29 +3162,43 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
   }
 
   // === Safe integer overflow checks ===
+  // Wave-2 parity: substr/slice indices accept the FULL i64 range with the
+  // Rust reference's saturating semantics (eval.rs op_substr / op_slice);
+  // only values beyond i64 are an error. See ParityWave2Suite for the
+  // exhaustive extreme-value pins.
 
-  test("substr with huge start index returns error") {
+  test("substr with i64::MAX start index saturates to the empty string") {
     val exprStr = """{"substr": ["hello", 9223372036854775807]}"""
     val dataStr = """null"""
 
     parseTestJson(exprStr, dataStr).flatMap {
       case (expr, data) =>
-        expectError(expr, data)
+        staticTestRunner(expr, data, StrValue(""))
     }
   }
 
-  test("slice with huge start index returns error") {
+  test("slice with i64::MAX start index saturates to the empty array") {
     val exprStr = """{"slice": [[1,2,3], 9223372036854775807]}"""
     val dataStr = """null"""
 
     parseTestJson(exprStr, dataStr).flatMap {
       case (expr, data) =>
-        expectError(expr, data)
+        staticTestRunner(expr, data, ArrayValue(Nil))
     }
   }
 
-  test("slice with huge end index returns error") {
+  test("slice with i64::MAX end index clamps to the array length") {
     val exprStr = """{"slice": [[1,2,3], 0, 9223372036854775807]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, ArrayValue(List(IntValue(1), IntValue(2), IntValue(3))))
+    }
+  }
+
+  test("substr with a beyond-i64 start index returns error") {
+    val exprStr = """{"substr": ["hello", 9223372036854775808]}"""
     val dataStr = """null"""
 
     parseTestJson(exprStr, dataStr).flatMap {
