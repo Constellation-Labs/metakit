@@ -10,7 +10,7 @@ import io.constellationnetwork.metagraph_sdk.crypto.bls.Bls12381
 import io.constellationnetwork.metagraph_sdk.crypto.vrf.MiraclEcVrf25519
 import io.constellationnetwork.metagraph_sdk.crypto.zk.merkle.{PoseidonMerkleProof, PoseidonMerkleTree}
 import io.constellationnetwork.metagraph_sdk.crypto.zk.poseidon.Poseidon
-import io.constellationnetwork.metagraph_sdk.crypto.zk.{Bn254, Sp1Groth16Verifier}
+import io.constellationnetwork.metagraph_sdk.crypto.zk.{Bn254, Groth16Verifier, Sp1Groth16Verifier}
 import io.constellationnetwork.metagraph_sdk.json_logic.core._
 
 /**
@@ -33,8 +33,13 @@ object CryptoOps {
   // poseidon: variadic field elements -> Fr hash (32B hex).
   // ---------------------------------------------------------------------------
 
-  /** Largest input width (t) for which circomlib constants are bundled (t = #inputs + 1). */
-  private val PoseidonMaxInputs: Int = 16
+  /**
+   * Largest input count for which circomlib constants are bundled (t = #inputs + 1).
+   * Derived from [[Poseidon]]'s constants so the opcode cap can never exceed what
+   * the primitive supports (a larger cap would let inputs through to an internal
+   * `require`, escaping the evaluator as a raw exception).
+   */
+  private val PoseidonMaxInputs: Int = Poseidon.MaxInputs
 
   def poseidon(values: List[JsonLogicValue]): Either[JsonLogicException, JsonLogicValue] = {
     val hexArgs: Either[JsonLogicException, List[String]] = values match {
@@ -57,7 +62,11 @@ object CryptoOps {
         JsonLogicException(s"poseidon: supports at most $PoseidonMaxInputs inputs, got ${hexes.length}")
       )
       inputs <- hexes.zipWithIndex.traverse { case (h, i) => HexBytes.parseFr(h, s"poseidon input[$i]") }
-      digest = Poseidon.hash(inputs)
+      // Defense-in-depth: the inputs are fully pre-validated above, but a future
+      // validation gap must degrade to a JLVM error, never escape evaluate().
+      digest <- Either
+        .catchNonFatal(Poseidon.hash(inputs))
+        .leftMap(e => JsonLogicException(s"poseidon: ${e.getMessage}"))
       out <- HexBytes.encodeFr(digest)
     } yield StrValue(out)
   }
@@ -109,9 +118,17 @@ object CryptoOps {
           vkey     <- HexBytes.parseBytes(vkeyHex, Some(32), "groth16_verify vkey")
           pub      <- HexBytes.parseBytes(pubHex, None, "groth16_verify publicValues")
           proof    <- HexBytes.parseBytes(proofHex, None, "groth16_verify proof")
-        } yield
-          // Right(()) -> true, Left(_) -> false (a malformed-but-well-typed proof is simply invalid).
-          BoolValue(Sp1Groth16Verifier.verify(vkey, pub, proof).isRight)
+          // Error-vs-false discipline (lockstep with Rust op_groth16_verify):
+          //   Right(())            -> true
+          //   Left("ENCODING: ..") -> hard opcode error (malformed, non-canonical proof bytes)
+          //   any other Left(_)    -> false (well-formed but cryptographically invalid)
+          result <- Sp1Groth16Verifier.verify(vkey, pub, proof) match {
+            case Right(()) => BoolValue(true).asRight
+            case Left(e) if e.startsWith(Groth16Verifier.EncodingErrorPrefix) =>
+              JsonLogicException(s"groth16_verify: $e").asLeft
+            case Left(_) => BoolValue(false).asRight
+          }
+        } yield result
       case _ =>
         JsonLogicException(
           s"groth16_verify: expected [vkeyHex, publicValuesHex, proofHex], got $values"

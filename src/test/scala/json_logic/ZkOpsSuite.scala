@@ -88,6 +88,21 @@ object ZkOpsSuite extends SimpleIOSuite {
     expect(multi == Right(StrValue(fr(poseidon_1_2))))
   }
 
+  test("poseidon accepts the maximum input count (4) and matches the primitive") {
+    val inputs = (1 to 4).map(i => HexBytes.encodeFr(BigInt(i)).fold(throw _, identity))
+    val expected = HexBytes.encodeFr(Poseidon.hash((1 to 4).map(BigInt(_)))).fold(throw _, identity)
+    evalExpr(s"""{"poseidon":[${inputs.map(h => s""""$h"""").mkString(",")}]}""")
+      .map(r => expect(r == Right(StrValue(expected))))
+  }
+
+  test("poseidon rejects more inputs than constants support (Result error, no crash)") {
+    // 5 inputs (width t=6) has no bundled circomlib constants; previously this
+    // escaped evaluate() as a raw IllegalArgumentException via an internal require.
+    val inputs = (1 to 5).map(i => HexBytes.encodeFr(BigInt(i)).fold(throw _, identity))
+    evalExpr(s"""{"poseidon":[${inputs.map(h => s""""$h"""").mkString(",")}]}""")
+      .map(r => expect(r.isLeft).and(expect(r.swap.exists(_.getMessage.contains("at most")))))
+  }
+
   test("poseidon rejects a non-canonical / malformed input (Result error, no crash)") {
     val nonCanonical = "0x" + "f" * 64
     evalExpr(s"""{"poseidon":["$nonCanonical"]}""").map { r =>
@@ -175,6 +190,19 @@ object ZkOpsSuite extends SimpleIOSuite {
   test("groth16_verify errors on a wrong-width vkey (not 32 bytes)") {
     evalExpr(s"""{"groth16_verify":["0xdead","${groth16.publicValues}","${groth16.proofBytes}"]}""")
       .map(r => expect(r.isLeft))
+  }
+
+  test("groth16_verify: a proof coordinate >= P is a hard ENCODING error, not false (matches Rust)") {
+    // Overwrite Groth16 proof word 0 (A.x) with 0xff..ff >= P: a malformed
+    // ENCODING that must be an opcode error, while a well-formed-but-invalid
+    // proof (byte-flip test above) is `false`. Layout: selector(4) ++
+    // exitCode/vkRoot/nonce(3*32) ++ proof words, so A.x starts at byte 100.
+    val hex = groth16.proofBytes.stripPrefix("0x")
+    val wordStart = (4 + 32 * 3) * 2
+    val tampered = "0x" + hex.substring(0, wordStart) + "ff" * 32 + hex.substring(wordStart + 64)
+    evalExpr(s"""{"groth16_verify":["${groth16.vkey}","${groth16.publicValues}","$tampered"]}""").map { r =>
+      expect(r.isLeft).and(expect(r.swap.exists(_.getMessage.contains("ENCODING"))))
+    }
   }
 
   // ===========================================================================

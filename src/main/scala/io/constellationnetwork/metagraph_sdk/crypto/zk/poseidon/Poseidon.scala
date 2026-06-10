@@ -25,6 +25,17 @@ import scala.annotation.tailrec
  *
  * All arithmetic is over Fr, i.e. `BigInt` reduced modulo the field modulus
  * [[Poseidon.R]].
+ *
+ * ==Security: PUBLIC INPUTS ONLY — not constant-time==
+ *
+ * `BigInt` (JVM `BigInteger`) arithmetic is variable-time in its operand
+ * values, so this implementation leaks input-dependent timing. That is fine
+ * for every current call site (the `poseidon` / `pmt_verify` JLVM opcodes and
+ * Merkle building, which only ever hash caller-supplied PUBLIC data), but it
+ * means this function must NEVER be used to hash secrets (note values,
+ * nullifier keys, private commitments). Secret-side Poseidon hashing belongs
+ * in the SP1 prover stack (metakit-sdk `rust/zk-shielded`), which runs on the
+ * prover's own machine.
  */
 object Poseidon {
 
@@ -38,6 +49,9 @@ object Poseidon {
 
   /** Largest input width (t) for which circomlib constants are bundled here. */
   private val MaxWidth: Int = PoseidonConstants.partialRounds.keys.max
+
+  /** Largest number of inputs [[hash]] supports (width t = inputs + 1). */
+  val MaxInputs: Int = MaxWidth - 1
 
   /**
    * Hash a sequence of field elements with circomlib semantics.
