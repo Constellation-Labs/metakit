@@ -33,15 +33,26 @@ import io.constellationnetwork.metagraph_sdk.json_logic.runtime.ResultContext
  */
 object GasAwareSemantics {
 
+  /**
+   * Nested-evaluation callback for the gas-aware stack. The third argument is the SEMANTICS
+   * depth (`currentDepth`, advanced only across callback boundaries; feeds the gas metrics);
+   * the fourth is the RUNTIME recursion depth the nested run resumes from (threads the
+   * [[io.constellationnetwork.metagraph_sdk.json_logic.runtime.JsonLogicRuntime.MaxEvalDepth]]
+   * guard across callback boundaries, exactly like the un-metered evaluator).
+   */
+  type GasEvaluationCallback[F[_]] =
+    (
+      JsonLogicExpression,
+      Option[JsonLogicValue],
+      Int,
+      Int
+    ) => F[Either[JsonLogicException, ResultContext.WithGas[JsonLogicValue]]]
+
   def make[F[_]: Sync](
     vars: JsonLogicValue,
     gasLimit: GasLimit,
     gasConfig: GasConfig,
-    evaluationStrategy: (
-      JsonLogicExpression,
-      Option[JsonLogicValue],
-      Int
-    ) => F[Either[JsonLogicException, ResultContext.WithGas[JsonLogicValue]]],
+    evaluationStrategy: GasEvaluationCallback[F],
     currentDepth: Int = 0
   ): F[JsonLogicSemantics[F, ResultContext.WithGas]] =
     Ref.of[F, GasLimit](gasLimit).map { gasLimitRef =>
@@ -52,19 +63,16 @@ object GasAwareSemantics {
     vars: JsonLogicValue,
     gasLimitRef: Ref[F, GasLimit],
     gasConfig: GasConfig,
-    evaluationStrategy: (
-      JsonLogicExpression,
-      Option[JsonLogicValue],
-      Int
-    ) => F[Either[JsonLogicException, ResultContext.WithGas[JsonLogicValue]]],
+    evaluationStrategy: GasEvaluationCallback[F],
     currentDepth: Int = 0
   ): JsonLogicSemantics[F, ResultContext.WithGas] = {
 
     def wrappedEval(
       expr: JsonLogicExpression,
-      ctx: Option[JsonLogicValue]
+      ctx: Option[JsonLogicValue],
+      recDepth: Int
     ): F[Either[JsonLogicException, ResultContext.WithGas[JsonLogicValue]]] =
-      evaluationStrategy(expr, ctx, currentDepth + 1)
+      evaluationStrategy(expr, ctx, currentDepth + 1, recDepth)
 
     val baseSemantics = JsonLogicSemantics.make[F, ResultContext.WithGas](vars, wrappedEval)
 
@@ -112,7 +120,8 @@ object GasAwareSemantics {
       }
 
       override def applyOp(
-        op: JsonLogicOp
+        op: JsonLogicOp,
+        recDepth: Int
       ): List[ResultContext.WithGas[JsonLogicValue]] => F[Either[JsonLogicException, ResultContext.WithGas[JsonLogicValue]]] =
         args => {
           val argValues = args.map { case (value, _) => value }
@@ -129,7 +138,7 @@ object GasAwareSemantics {
           consumeGas(preCost).flatMap {
             case Left(err) => err.asLeft[ResultContext.WithGas[JsonLogicValue]].pure[F]
             case Right(()) =>
-              baseSemantics.applyOp(op)(args).flatMap {
+              baseSemantics.applyOp(op, recDepth)(args).flatMap {
                 case Right((value, metrics)) =>
                   // Residual component only observable on the produced value (e.g. split piece
                   // count); the work it prices is bounded by inputs that were already paid for.

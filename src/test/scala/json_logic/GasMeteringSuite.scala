@@ -962,15 +962,17 @@ object GasMeteringSuite extends SimpleIOSuite with Checkers {
     def evalWithRef(ref: Ref[IO, GasLimit])(
       e: JsonLogicExpression,
       c: Option[JsonLogicValue],
-      d: Int
+      d: Int,
+      rd: Int
     ): IO[Either[JsonLogicException, ResultContext.WithGas[JsonLogicValue]]] = {
-      val sem = GasAwareSemantics.makeWithRef[IO](data, ref, config, (e2, c2, d2) => evalWithRef(ref)(e2, c2, d2), d)
-      JsonLogicRuntime.evaluate(e, c)(Sync[IO], ResultContext.gasContext, sem)
+      val sem =
+        GasAwareSemantics.makeWithRef[IO](data, ref, config, (e2, c2, d2, rd2) => evalWithRef(ref)(e2, c2, d2, rd2), d)
+      JsonLogicRuntime.evaluate(e, c, rd)(Sync[IO], ResultContext.gasContext, sem)
     }
 
     for {
       ref       <- Ref.of[IO, GasLimit](limit)
-      _         <- evalWithRef(ref)(expr, None, 0).flatMap(IO.fromEither)
+      _         <- evalWithRef(ref)(expr, None, 0, 0).flatMap(IO.fromEither)
       remaining <- ref.get
       reported <- JsonLogicEvaluator
         .tailRecursive[IO]

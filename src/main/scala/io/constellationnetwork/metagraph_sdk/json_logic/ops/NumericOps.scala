@@ -19,6 +19,31 @@ import io.constellationnetwork.metagraph_sdk.numerics.RatioOps.implicits._
  */
 object NumericOps {
 
+  /**
+   * Maximum permitted magnitude of the effective decimal scale (fractional digits minus exponent) accepted by string ->
+   * number coercion. Mirrors the Rust reference `Ratio::MAX_DECIMAL_SCALE` (rust/jlvm-core/src/ratio.rs).
+   *
+   * SECURITY: `Ratio.fromBigDecimal` materializes `10^|scale|` as a full BigInt, so an attacker-controlled exponent like
+   * "1e-2000000000" would eagerly allocate a multi-GB integer (memory bomb). Scala's BigDecimal stores such strings
+   * compactly without expansion, so without this shared bound the Scala evaluator would compute an exact tiny value where
+   * Rust/TS reject — a consensus divergence. With it, programs like {"+":["1e-2000000000"]} error in ALL impls.
+   */
+  val MaxDecimalScale: Int = 10000
+
+  /**
+   * Parse a decimal string into an exact Ratio, rejecting any value whose effective decimal scale magnitude exceeds
+   * [[MaxDecimalScale]]. Java BigDecimal's `scale` is exactly `fractionalDigits - exponent`, the same quantity Rust's
+   * `Ratio::parse_decimal` bounds; it is checked BEFORE `Ratio.fromBigDecimal` materializes `10^|scale|`.
+   */
+  def parseDecimalBounded(s: String): Either[Throwable, Ratio] =
+    Either.catchNonFatal(BigDecimal(s)).flatMap { bd =>
+      val scale = bd.bigDecimal.scale
+      if (math.abs(scale.toLong) > MaxDecimalScale.toLong)
+        JsonLogicException(s"Decimal scale $scale exceeds maximum magnitude $MaxDecimalScale").asLeft
+      else
+        Ratio.fromBigDecimal(bd).asRight
+    }
+
   /** Exact rational division (was BigDecimal DECIMAL128 on dev; now lossless). */
   def safeDivide(l: Ratio, r: Ratio): Ratio =
     l / r
@@ -28,6 +53,28 @@ object NumericOps {
       bi.toInt.asRight
     else
       JsonLogicException(s"$name value $bi exceeds Int range").asLeft
+
+  /**
+   * BigInt -> i64 (Long) conversion matching the Rust reference `bigint_to_i64` (eval.rs): values outside the i64 range
+   * are an error. The error text byte-matches Rust's (`"<name> out of range"`).
+   */
+  def safeToI64(bi: BigInt, name: String): Either[JsonLogicException, Long] =
+    if (bi >= Long.MinValue && bi <= Long.MaxValue)
+      bi.toLong.asRight
+    else
+      JsonLogicException(s"$name out of range").asLeft
+
+  /**
+   * Long addition saturating at the i64 bounds, mirroring Rust's `i64::saturating_add` used by `op_substr` / `op_slice`:
+   * the operands are attacker-controlled i64 extremes, and saturation followed by the callers' clamps yields the same
+   * indices as exact (unbounded) arithmetic would.
+   */
+  def saturatingAddI64(a: Long, b: Long): Long = {
+    val r = a + b
+    if (((a ^ r) & (b ^ r)) < 0L) {
+      if (a < 0L) Long.MinValue else Long.MaxValue
+    } else r
+  }
 
   sealed trait NumericResult {
 
@@ -69,7 +116,7 @@ object NumericOps {
           Either
             .catchNonFatal(BigInt(s))
             .map(IntResult(_): NumericResult)
-            .orElse(Either.catchNonFatal(Ratio.fromBigDecimal(BigDecimal(s))).map(FloatResult(_): NumericResult))
+            .orElse(parseDecimalBounded(s).map(FloatResult(_): NumericResult))
             .leftMap(_ => JsonLogicException(s"Cannot convert string '$s' to number"))
         }
       case ArrayValue(List(single)) =>
