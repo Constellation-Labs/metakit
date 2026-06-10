@@ -46,29 +46,11 @@ object ZkVectorConformanceSuite extends SimpleIOSuite {
    * listed case must STILL be failing — if it starts passing, the suite fails
    * loudly so the stale entry gets removed.
    *
-   * Currently listed (vectors v1.7.0):
-   *
-   *   - `ecvrf_verify` / `known_answer`: the single valid-proof ECVRF case. The
-   *     v1.7.0 vectors still carry the draft-irtf-cfrg-vrf-10 FOUR-point
-   *     challenge proof (mislabelled "RFC 9381"), while the Scala reference
-   *     (`MiraclEcVrf25519`) implements the final RFC 9381 §5.4.3 FIVE-point
-   *     challenge (suite || 0x02 || Y || H || Gamma || U || V || 0x00) and is
-   *     anchored on the official Appendix B.3 vectors. Scala therefore
-   *     correctly REJECTS the draft-10 pi (`{valid: false, beta: null}`). The
-   *     Rust side is being re-anchored on the official RFC 9381 Appendix B.3
-   *     Example 17 pi/beta in vectors v1.8.0; re-syncing v1.8.0 removes these
-   *     two entries. The tampered / wrong-width ecvrf cases are unaffected
-   *     (false/error in both constructions) and remain enforced.
+   * Currently EMPTY (vectors v1.8.0): the ecvrf cases are anchored on the
+   * official RFC 9381 Appendix B.3 Example 17 pi/beta, matching the Scala
+   * reference's final 5-point challenge — no divergences remain.
    */
-  private val DivergentEcvrfDraft10Expr: String =
-    "{\"ecvrf_verify\":[\"0x3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c\",\"0x72\"," +
-    "\"0xf3141cd382dc42909d19ec5110469e4feae18300e94f304590abdced48aed593f7eaf3eb2f1a968cba3f6e23b386aeea" +
-    "ab7b1ea44a256e811892e13eeae7c9f6ea8992557453eac11c4d5476b1f35a08\"]}"
-
-  private val KnownDivergences: Set[(String, String)] = Set(
-    ("ecvrf_verify", DivergentEcvrfDraft10Expr),
-    ("known_answer", DivergentEcvrfDraft10Expr)
-  )
+  private val KnownDivergences: Set[(String, String)] = Set.empty
 
   private val VectorsPath = "src/test/resources/conformance/zk_opcode_test_vectors.json"
 
