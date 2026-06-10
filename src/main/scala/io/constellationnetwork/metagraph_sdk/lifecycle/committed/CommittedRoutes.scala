@@ -136,7 +136,6 @@ object CommittedRoutes {
 
   object BatchProofRequest {
 
-    implicit val decoder: Decoder[BatchProofRequest] = (c: HCursor) =>
-      c.downField("keys").as[List[String]].map(BatchProofRequest(_))
+    implicit val decoder: Decoder[BatchProofRequest] = (c: HCursor) => c.downField("keys").as[List[String]].map(BatchProofRequest(_))
   }
 }

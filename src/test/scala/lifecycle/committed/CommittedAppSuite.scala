@@ -1,4 +1,5 @@
 package io.constellationnetwork.metagraph_sdk.lifecycle.committed
+
 import cats.effect.IO
 import cats.syntax.all._
 
@@ -35,8 +36,8 @@ object CommittedAppSuite extends SimpleIOSuite {
   private val combiner: CombinerService[IO, ToyTx, ToyPub, ToyPrv] =
     new CombinerService[IO, ToyTx, ToyPub, ToyPrv] {
 
-      def insert(previous: DataState[ToyPub, ToyPrv], update: Signed[ToyTx])(implicit
-        ctx: L0NodeContext[IO]
+      def insert(previous: DataState[ToyPub, ToyPrv], update: Signed[ToyTx])(
+        implicit ctx: L0NodeContext[IO]
       ): IO[DataState[ToyPub, ToyPrv]] =
         previous.copy(onChain = ToyPub(previous.onChain.updateCount + 1)).pure[IO]
     }
@@ -47,8 +48,8 @@ object CommittedAppSuite extends SimpleIOSuite {
       def validateUpdate(update: ToyTx)(implicit ctx: L1NodeContext[IO]): IO[DataApplicationValidationErrorOr[Unit]] =
         ().validNec[DataApplicationValidationError].pure[IO]
 
-      def validateSignedUpdate(current: DataState[ToyPub, ToyPrv], signedUpdate: Signed[ToyTx])(implicit
-        ctx: L0NodeContext[IO]
+      def validateSignedUpdate(current: DataState[ToyPub, ToyPrv], signedUpdate: Signed[ToyTx])(
+        implicit ctx: L0NodeContext[IO]
       ): IO[DataApplicationValidationErrorOr[Unit]] =
         ().validNec[DataApplicationValidationError].pure[IO]
     }
@@ -81,16 +82,17 @@ object CommittedAppSuite extends SimpleIOSuite {
 
   test("GET /committed/root reflects the committed ordinal, roots, and consensus hash") {
     for {
-      service <- makeService
-      _       <- service.setCalculatedState(ord(1), ToyPrv(s1))
-      res     <- get(service, "/committed/root")
-      json    <- res.as[Json]
+      service      <- makeService
+      _            <- service.setCalculatedState(ord(1), ToyPrv(s1))
+      res          <- get(service, "/committed/root")
+      json         <- res.as[Json]
       expectedHash <- CommittedCommitment.deriveHash[IO, ToyPrv](ToyPrv(s1))
-    } yield expect.all(
-      res.status == Status.Ok,
-      json.hcursor.downField("ordinal").as[SnapshotOrdinal] == Right(ord(1)),
-      json.hcursor.downField("calculatedStateHash").as[String] == Right(expectedHash.value)
-    )
+    } yield
+      expect.all(
+        res.status == Status.Ok,
+        json.hcursor.downField("ordinal").as[SnapshotOrdinal] == Right(ord(1)),
+        json.hcursor.downField("calculatedStateHash").as[String] == Right(expectedHash.value)
+      )
   }
 
   test("GET /committed/proof/<key> proves a key; invalid keys are 400, absent keys 404") {
@@ -100,13 +102,14 @@ object CommittedAppSuite extends SimpleIOSuite {
       json    <- found.as[Json]
       missing <- get(service, "/committed/proof/fiber/zzz")
       invalid <- get(service, "/committed/proof/FIBER/aaa")
-    } yield expect.all(
-      found.status == Status.Ok,
-      json.hcursor.downField("key").as[String] == Right("fiber/aaa"),
-      json.hcursor.downField("proof").succeeded,
-      missing.status == Status.NotFound,
-      invalid.status == Status.BadRequest
-    )
+    } yield
+      expect.all(
+        found.status == Status.Ok,
+        json.hcursor.downField("key").as[String] == Right("fiber/aaa"),
+        json.hcursor.downField("proof").succeeded,
+        missing.status == Status.NotFound,
+        invalid.status == Status.BadRequest
+      )
   }
 
   test("POST /committed/proofs returns one batch proof for many keys") {
@@ -116,10 +119,11 @@ object CommittedAppSuite extends SimpleIOSuite {
         .withEntity(Json.obj("keys" -> List("fiber/aaa", "registry/alpha").asJson))
       res  <- service.routes.orNotFound.run(req)
       json <- res.as[Json]
-    } yield expect.all(
-      res.status == Status.Ok,
-      json.hcursor.downField("proof").downField("paths").as[List[String]].exists(_.size == 2)
-    )
+    } yield
+      expect.all(
+        res.status == Status.Ok,
+        json.hcursor.downField("proof").downField("paths").as[List[String]].exists(_.size == 2)
+      )
   }
 
   test("GET /committed/proof-prefix/<ns> returns the namespace attestation") {
@@ -127,11 +131,12 @@ object CommittedAppSuite extends SimpleIOSuite {
       service <- makeService
       res     <- get(service, "/committed/proof-prefix/fiber")
       json    <- res.as[Json]
-    } yield expect.all(
-      res.status == Status.Ok,
-      json.hcursor.downField("namespace").as[String] == Right("fiber"),
-      json.hcursor.downField("proof").downField("paths").as[List[String]].exists(_.size == 2)
-    )
+    } yield
+      expect.all(
+        res.status == Status.Ok,
+        json.hcursor.downField("namespace").as[String] == Right("fiber"),
+        json.hcursor.downField("proof").downField("paths").as[List[String]].exists(_.size == 2)
+      )
   }
 
   test("GET /committed/delta/:ordinal serves retained deltas and 404s evicted ones") {

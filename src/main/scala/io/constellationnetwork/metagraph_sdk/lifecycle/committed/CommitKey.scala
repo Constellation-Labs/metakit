@@ -57,8 +57,8 @@ object CommitKey {
       else if (segments.length > MaxSegments) CommitKeyError.TooManySegments(segments.length).asLeft
       else
         segments.collectFirst {
-          case s if s.length > MaxSegmentLength    => CommitKeyError.SegmentTooLong(s)
-          case s if !SegmentPattern.matches(s)     => CommitKeyError.InvalidSegment(s)
+          case s if s.length > MaxSegmentLength => CommitKeyError.SegmentTooLong(s)
+          case s if !SegmentPattern.matches(s)  => CommitKeyError.InvalidSegment(s)
         } match {
           case Some(err) => err.asLeft
           case None      => ().asRight

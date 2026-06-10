@@ -2,11 +2,7 @@ package io.constellationnetwork.metagraph_sdk.lifecycle.committed
 
 import cats.effect.IO
 
-import io.constellationnetwork.metagraph_sdk.crypto.mpt.api.{
-  MerklePatriciaBatchInclusionVerifier,
-  MerklePatriciaVerifier,
-  PathNotFound
-}
+import io.constellationnetwork.metagraph_sdk.crypto.mpt.api.{MerklePatriciaBatchInclusionVerifier, MerklePatriciaVerifier, PathNotFound}
 import io.constellationnetwork.metagraph_sdk.crypto.smt.api.SparseMerkleVerifier
 import io.constellationnetwork.metagraph_sdk.crypto.smt.{SparseMerkleEntry, SparseMerkleProof}
 import io.constellationnetwork.metagraph_sdk.json_logic.core.{BoolValue, JsonLogicValue, MapValue, StrValue}
@@ -54,10 +50,11 @@ object CommittedProofSuite extends SimpleIOSuite {
       c     <- CommittedState.make[IO, ToyState](s0).flatMap(_.committed)
       proof <- c.attestNamespace(CommitNamespace.unsafe("fiber")).flatMap(IO.fromEither(_))
       ok    <- MerklePatriciaBatchInclusionVerifier.make[IO](c.roots.mptRoot).confirm(proof)
-    } yield expect.all(
-      ok.isRight,
-      proof.paths.toSet == Set(CommitKey.unsafe("fiber/aaa").toHex, CommitKey.unsafe("fiber/bbb").toHex)
-    )
+    } yield
+      expect.all(
+        ok.isRight,
+        proof.paths.toSet == Set(CommitKey.unsafe("fiber/aaa").toHex, CommitKey.unsafe("fiber/bbb").toHex)
+      )
   }
 
   test("namespace attestation is JLVM mpt_prefix_verify compatible (0x-prefixed hex formats)") {
@@ -77,7 +74,7 @@ object CommittedProofSuite extends SimpleIOSuite {
         entriesJlv,
         jlv(proof.asJson)
       )
-      complete   <- AuthDbOps.mptPrefixVerify[IO](args)
+      complete <- AuthDbOps.mptPrefixVerify[IO](args)
       incomplete <- AuthDbOps.mptPrefixVerify[IO](
         args.updated(2, MapValue(entriesJlv.value - CommitKey.unsafe("fiber/bbb").toHex.value))
       )
@@ -99,20 +96,21 @@ object CommittedProofSuite extends SimpleIOSuite {
 
       absentProof <- c2.proveCatalog(CommitCatalog.ordinalName(ord(999999))).flatMap(IO.fromEither(_))
       absent      <- verifier.verify(c2.roots.smtRoot, absentProof).flatMap(IO.fromEither(_))
-    } yield expect.all(
-      current.value match {
-        case SparseMerkleEntry.Present(_, value) => value.sameElements(CommitCatalog.rootValueBytes(c2.roots.mptRoot))
-        case _                                   => false
-      },
-      historical.value match {
-        case SparseMerkleEntry.Present(_, value) => value.sameElements(CommitCatalog.rootValueBytes(c1.roots.mptRoot))
-        case _                                   => false
-      },
-      absentProof.isInstanceOf[SparseMerkleProof.Absence],
-      absent.value match {
-        case SparseMerkleEntry.Absent(_) => true
-        case _                           => false
-      }
-    )
+    } yield
+      expect.all(
+        current.value match {
+          case SparseMerkleEntry.Present(_, value) => value.sameElements(CommitCatalog.rootValueBytes(c2.roots.mptRoot))
+          case _                                   => false
+        },
+        historical.value match {
+          case SparseMerkleEntry.Present(_, value) => value.sameElements(CommitCatalog.rootValueBytes(c1.roots.mptRoot))
+          case _                                   => false
+        },
+        absentProof.isInstanceOf[SparseMerkleProof.Absence],
+        absent.value match {
+          case SparseMerkleEntry.Absent(_) => true
+          case _                           => false
+        }
+      )
   }
 }

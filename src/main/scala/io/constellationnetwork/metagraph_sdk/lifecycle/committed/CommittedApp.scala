@@ -69,9 +69,7 @@ object CommittedApp {
           override def getCalculatedState(implicit context: L0NodeContext[F]): F[(SnapshotOrdinal, PRV)] =
             committedState.committed.map(c => c.ordinal -> c.state)
 
-          override def setCalculatedState(ordinal: SnapshotOrdinal, state: PRV)(implicit
-            context: L0NodeContext[F]
-          ): F[Boolean] =
+          override def setCalculatedState(ordinal: SnapshotOrdinal, state: PRV)(implicit context: L0NodeContext[F]): F[Boolean] =
             committedState.setCommitted(ordinal, state).as(true)
 
           override def hashCalculatedState(state: PRV)(implicit context: L0NodeContext[F]): F[Hash] =

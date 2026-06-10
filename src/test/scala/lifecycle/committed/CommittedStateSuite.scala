@@ -44,10 +44,11 @@ object CommittedStateSuite extends SimpleIOSuite {
       c1      <- st.setCommitted(ord(1), s1)
       derived <- CommittedCommitment.buildTrie[IO](ToyState.view.entries(s1))
       fresh   <- CommittedState.make[IO, ToyState](s1).flatMap(_.committed)
-    } yield expect.all(
-      c1.roots.mptRoot == derived.rootNode.digest,
-      c1.roots.mptRoot == fresh.roots.mptRoot
-    )
+    } yield
+      expect.all(
+        c1.roots.mptRoot == derived.rootNode.digest,
+        c1.roots.mptRoot == fresh.roots.mptRoot
+      )
   }
 
   test("empty <-> nonempty boundary stays canonical in both directions") {
@@ -57,10 +58,11 @@ object CommittedStateSuite extends SimpleIOSuite {
       c2        <- st.setCommitted(ord(2), ToyState.empty)
       derived   <- CommittedCommitment.deriveRoots[IO, ToyState](s0)
       emptyTrie <- CommittedCommitment.emptyTrie[IO]
-    } yield expect.all(
-      c1.roots.mptRoot == derived.mptRoot,
-      c2.roots.mptRoot == emptyTrie.rootNode.digest
-    )
+    } yield
+      expect.all(
+        c1.roots.mptRoot == derived.mptRoot,
+        c2.roots.mptRoot == emptyTrie.rootNode.digest
+      )
   }
 
   test("combined hash is sha256(rawBytes(mptRoot) ++ rawBytes(smtRoot)) over the canonical pair") {
@@ -110,13 +112,14 @@ object CommittedStateSuite extends SimpleIOSuite {
       st <- CommittedState.make[IO, ToyState](s0, maxRecentDeltas = 2)
       _  <- states.zipWithIndex.traverse { case (s, i) => st.setCommitted(ord(i.toLong + 1), s) }
       c  <- st.committed
-    } yield expect.all(
-      c.recentDeltas.size == 2,
-      c.deltaFor(ord(1)).isEmpty,
-      c.deltaFor(ord(2)).isEmpty,
-      c.deltaFor(ord(3)).nonEmpty,
-      c.deltaFor(ord(4)).nonEmpty
-    )
+    } yield
+      expect.all(
+        c.recentDeltas.size == 2,
+        c.deltaFor(ord(1)).isEmpty,
+        c.deltaFor(ord(2)).isEmpty,
+        c.deltaFor(ord(3)).nonEmpty,
+        c.deltaFor(ord(4)).nonEmpty
+      )
   }
 
   pureTest("CommitKey grammar: valid keys parse, invalid keys are rejected") {

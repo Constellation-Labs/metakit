@@ -21,9 +21,9 @@ object CommittedReplicationSuite extends SimpleIOSuite {
   private val s0 = ToyState(Map("aaa" -> 1, "bbb" -> 2), Map("alpha" -> "x"))
 
   private val stream = List(
-    ToyState(Map("aaa" -> 5, "bbb" -> 2), Map("alpha" -> "x")),                              // modify
-    ToyState(Map("aaa" -> 5), Map("alpha" -> "x", "beta" -> "y")),                           // remove + add
-    ToyState(Map("aaa" -> 5, "ccc" -> 7), Map("beta" -> "y"))                                // add + remove
+    ToyState(Map("aaa" -> 5, "bbb" -> 2), Map("alpha" -> "x")), // modify
+    ToyState(Map("aaa" -> 5), Map("alpha" -> "x", "beta" -> "y")), // remove + add
+    ToyState(Map("aaa" -> 5, "ccc" -> 7), Map("beta" -> "y")) // add + remove
   )
 
   test("a replica applying the delta stream matches the source's roots at every step") {
@@ -59,12 +59,13 @@ object CommittedReplicationSuite extends SimpleIOSuite {
       r2 <- replica.applyDelta(tamperedRemoves)
       r3 <- replica.applyDelta(forgedRoots)
       ok <- replica.applyDelta(delta)
-    } yield expect.all(
-      r1.left.exists(_.isInstanceOf[ReplicationError.MptRootMismatch]),
-      r2.left.exists(_.isInstanceOf[ReplicationError.MptRootMismatch]),
-      r3.left.exists(_.isInstanceOf[ReplicationError.MptRootMismatch]),
-      ok.isRight
-    )
+    } yield
+      expect.all(
+        r1.left.exists(_.isInstanceOf[ReplicationError.MptRootMismatch]),
+        r2.left.exists(_.isInstanceOf[ReplicationError.MptRootMismatch]),
+        r3.left.exists(_.isInstanceOf[ReplicationError.MptRootMismatch]),
+        ok.isRight
+      )
   }
 
   test("a delta that does not chain from the replica's roots is rejected") {

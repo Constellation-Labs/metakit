@@ -24,7 +24,7 @@ object ToyFixtures {
       def entries(s: ToyState): SortedMap[CommitKey, Json] =
         SortedMap.from(
           s.fibers.map { case (id, v) => CommitKey.unsafe(s"fiber/$id") -> Json.obj("count" -> v.asJson) } ++
-            s.registry.map { case (n, v) => CommitKey.unsafe(s"registry/$n") -> Json.fromString(v) }
+          s.registry.map { case (n, v) => CommitKey.unsafe(s"registry/$n") -> Json.fromString(v) }
         )
     }
 

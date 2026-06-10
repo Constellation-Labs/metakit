@@ -75,7 +75,7 @@ object CommittedReplica {
     snapshot: CommittedSnapshot
   ): F[Either[ReplicationError, CommittedReplica[F]]] =
     for {
-      trie    <- CommittedCommitment.buildTrie[F](snapshot.entries)
+      trie <- CommittedCommitment.buildTrie[F](snapshot.entries)
       catalog <- InMemorySparseMerkleTree.make[F](
         snapshot.catalog.toList.map { case (k, h) => k -> CommitCatalog.rootValueBytes(h) }.toMap
       )

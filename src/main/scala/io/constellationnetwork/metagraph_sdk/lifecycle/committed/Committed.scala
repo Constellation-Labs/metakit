@@ -8,7 +8,11 @@ import cats.syntax.functor._
 import scala.collection.immutable.SortedMap
 
 import io.constellationnetwork.metagraph_sdk.crypto.mpt.api._
-import io.constellationnetwork.metagraph_sdk.crypto.mpt.{MerklePatriciaBatchInclusionProof, MerklePatriciaInclusionProof, MerklePatriciaTrie}
+import io.constellationnetwork.metagraph_sdk.crypto.mpt.{
+  MerklePatriciaBatchInclusionProof,
+  MerklePatriciaInclusionProof,
+  MerklePatriciaTrie
+}
 import io.constellationnetwork.metagraph_sdk.crypto.smt.impl.InMemorySparseMerkleTree
 import io.constellationnetwork.metagraph_sdk.crypto.smt.{SparseMerkleProof, SparseMerkleProofError}
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher
@@ -44,10 +48,13 @@ final case class Committed[F[_], S] private[committed] (
   def proveKey(
     key: CommitKey
   )(implicit F: MonadThrow[F], H: JsonBinaryHasher[F]): F[Either[MerklePatriciaProofError, MerklePatriciaInclusionProof]] =
-    MerklePatriciaProver.make[F](trie).attestPath(key.toHex).map(_.leftMap {
-      case InvalidNodeType(_) => PathNotFound(key.value)
-      case other              => other
-    })
+    MerklePatriciaProver
+      .make[F](trie)
+      .attestPath(key.toHex)
+      .map(_.leftMap {
+        case InvalidNodeType(_) => PathNotFound(key.value)
+        case other              => other
+      })
 
   /** One batch proof covering all `keys` against [[CommittedRoots.mptRoot]]. */
   def proveKeys(
