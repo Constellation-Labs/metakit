@@ -85,4 +85,10 @@ object JsonLogicOp extends Enum[JsonLogicOp] with CirceEnum[JsonLogicOp] {
   case object MissingNoneOp extends JsonLogicOp("missing")
   case object MissingSomeOp extends JsonLogicOp("missing_some")
   case object TypeOfOp extends JsonLogicOp("typeof")
+
+  // ZK / Crypto Operations (verify/hash precompiles over verified facts)
+  case object PoseidonOp extends JsonLogicOp("poseidon")
+  case object PmtVerifyOp extends JsonLogicOp("pmt_verify")
+  case object Groth16VerifyOp extends JsonLogicOp("groth16_verify")
+  case object EcVrfVerifyOp extends JsonLogicOp("ecvrf_verify")
 }
