@@ -46,6 +46,9 @@ object Bn254 {
       G1.fromBesu(toBesu.multiply(scalar.mod(R)))
 
     def isOnCurve: Boolean = toBesu.isOnCurve
+
+    /** The EVM / Besu point-at-infinity is the all-zero point `(0, 0)`. */
+    def isInfinity: Boolean = x.signum == 0 && y.signum == 0
   }
 
   object G1 {
@@ -73,6 +76,18 @@ object Bn254 {
       new AltBn128Fq2Point(fq2(xReal, xImag), fq2(yReal, yImag))
 
     def isOnCurve: Boolean = toBesu.isOnCurve
+
+    /**
+     * Order-`r` (G2) subgroup membership: `r * P == O`. G2 has a non-trivial
+     * cofactor, so on-curve is NOT sufficient; this is the defence against
+     * non-subgroup (small-subgroup) attack points. Delegates to Besu's
+     * `AltBn128Fq2Point.isInGroup`, which multiplies by the curve order.
+     */
+    def isInGroup: Boolean = toBesu.isInGroup
+
+    /** The all-zero Fp2 point `(0, 0)` is the point-at-infinity / identity. */
+    def isInfinity: Boolean =
+      xReal.signum == 0 && xImag.signum == 0 && yReal.signum == 0 && yImag.signum == 0
   }
 
   /** Build an Fp2 element `real + imag * i` (Besu order: c0 = real, c1 = imag). */
