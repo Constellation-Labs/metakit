@@ -43,12 +43,22 @@ object SharedVectorConformanceSuite extends SimpleIOSuite {
 
   final case class Vectors(description: String, version: String, tests: List[Category])
   final case class Category(category: String, note: Option[String], cases: List[VecCase])
-  final case class VecCase(expr: String, data: String, expected: String, note: Option[String])
 
-  implicit private val caseDecoder: Decoder[VecCase] = Decoder.forProduct4(
+  final case class VecCase(
+    expr: String,
+    data: String,
+    expected: Option[String],
+    error: Option[Boolean],
+    note: Option[String]
+  ) {
+    def mustError: Boolean = error.contains(true)
+  }
+
+  implicit private val caseDecoder: Decoder[VecCase] = Decoder.forProduct5(
     "expr",
     "data",
     "expected",
+    "error",
     "note"
   )(VecCase.apply)
 
@@ -129,35 +139,60 @@ object SharedVectorConformanceSuite extends SimpleIOSuite {
     def outcome(structPass: Boolean, textPass: Boolean, detail: String): CaseOutcome =
       CaseOutcome(category, c.expr, label, structPass, textPass, detail)
 
-    val parsed: Either[String, (JsonLogicExpression, JsonLogicValue, JsonLogicValue)] =
+    val parsedBase: Either[String, (JsonLogicExpression, JsonLogicValue)] =
       for {
-        exprJson     <- parser.parse(c.expr).left.map(e => s"EXPR-PARSE: ${e.getMessage}")
-        expr         <- exprJson.as[JsonLogicExpression].left.map(e => s"EXPR-DECODE: ${e.getMessage}")
-        dataJson     <- parser.parse(c.data).left.map(e => s"DATA-PARSE: ${e.getMessage}")
-        data         <- dataJson.as[JsonLogicValue].left.map(e => s"DATA-DECODE: ${e.getMessage}")
-        expectedJson <- parser.parse(c.expected).left.map(e => s"EXPECTED-PARSE: ${e.getMessage}")
-        expected     <- expectedJson.as[JsonLogicValue].left.map(e => s"EXPECTED-DECODE: ${e.getMessage}")
-      } yield (expr, data, expected)
+        exprJson <- parser.parse(c.expr).left.map(e => s"EXPR-PARSE: ${e.getMessage}")
+        expr     <- exprJson.as[JsonLogicExpression].left.map(e => s"EXPR-DECODE: ${e.getMessage}")
+        dataJson <- parser.parse(c.data).left.map(e => s"DATA-PARSE: ${e.getMessage}")
+        data     <- dataJson.as[JsonLogicValue].left.map(e => s"DATA-DECODE: ${e.getMessage}")
+      } yield (expr, data)
 
-    parsed match {
-      case Left(err) =>
-        IO.pure(outcome(structPass = false, textPass = false, s"$label\n    $err"))
-      case Right((expr, data, expected)) =>
-        JsonLogicEvaluator.tailRecursive[IO].evaluate(expr, data, None).map {
-          case Left(evalErr) =>
-            outcome(structPass = false, textPass = false, s"$label\n    EVAL-ERR: ${evalErr.getMessage}")
-          case Right(result) =>
-            val sOk = structEq(result, expected)
-            val rendered = showJsonLogicValue.show(result)
-            val tOk = rendered == c.expected
-            val detail =
-              s"""$label
-                 |    data     = ${c.data}
-                 |    expected = ${c.expected}
-                 |    got      = $rendered
-                 |    struct=${if (sOk) "ok" else "FAIL"} text=${if (tOk) "ok" else "FAIL"}""".stripMargin
-            outcome(structPass = sOk, textPass = tOk, detail)
-        }
+    if (c.mustError)
+      // `error: true` cases pin that evaluation MUST fail (same convention as the ZK vectors).
+      parsedBase match {
+        case Left(err) =>
+          // A case the decoder itself rejects still satisfies "evaluation MUST fail".
+          IO.pure(outcome(structPass = true, textPass = true, s"$label\n    failed as required (decode): $err"))
+        case Right((expr, data)) =>
+          JsonLogicEvaluator.tailRecursive[IO].evaluate(expr, data, None).attempt.map {
+            case Left(raised) =>
+              outcome(structPass = true, textPass = true, s"$label\n    failed as required (raised): ${raised.getMessage}")
+            case Right(Left(evalErr)) =>
+              outcome(structPass = true, textPass = true, s"$label\n    failed as required: ${evalErr.getMessage}")
+            case Right(Right(result)) =>
+              val rendered = showJsonLogicValue.show(result)
+              outcome(structPass = false, textPass = false, s"$label\n    expected an error but evaluated to $rendered")
+          }
+      }
+    else {
+      val parsed: Either[String, (JsonLogicExpression, JsonLogicValue, String, JsonLogicValue)] =
+        for {
+          base         <- parsedBase
+          expectedRaw  <- c.expected.toRight("MISSING-EXPECTED: non-error case must define `expected`")
+          expectedJson <- parser.parse(expectedRaw).left.map(e => s"EXPECTED-PARSE: ${e.getMessage}")
+          expected     <- expectedJson.as[JsonLogicValue].left.map(e => s"EXPECTED-DECODE: ${e.getMessage}")
+        } yield (base._1, base._2, expectedRaw, expected)
+
+      parsed match {
+        case Left(err) =>
+          IO.pure(outcome(structPass = false, textPass = false, s"$label\n    $err"))
+        case Right((expr, data, expectedRaw, expected)) =>
+          JsonLogicEvaluator.tailRecursive[IO].evaluate(expr, data, None).map {
+            case Left(evalErr) =>
+              outcome(structPass = false, textPass = false, s"$label\n    EVAL-ERR: ${evalErr.getMessage}")
+            case Right(result) =>
+              val sOk = structEq(result, expected)
+              val rendered = showJsonLogicValue.show(result)
+              val tOk = rendered == expectedRaw
+              val detail =
+                s"""$label
+                   |    data     = ${c.data}
+                   |    expected = $expectedRaw
+                   |    got      = $rendered
+                   |    struct=${if (sOk) "ok" else "FAIL"} text=${if (tOk) "ok" else "FAIL"}""".stripMargin
+              outcome(structPass = sOk, textPass = tOk, detail)
+          }
+      }
     }
   }
 

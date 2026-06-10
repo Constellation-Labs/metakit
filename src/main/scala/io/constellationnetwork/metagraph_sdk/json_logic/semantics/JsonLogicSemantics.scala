@@ -572,7 +572,7 @@ object JsonLogicSemantics {
                 if (rn.toBigDecimal == 0) {
                   JsonLogicException("Division by zero").asLeft[Result[JsonLogicValue]]
                 } else {
-                  // Use safeDivide for explicit DECIMAL128 precision
+                  // Exact rational division — no rounding anywhere in the evaluator path.
                   combineNumeric(safeDivide)(ln, rn).pure[Result].asRight[JsonLogicException]
                 }).fold(_.asLeft[Result[JsonLogicValue]], identity)
             case _ =>
@@ -1174,8 +1174,9 @@ object JsonLogicSemantics {
             case IntValue(base) :: IntValue(exp) :: Nil if exp >= 0 && exp.isValidInt && exp <= maxSafeExponent =>
               ((IntValue(base.pow(exp.toInt)): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight[JsonLogicException]
             case IntValue(_) :: IntValue(exp) :: Nil if exp > maxSafeExponent =>
+              // Error text matches the Rust reference (eval.rs op_pow) byte-for-byte.
               JsonLogicException(
-                s"Exponent $exp exceeds maximum safe value $maxSafeExponent for integer exponentiation"
+                s"Exponent $exp exceeds maximum safe value $maxSafeExponent"
               ).asLeft[Result[JsonLogicValue]]
             case base :: exp :: Nil =>
               for {
