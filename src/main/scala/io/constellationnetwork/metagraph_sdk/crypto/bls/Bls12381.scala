@@ -39,6 +39,12 @@ import org.bouncycastle.math.ec.{ECCurve, ECPoint}
  * The verification entry points ([[verify]], [[fastAggregateVerify]]) never throw: malformed or
  * non-canonical inputs (bad point encoding, non-subgroup member, wrong width) return `false`. This
  * is what the JLVM crypto opcodes consume.
+ *
+ * ==Optional backend==
+ * The `org.bouncycastle.crypto.bls` API exists only in the (unpublished) BC 1.85 line, vendored as
+ * build/test-time-only unmanaged jars in `lib/` — the published metakit artifact carries no BC
+ * requirement, so this object may fail to initialize on a consumer classpath. Callers must check
+ * [[BlsBackend.isAvailable]] before first touching this object; the JLVM opcodes do.
  */
 object Bls12381 {
 
