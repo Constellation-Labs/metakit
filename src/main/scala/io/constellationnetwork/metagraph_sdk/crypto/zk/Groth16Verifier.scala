@@ -89,6 +89,18 @@ object Groth16Verifier {
   val NumPublicInputs: Int = 5
 
   /**
+   * Sentinel prefix marking a MALFORMED-ENCODING failure: a proof coordinate
+   * `>= P`, i.e. a non-canonical base-field-element encoding. Besu's `Fq.create`
+   * stores the value unreduced and later arithmetic silently reduces it mod P,
+   * so a `>= P` coordinate must be rejected explicitly BEFORE it reaches the
+   * curve. The opcode layer distinguishes these (a hard `JsonLogicException`)
+   * from cryptographic-invalidity failures (off-curve / non-subgroup), which
+   * verify to `false`. Kept in lockstep with the Rust
+   * `groth16::ENCODING_ERROR_PREFIX`.
+   */
+  val EncodingErrorPrefix: String = "ENCODING: "
+
+  /**
    * Public-input linear combination `L = CONSTANT + sum_i input_i * PUB_i`.
    * Each input scalar must already be reduced (`< R`); unreduced scalars are
    * rejected, matching the Solidity `lt(s, R)` checks.
@@ -113,23 +125,53 @@ object Groth16Verifier {
    *              produced by gnark / abi-encoded SP1 proofs).
    * @param input five public-input scalars (elements of Fr).
    * @return `Right(())` if the proof is valid, `Left(reason)` otherwise.
+   *
+   * ==Proof-point validation (soundness hardening)==
+   * Before pairing, every proof point is validated, in lockstep with the Rust
+   * `groth16::verify_proof`:
+   *   1. CANONICAL ENCODING: every coordinate must be `< P`. A `>= P` coordinate
+   *      is a non-canonical encoding (Besu's `Fq.create` would silently reduce
+   *      it mod P) and yields `Left` tagged with [[EncodingErrorPrefix]] -- a
+   *      hard error at the opcode layer.
+   *   2. ON-CURVE: A, B, C must satisfy the curve equation.
+   *   3. SUBGROUP: B (G2) must lie in the order-`r` subgroup (G2 has a
+   *      non-trivial cofactor, so on-curve is NOT sufficient). A, C (G1) are
+   *      cofactor-1 (prime order), so on-curve implies correct subgroup; the
+   *      identity is rejected for A/B/C as a degenerate proof point.
+   * A well-formed but cryptographically invalid point (off-curve, non-subgroup
+   * or identity) yields `Left` WITHOUT the encoding prefix -- the opcode maps it
+   * to `false`, exactly like a failed pairing.
    */
   def verifyProof(proof: IndexedSeq[BigInteger], input: IndexedSeq[BigInteger]): Either[String, Unit] =
     if (proof.length != 8) Left(s"expected 8 proof elements, got ${proof.length}")
     else
-      publicInputMSM(input).flatMap { l =>
-        val a = G1(proof(0), proof(1))
+      for {
+        l <- publicInputMSM(input)
+        // (1) Canonical-encoding check on every coordinate (>= P -> Left ENCODING).
+        _ <- canonicalCoord(proof(0), "proof A.x")
+        _ <- canonicalCoord(proof(1), "proof A.y")
+        _ <- canonicalCoord(proof(2), "proof B.x_imag")
+        _ <- canonicalCoord(proof(3), "proof B.x_real")
+        _ <- canonicalCoord(proof(4), "proof B.y_imag")
+        _ <- canonicalCoord(proof(5), "proof B.y_real")
+        _ <- canonicalCoord(proof(6), "proof C.x")
+        _ <- canonicalCoord(proof(7), "proof C.y")
+        a = G1(proof(0), proof(1))
         // EIP-197 order in `proof`: imag before real.
-        val b = G2(
+        b = G2(
           xReal = proof(3),
           xImag = proof(2),
           yReal = proof(5),
           yImag = proof(4)
         )
-        val c = G1(proof(6), proof(7))
-
+        c = G1(proof(6), proof(7))
+        // (2)+(3) On-curve / subgroup / non-identity. Cryptographic invalidity
+        // (no encoding prefix) -> the opcode maps these Lefts to `false`.
+        _ <- checkG1(a, "proof A")
+        _ <- checkG2(b, "proof B")
+        _ <- checkG1(c, "proof C")
         // e(A, B) * e(C, -delta) * e(alpha, -beta) * e(L, -gamma) == 1
-        val ok = Bn254.pairingProductIsOne(
+        ok = Bn254.pairingProductIsOne(
           Seq(
             a     -> b,
             c     -> deltaNeg,
@@ -137,6 +179,31 @@ object Groth16Verifier {
             l     -> gammaNeg
           )
         )
-        if (ok) Right(()) else Left("pairing check failed")
-      }
+        _ <- if (ok) Right(()) else Left("pairing check failed")
+      } yield ()
+
+  /** Reject a non-canonical (`>= P`) coordinate as a malformed encoding. */
+  private def canonicalCoord(value: BigInteger, role: String): Either[String, Unit] =
+    if (value.signum >= 0 && value.compareTo(Bn254.P) < 0) Right(())
+    else Left(s"$EncodingErrorPrefix$role: coordinate not in base field (>= P): $value")
+
+  /**
+   * G1 proof-point validation: on-curve and non-identity. BN254 G1 has cofactor
+   * 1 (prime order), so on-curve already implies correct-subgroup membership;
+   * the identity is rejected as a degenerate proof point.
+   */
+  private def checkG1(p: G1, role: String): Either[String, Unit] =
+    if (p.isInfinity) Left(s"$role: point is the identity (degenerate)")
+    else if (!p.isOnCurve) Left(s"$role: point is not on the BN254 G1 curve")
+    else Right(())
+
+  /**
+   * G2 proof-point validation: on-curve, non-identity, AND order-`r` subgroup
+   * membership (G2 has a non-trivial cofactor, so on-curve is NOT sufficient).
+   */
+  private def checkG2(p: G2, role: String): Either[String, Unit] =
+    if (p.isInfinity) Left(s"$role: point is the identity (degenerate)")
+    else if (!p.isOnCurve) Left(s"$role: point is not on the BN254 G2 curve")
+    else if (!p.isInGroup) Left(s"$role: G2 point is not in the order-r subgroup")
+    else Right(())
 }

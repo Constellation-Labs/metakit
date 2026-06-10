@@ -181,19 +181,24 @@ public abstract class AbstractFqp<T extends AbstractFqp> implements FieldElement
     }
   }
 
+  // Deviation from upstream Besu: iterative square-and-multiply. Upstream's
+  // recursion consumes one stack frame per exponent bit (~2790 frames for the
+  // Groth16 final exponentiation (P^12 - 1) / R), which can StackOverflowError
+  // on threads with a reduced stack size (e.g. -Xss256k).
   @SuppressWarnings("unchecked")
   @Override
   public T power(final BigInteger n) {
-    if (n.compareTo(BigInteger.ZERO) == 0) {
-      return one();
+    T result = one();
+    T base = (T) this;
+    BigInteger exp = n;
+    while (exp.signum() > 0) {
+      if (exp.testBit(0)) {
+        result = (T) result.multiply(base);
+      }
+      base = (T) base.multiply(base);
+      exp = exp.shiftRight(1);
     }
-    if (n.compareTo(BigInteger.ONE) == 0) {
-      return (T) this;
-    } else if (n.mod(BIGINT_2).compareTo(BigInteger.ZERO) == 0) {
-      return (T) multiply((T) this).power(n.divide(BIGINT_2));
-    } else {
-      return (T) multiply((T) this).power(n.divide(BIGINT_2)).multiply(this);
-    }
+    return result;
   }
 
   /**
