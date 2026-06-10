@@ -71,8 +71,14 @@ Include this paragraph (or equivalent) in the release notes:
 > required because the BLS12-381 API (`org.bouncycastle.crypto.bls.*`) behind
 > metakit's eth2-ciphersuite BLS primitive exists only in the unreleased 1.85
 > line. The exact bytes are sha256-pinned in `lib/README.md` and enforced in
-> CI. The transitive BC 1.70 artifacts from tessellation-sdk are excluded in
-> `build.sbt`, so consumers get the 1.85 classes on the classpath. These jars
+> CI. IMPORTANT for consumers: the vendored `lib/` jars are unmanaged and are
+> NOT part of the published metakit artifact — the published POM excludes the
+> transitive BC 1.70 artifacts but ships no replacement. A consumer that
+> exercises the BLS primitive (`bls_verify` / `bls_aggregate_verify`) MUST
+> vendor the same sha256-pinned jars with the same `build.sbt` exclusion hack
+> (see `lib/README.md`), or those code paths fail with `NoClassDefFoundError`
+> at runtime. Consumers that never touch BLS are unaffected (the classes load
+> lazily on first use). These jars
 > will be replaced with the managed `org.bouncycastle:*:1.85` Maven Central
 > artifacts the moment BC publishes a stable 1.85; see `lib/README.md` for the
 > migration delta and the deferred source-verification checklist.
