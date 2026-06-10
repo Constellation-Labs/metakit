@@ -87,6 +87,10 @@ object Nibble {
       .takeWhile(Function.tupled(_.value == _.value))
       .map(_._1)
 
+  /** Render a nibble sequence as a Hex string, one hex character per nibble. */
+  def toHex(nibbles: Seq[Nibble]): Hex =
+    Hex(nibbles.map(n => hexChars(n.value & 0x0f)).mkString(""))
+
   implicit val nibbleEncoder: Encoder[Nibble] = (a: Nibble) => Json.fromString("" + hexChars(a.value & 0x0f))
 
   implicit val nibbleDecoder: Decoder[Nibble] = (c: HCursor) =>
