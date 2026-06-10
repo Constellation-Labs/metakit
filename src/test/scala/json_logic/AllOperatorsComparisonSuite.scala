@@ -47,6 +47,21 @@ object AllOperatorsComparisonSuite extends SimpleIOSuite {
     testBothStrategies("""{"let": [[["x", 5], ["y", {"+": [{"var": "x"}, 3]}]], {"var": "y"}]}""", "null").map(expect(_))
   }
 
+  test("let: object form single binding") {
+    testBothStrategies("""{"let": [{"x": 5}, {"+": [{"var": "x"}, 1]}]}""", "null").map(expect(_))
+  }
+
+  test("let: object form references outer scope") {
+    testBothStrategies("""{"let": [{"doubled": {"*": [{"var": "x"}, 2]}}, {"+": [{"var": "doubled"}, 1]}]}""", """{"x": 5}""").map(
+      expect(_)
+    )
+  }
+
+  // get: 3-arg default form must agree across both strategies
+  test("get: 3-arg default for missing key") {
+    testBothStrategies("""{"get": [{"var": "obj"}, "missing", "default"]}""", """{"obj": {}}""").map(expect(_))
+  }
+
   // Logic
   test("!: not true") {
     testBothStrategies("""{"!": [true]}""", "null").map(expect(_))

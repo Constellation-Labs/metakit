@@ -5,6 +5,7 @@ import cats.syntax.all._
 
 import io.constellationnetwork.metagraph_sdk.json_logic.core._
 import io.constellationnetwork.metagraph_sdk.json_logic.semantics.JsonLogicSemantics
+import io.constellationnetwork.metagraph_sdk.std.JsonCanonicalizer
 
 import ResultContext._
 
@@ -22,6 +23,46 @@ object JsonLogicRuntime {
     case _ =>
       false
   }
+
+  /**
+   * Desugar the two accepted `let` surface forms into an ordered list of
+   * `(name, valueExpr)` bindings plus the result expression. Mirrors Rust
+   * `eval_let` (rust/jlvm-core/src/eval.rs), which accepts both:
+   *   - array form : `{"let": [[[name, expr], ...], resultExpr]}`
+   *   - object form: `{"let": [{name: expr, ...},   resultExpr]}` (as used by the
+   *     cross-language conformance vectors and the TS evaluator).
+   * Bindings are returned in order so callers evaluate them sequentially with each
+   * prior binding already in scope.
+   *
+   * Ordering:
+   *   - ARRAY form keeps its explicit insertion order (unchanged).
+   *   - OBJECT form is evaluated in RFC-8785 sorted-key order (UTF-16 code units) for
+   *     crypto-determinism: a JSON object has no inherent member order, so we sort by
+   *     the SAME key comparator the canonicalizer uses ([[JsonCanonicalizer.keyOrdering]])
+   *     to stay byte-identical with the Rust (`canonical::utf16_cmp`) and TS impls.
+   */
+  private[runtime] def normalizeLetArgs(
+    args: List[JsonLogicExpression]
+  ): Either[JsonLogicException, (List[(String, JsonLogicExpression)], JsonLogicExpression)] =
+    args match {
+      case ArrayExpression(bindings) :: resultExpr :: Nil =>
+        bindings.traverse {
+          case ArrayExpression(ConstExpression(StrValue(name)) :: valueExpr :: Nil) =>
+            (name -> valueExpr).asRight[JsonLogicException]
+          case invalid =>
+            JsonLogicException(s"let binding must be [name, expr], got: $invalid").asLeft
+        }
+          .map(_ -> resultExpr)
+
+      case MapExpression(bindings) :: resultExpr :: Nil =>
+        // Object-form bindings: a JSON object has no inherent member order, so evaluate
+        // in RFC-8785 sorted-key order (UTF-16 code units) using the canonicalizer's key
+        // comparator. Each binding then sees the prior (sorted-order) bindings in scope.
+        (bindings.toList.sortBy(_._1)(JsonCanonicalizer.keyOrdering) -> resultExpr).asRight[JsonLogicException]
+
+      case _ =>
+        JsonLogicException("let requires [[bindings...], resultExpr]").asLeft
+    }
 
   private def lookupVar[F[_]: Monad, Result[_]: ResultContext](
     key: String,
@@ -124,13 +165,14 @@ object JsonLogicRuntime {
         evaluateIfElse(args)
 
       case ApplyExpression(JsonLogicOp.LetOp, args) =>
-        // Syntax: {"let": [[[name1, expr1], [name2, expr2], ...], resultExpr]}
-        // Bindings are evaluated sequentially, each in the context of previous bindings
-        // Result expression is evaluated with all bindings in scope
-        args match {
-          case ArrayExpression(bindings) :: resultExpr :: Nil =>
+        // Both surface forms (array of [name, expr] pairs and the object form
+        // {name: expr, ...}) desugar to the same ordered binding list. Bindings are
+        // evaluated sequentially, each in the context of previous bindings, and the
+        // result expression sees all bindings in scope (mirrors Rust `eval_let`).
+        JsonLogicRuntime.normalizeLetArgs(args) match {
+          case Right((bindings, resultExpr)) =>
             def processBindings(
-              remaining: List[JsonLogicExpression],
+              remaining: List[(String, JsonLogicExpression)],
               accumulatedBindings: Map[String, JsonLogicValue]
             ): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
               remaining match {
@@ -143,7 +185,7 @@ object JsonLogicRuntime {
                   }
                   evaluateExpression(resultExpr, letCtx)
 
-                case ArrayExpression(ConstExpression(StrValue(name)) :: valueExpr :: Nil) :: rest =>
+                case (name, valueExpr) :: rest =>
                   // Evaluate binding expression in context with accumulated bindings
                   val bindingCtx = currentCtx match {
                     case Some(MapValue(existing)) => MapValue(existing ++ accumulatedBindings).some
@@ -156,19 +198,12 @@ object JsonLogicRuntime {
                     case Left(error) =>
                       error.asLeft[Result[JsonLogicValue]].pure[F]
                   }
-
-                case invalid :: _ =>
-                  JsonLogicException(s"let binding must be [name, expr], got: $invalid")
-                    .asLeft[Result[JsonLogicValue]]
-                    .pure[F]
               }
 
             processBindings(bindings, Map.empty)
 
-          case _ =>
-            JsonLogicException("let requires [[bindings...], resultExpr]")
-              .asLeft[Result[JsonLogicValue]]
-              .pure[F]
+          case Left(error) =>
+            error.asLeft[Result[JsonLogicValue]].pure[F]
         }
 
       case ApplyExpression(op, args) =>
@@ -308,29 +343,25 @@ object JsonLogicRuntime {
           (Eval(firstExpr, Some(newCont)) :: tail).asLeft[Either[JsonLogicException, Result[JsonLogicValue]]].pure[F]
         }
 
-      // Handle LetOp: {"let": [[[name1, expr1], ...], resultExpr]}
+      // Handle LetOp. Two surface forms, both desugared to the same ordered,
+      // scope-aware binding pipeline (mirrors Rust `eval_let` + the TS evaluator):
+      //   - array form : {"let": [[[name, expr], ...], resultExpr]}
+      //   - object form: {"let": [{name: expr, ...},   resultExpr]}
+      // Each binding is evaluated sequentially with prior bindings already in scope.
       case Eval(ApplyExpression(JsonLogicOp.LetOp, args), contOpt) :: tail =>
-        args match {
-          case ArrayExpression(bindings) :: resultExpr :: Nil if bindings.nonEmpty =>
-            // Start processing first binding
-            bindings.head match {
-              case ArrayExpression(ConstExpression(StrValue(name)) :: valueExpr :: Nil) =>
-                val letCont = LetContinuation(name, bindings.tail, resultExpr, Map.empty, contOpt, ctx)
+        JsonLogicRuntime.normalizeLetArgs(args) match {
+          case Right((bindings, resultExpr)) =>
+            bindings match {
+              case Nil =>
+                // No bindings, just evaluate result.
+                (Eval(resultExpr, contOpt) :: tail).asLeft[Either[JsonLogicException, Result[JsonLogicValue]]].pure[F]
+              case (name, valueExpr) :: rest =>
+                val restPairs = rest.map { case (n, e) => ArrayExpression(ConstExpression(StrValue(n)) :: e :: Nil) }
+                val letCont = LetContinuation(name, restPairs, resultExpr, Map.empty, contOpt, ctx)
                 (EvalLet(valueExpr, letCont) :: tail).asLeft[Either[JsonLogicException, Result[JsonLogicValue]]].pure[F]
-              case invalid =>
-                JsonLogicException(s"let binding must be [name, expr], got: $invalid")
-                  .asLeft[Result[JsonLogicValue]]
-                  .asRight[Stack]
-                  .pure[F]
             }
-          case ArrayExpression(Nil) :: resultExpr :: Nil =>
-            // No bindings, just evaluate result
-            (Eval(resultExpr, contOpt) :: tail).asLeft[Either[JsonLogicException, Result[JsonLogicValue]]].pure[F]
-          case _ =>
-            JsonLogicException("let requires [[bindings...], resultExpr]")
-              .asLeft[Result[JsonLogicValue]]
-              .asRight[Stack]
-              .pure[F]
+          case Left(err) =>
+            err.asLeft[Result[JsonLogicValue]].asRight[Stack].pure[F]
         }
 
       // Handle IfElseOp with lazy evaluation of branches

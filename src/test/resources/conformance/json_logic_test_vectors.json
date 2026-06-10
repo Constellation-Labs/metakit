@@ -1,6 +1,6 @@
 {
   "description": "JSON Logic VM test vectors for cross-language compatibility",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "tests": [
     {
       "category": "constants",
@@ -209,11 +209,23 @@
           "data": "{}", 
           "expected": "6"
         },
-        { 
-          "expr": "{\"let\": [{\"doubled\": {\"*\": [{\"var\": \"x\"}, 2]}}, {\"+\": [{\"var\": \"doubled\"}, 1]}]}", 
-          "data": "{\"x\": 5}", 
+        {
+          "expr": "{\"let\": [{\"doubled\": {\"*\": [{\"var\": \"x\"}, 2]}}, {\"+\": [{\"var\": \"doubled\"}, 1]}]}",
+          "data": "{\"x\": 5}",
           "expected": "11",
           "note": "bindings can reference outer scope"
+        },
+        {
+          "expr": "{\"let\":[{\"b\":{\"+\":[{\"var\":\"a\"},1]},\"a\":1},{\"var\":\"b\"}]}",
+          "data": "{}",
+          "expected": "2",
+          "note": "object-form let evaluates bindings in RFC-8785 sorted-key order (a before b); insertion order would leave a unbound"
+        },
+        {
+          "expr": "{\"let\":[{\"ä\":{\"+\":[{\"var\":\"a\"},1]},\"a\":1},{\"var\":\"ä\"}]}",
+          "data": "{}",
+          "expected": "2",
+          "note": "UTF-16 code-unit key order: 'a' (U+0061) sorts before 'ä' (U+00E4), so a=1 then ä=a+1=2"
         }
       ]
     },

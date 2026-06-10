@@ -843,19 +843,23 @@ object JsonLogicSemantics {
 
       private def handleGetOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] = {
 
+        // Look up `key` in `input`, returning `fallback` when the key is absent.
+        // Mirrors Rust `op_get` (rust/jlvm-core/src/eval.rs): the 2-arg form falls
+        // back to NullValue, the 3-arg form falls back to the supplied default.
         def implMap(
           input: Map[String, JsonLogicValue],
-          key: String
+          key: String,
+          fallback: JsonLogicValue
         ): Either[JsonLogicException, Result[JsonLogicValue]] =
-          // Return NullValue for missing keys (consistent behavior for both evaluators)
           input.get(key) match {
             case Some(value) => value.pure[Result].asRight[JsonLogicException]
-            case None        => (NullValue: JsonLogicValue).pure[Result].asRight[JsonLogicException]
+            case None        => fallback.pure[Result].asRight[JsonLogicException]
           }
 
         args.withMetrics { values =>
           values match {
-            case MapValue(v) :: StrValue(k) :: Nil => implMap(v, k)
+            case MapValue(v) :: StrValue(k) :: Nil            => implMap(v, k, NullValue)
+            case MapValue(v) :: StrValue(k) :: default :: Nil => implMap(v, k, default)
             case _ => JsonLogicException(s"Unexpected input to ${GetOp.tag}, got $values").asLeft[Result[JsonLogicValue]]
           }
         }
