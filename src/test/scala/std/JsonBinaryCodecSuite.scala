@@ -4,8 +4,8 @@ import java.nio.charset.StandardCharsets
 
 import cats.effect.IO
 
-import io.constellationnetwork.metagraph_sdk.std.JsonBinaryCodec
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryCodec.{JsonBinaryDecodeOps, JsonBinaryEncodeOps}
+import io.constellationnetwork.metagraph_sdk.std.{JsonBinaryCodec, MaxDepthExceededException}
 
 import org.bouncycastle.util.encoders.Base64
 import shared.Generators._
@@ -117,5 +117,137 @@ object JsonBinaryCodecSuite extends SimpleIOSuite with Checkers {
         serialized2  <- deserialized.toOption.get.toBinary
       } yield expect(java.util.Arrays.equals(serialized1, serialized2))
     }
+  }
+
+  test("codec should drop null values from Option fields") {
+    // TestDataComplex has nested: Option[TestData] which becomes null when None
+    val dataWithNone = TestDataComplex("test", 42, None)
+    val dataWithSome = TestDataComplex("test", 42, Some(TestData("inner", 1)))
+
+    for {
+      bytesNone <- dataWithNone.toBinary
+      bytesSome <- dataWithSome.toBinary
+      strNone = new String(bytesNone, StandardCharsets.UTF_8)
+      strSome = new String(bytesSome, StandardCharsets.UTF_8)
+    } yield
+      // When nested is None, the "nested" key should not appear in the serialized form
+      expect(!strNone.contains("nested")) &&
+      expect(!strNone.contains("null")) &&
+      // When nested has a value, it should appear
+      expect(strSome.contains("nested")) &&
+      expect(strSome.contains("inner"))
+  }
+
+  test("codec should round-trip data with Option fields") {
+    forall { (testData: TestDataComplex) =>
+      assertRoundTrip(testData)
+    }
+  }
+
+  test("codec with None produces same bytes as sender without field") {
+    // This simulates the signature compatibility scenario:
+    // - TypeScript SDK sends JSON without optional field
+    // - Scala deserializes to case class with None
+    // - Scala re-serializes - should produce same bytes (no null field)
+    val dataWithNone = TestDataComplex("test", 42, None)
+
+    for {
+      serialized <- dataWithNone.toBinary
+      str = new String(serialized, StandardCharsets.UTF_8)
+    } yield
+      // The serialized form should not contain "nested" key at all
+      // This ensures hash compatibility with senders who omit the field
+      expect(!str.contains("\"nested\""))
+  }
+
+  test("DataUpdate codec should drop null values from Option fields") {
+    // Same behavior as regular codec, but for DataUpdate path
+    // Note: DataUpdate wraps in prefix + base64, so we decode to check content
+    val dataWithNone = TestDataUpdateComplex("test", 42, None)
+    val dataWithSome = TestDataUpdateComplex("test", 42, Some("meta"))
+
+    for {
+      bytesNone <- dataWithNone.toBinary
+      bytesSome <- dataWithSome.toBinary
+      // Extract base64 part and decode
+      strNoneRaw = new String(bytesNone, StandardCharsets.UTF_8)
+      strSomeRaw = new String(bytesSome, StandardCharsets.UTF_8)
+      base64None = strNoneRaw.split("\n").drop(2).mkString
+      base64Some = strSomeRaw.split("\n").drop(2).mkString
+      decodedNone = new String(Base64.decode(base64None), StandardCharsets.UTF_8)
+      decodedSome = new String(Base64.decode(base64Some), StandardCharsets.UTF_8)
+    } yield
+      // When metadata is None, the key should not appear in decoded content
+      expect(!decodedNone.contains("metadata")) &&
+      expect(!decodedNone.contains("null")) &&
+      // When metadata has a value, it should appear
+      expect(decodedSome.contains("metadata")) &&
+      expect(decodedSome.contains("meta"))
+  }
+
+  test("DataUpdate codec should round-trip data with Option fields") {
+    forall { (testData: TestDataUpdateComplex) =>
+      assertRoundTrip(testData)
+    }
+  }
+
+  // --- Depth limit tests ---
+
+  test("codec should accept JSON within default depth limit") {
+    // TestDataComplex has depth 2 when nested is Some
+    val data = TestDataComplex("outer", 1, Some(TestData("inner", 2)))
+    assertRoundTrip(data)
+  }
+
+  test("codec should reject JSON exceeding custom depth limit") {
+    // Create a codec with a very restrictive depth limit
+    implicit val restrictedCodec: JsonBinaryCodec[IO, TestDataComplex] =
+      JsonBinaryCodec.deriveWithMaxDepth[IO, TestDataComplex](1)
+
+    // TestDataComplex with nested data has depth 2
+    val data = TestDataComplex("outer", 1, Some(TestData("inner", 2)))
+
+    for {
+      serialized   <- data.toBinary(JsonBinaryCodec.deriveWithMaxDepth[IO, TestDataComplex](100)) // serialize with permissive limit
+      deserialized <- restrictedCodec.deserialize(serialized)
+    } yield
+      expect(deserialized.isLeft) &&
+      expect(deserialized.left.exists(_.isInstanceOf[MaxDepthExceededException]))
+  }
+
+  test("codec should accept shallow JSON with restrictive depth limit") {
+    implicit val restrictedCodec: JsonBinaryCodec[IO, TestData] =
+      JsonBinaryCodec.deriveWithMaxDepth[IO, TestData](1)
+
+    // TestData is flat (depth 1)
+    val data = TestData("test", 42)
+    assertRoundTrip(data)(restrictedCodec)
+  }
+
+  test("DataUpdate codec should reject JSON exceeding custom depth limit") {
+    implicit val restrictedCodec: JsonBinaryCodec[IO, TestDataUpdateComplex] =
+      JsonBinaryCodec.deriveDataUpdateWithMaxDepth[IO, TestDataUpdateComplex](0)
+
+    // Even depth-1 JSON should fail with limit 0
+    val data = TestDataUpdateComplex("test", 42, None)
+
+    for {
+      serialized   <- data.toBinary(JsonBinaryCodec.deriveDataUpdateWithMaxDepth[IO, TestDataUpdateComplex](100))
+      deserialized <- restrictedCodec.deserialize(serialized)
+    } yield
+      expect(deserialized.isLeft) &&
+      expect(deserialized.left.exists(_.isInstanceOf[MaxDepthExceededException]))
+  }
+
+  test("default max depth should be 64") {
+    IO.pure(expect(JsonBinaryCodec.DefaultMaxDepth == 64))
+  }
+
+  test("MaxDepthExceededException should have informative message") {
+    val ex = MaxDepthExceededException(100, 64)
+    IO.pure(
+      expect(ex.getMessage.contains("100")) &&
+      expect(ex.getMessage.contains("64"))
+    )
   }
 }

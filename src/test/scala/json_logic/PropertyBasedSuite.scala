@@ -5,6 +5,7 @@ import cats.effect.IO
 
 import io.constellationnetwork.metagraph_sdk.json_logic.core._
 import io.constellationnetwork.metagraph_sdk.json_logic.runtime.JsonLogicEvaluator
+import io.constellationnetwork.metagraph_sdk.numerics.RatioOps.implicits._
 
 import org.scalacheck.{Arbitrary, Gen}
 import weaver.SimpleIOSuite
@@ -738,7 +739,7 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
 
         evaluator.evaluate(expr, MapValue.empty, None).map {
           case Right(IntValue(result))   => expect(result.abs <= b.value.abs)
-          case Right(FloatValue(result)) => expect(result.abs <= BigDecimal(b.value).abs)
+          case Right(FloatValue(result)) => expect(result.abs.toBigDecimal <= BigDecimal(b.value).abs)
           case Left(_)                   => failure("Modulo should succeed for non-zero divisor")
           case _                         => success
         }
@@ -985,7 +986,7 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
 
       evaluator.evaluate(expr, MapValue.empty, None).map {
         case Right(IntValue(result))   => expect(result >= 0)
-        case Right(FloatValue(result)) => expect(result >= 0)
+        case Right(FloatValue(result)) => expect(result.toBigDecimal >= 0)
         case _                         => failure("Expected numeric result")
       }
     }
@@ -1016,7 +1017,7 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
       val expr = ApplyExpression(JsonLogicOp.FloorOp, List(ConstExpression(num)))
 
       evaluator.evaluate(expr, MapValue.empty, None).map {
-        case Right(IntValue(result))   => expect(BigDecimal(result) <= num.value)
+        case Right(IntValue(result))   => expect(BigDecimal(result) <= num.value.toBigDecimal)
         case Right(FloatValue(result)) => expect(result <= num.value)
         case _                         => success
       }
@@ -1029,7 +1030,7 @@ object PropertyBasedSuite extends SimpleIOSuite with Checkers {
       val expr = ApplyExpression(JsonLogicOp.CeilOp, List(ConstExpression(num)))
 
       evaluator.evaluate(expr, MapValue.empty, None).map {
-        case Right(IntValue(result))   => expect(BigDecimal(result) >= num.value)
+        case Right(IntValue(result))   => expect(BigDecimal(result) >= num.value.toBigDecimal)
         case Right(FloatValue(result)) => expect(result >= num.value)
         case _                         => success
       }

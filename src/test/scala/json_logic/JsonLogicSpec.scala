@@ -4,6 +4,7 @@ import cats.effect.IO
 
 import io.constellationnetwork.metagraph_sdk.json_logic.core._
 import io.constellationnetwork.metagraph_sdk.json_logic.runtime.JsonLogicEvaluator
+import io.constellationnetwork.metagraph_sdk.numerics.RatioOps.implicits._
 
 import io.circe.parser
 import weaver.scalacheck.Checkers
@@ -610,7 +611,7 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
     }
   }
 
-  test("!== can test strict not-equal with type coercion for un-like types") {
+  test("!== is strict not-equal: un-like types are not strictly equal (=> true)") {
     val exprStr =
       """
         |{"!==" : [1, "1"]}
@@ -623,7 +624,7 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
 
     parseTestJson(exprStr, dataStr).flatMap {
       case (expr, data) =>
-        staticTestRunner(expr, data, BoolValue(false))
+        staticTestRunner(expr, data, BoolValue(true))
     }
   }
 
@@ -2723,23 +2724,23 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
     }
   }
 
-  test("`pow` handles fractional exponent") {
+  test("`pow` rejects fractional exponent (integer-only for determinism)") {
     val exprStr = """{"pow": [4, 0.5]}"""
     val dataStr = """null"""
 
     parseTestJson(exprStr, dataStr).flatMap {
       case (expr, data) =>
-        staticTestRunner(expr, data, IntValue(2))
+        expectError(expr, data)
     }
   }
 
-  test("`pow` handles fractional exponent and decimal base") {
+  test("`pow` rejects fractional exponent with decimal base (integer-only for determinism)") {
     val exprStr = """{"pow": [6.25, 0.5]}"""
     val dataStr = """null"""
 
     parseTestJson(exprStr, dataStr).flatMap {
       case (expr, data) =>
-        staticTestRunner(expr, data, FloatValue(2.5))
+        expectError(expr, data)
     }
   }
 
@@ -2971,6 +2972,16 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
     parseTestJson(exprStr, dataStr).flatMap {
       case (expr, data) =>
         expectError(expr, data)
+    }
+  }
+
+  test("`all` over an empty array is false (not vacuously true)") {
+    val exprStr = """{"all": [[], {">": [{"var": ""}, 0]}]}"""
+    val dataStr = """null"""
+
+    parseTestJson(exprStr, dataStr).flatMap {
+      case (expr, data) =>
+        staticTestRunner(expr, data, BoolValue(false))
     }
   }
 
@@ -3321,7 +3332,7 @@ object JsonLogicSpec extends SimpleIOSuite with Checkers {
           .map {
             case Right(FloatValue(result)) =>
               // Result should be approximately 0.333... bounded by DECIMAL128 precision
-              expect(result > BigDecimal("0.33")).and(expect(result < BigDecimal("0.34")))
+              expect(result.toBigDecimal > BigDecimal("0.33")).and(expect(result.toBigDecimal < BigDecimal("0.34")))
             case other => failure(s"Expected FloatValue, got $other")
           }
     }
