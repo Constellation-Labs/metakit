@@ -6,7 +6,7 @@ import java.security.MessageDigest
 import cats.syntax.either._
 import cats.syntax.traverse._
 
-import io.constellationnetwork.metagraph_sdk.crypto.bls.Bls12381
+import io.constellationnetwork.metagraph_sdk.crypto.bls.{Bls12381, BlsBackend}
 import io.constellationnetwork.metagraph_sdk.crypto.vrf.MiraclEcVrf25519
 import io.constellationnetwork.metagraph_sdk.crypto.zk.merkle.{PoseidonMerkleProof, PoseidonMerkleTree}
 import io.constellationnetwork.metagraph_sdk.crypto.zk.poseidon.Poseidon
@@ -279,12 +279,21 @@ object CryptoOps {
   // ---------------------------------------------------------------------------
   // bls_verify: [pkHex(48B G1), msgHex, sigHex(96B G2)] -> bool.
   //   Eth2 / IETF ProofOfPossession ciphersuite (BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_).
+  //
+  //   OPTIONAL BACKEND: both bls opcodes are gated on BlsBackend (the BC 1.85
+  //   `org.bouncycastle.crypto.bls` jars are build/test-time unmanaged deps, never published).
+  //   When the backend is absent the opcodes return a deterministic Left — they never throw.
+  //   The gate runs FIRST so nothing below it can touch Bls12381 on a backend-less classpath.
   // ---------------------------------------------------------------------------
+
+  private def requireBlsBackend(op: String): Either[JsonLogicException, Unit] =
+    Either.cond(BlsBackend.isAvailable, (), JsonLogicException(BlsBackend.unavailableMessage(op)))
 
   def blsVerify(values: List[JsonLogicValue]): Either[JsonLogicException, JsonLogicValue] =
     values match {
       case pkV :: msgV :: sigV :: Nil =>
         for {
+          _      <- requireBlsBackend("bls_verify")
           pkHex  <- expectStr("bls_verify pk")(pkV)
           msgHex <- expectStr("bls_verify msg")(msgV)
           sigHex <- expectStr("bls_verify sig")(sigV)
@@ -306,6 +315,7 @@ object CryptoOps {
     values match {
       case ArrayValue(pksV) :: msgV :: aggSigV :: Nil =>
         for {
+          _      <- requireBlsBackend("bls_aggregate_verify")
           _      <- Either.cond(pksV.nonEmpty, (), JsonLogicException("bls_aggregate_verify: at least one public key required"))
           msgHex <- expectStr("bls_aggregate_verify msg")(msgV)
           sigHex <- expectStr("bls_aggregate_verify aggSig")(aggSigV)
