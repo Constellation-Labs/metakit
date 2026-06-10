@@ -6,8 +6,27 @@ import cats.syntax.all._
 import io.constellationnetwork.metagraph_sdk.json_logic.core.JsonLogicOp._
 import io.constellationnetwork.metagraph_sdk.json_logic.core._
 import io.constellationnetwork.metagraph_sdk.json_logic.gas.{GasConfig, GasCost, GasLimit}
+import io.constellationnetwork.metagraph_sdk.json_logic.ops.NumericOps.floatToPlainString
 import io.constellationnetwork.metagraph_sdk.json_logic.runtime.ResultContext
 
+/**
+ * Gas-aware semantics: meters every operation against a shared gas `Ref`.
+ *
+ * Charging contract (charge-once, pre-charge):
+ *   - Each operation consumes EXACTLY ONCE from the gas ref:
+ *     `baseCost(op) + depthPenalty(depth) + inputScaledCost(op, args) [+ outputScaledCost(op, result)]`.
+ *     Child sub-results have already consumed their own cost while they were evaluated; an
+ *     ancestor never re-consumes its subtree (no compounding with depth).
+ *   - `baseCost + depthPenalty + inputScaledCost` is consumed BEFORE the underlying primitive
+ *     runs, so out-of-gas is raised before any input-scaled work (pairings, BLS aggregation,
+ *     proof folds, string building) is performed.
+ *   - `outputScaledCost` is the residual component that can only be observed on the produced
+ *     value (split piece count, flatten/slice/merge output size, substr output length). It is
+ *     consumed AFTER the primitive; the work it prices is bounded by already-paid-for inputs.
+ *   - Variable accesses consume `varAccess + pathSegments` at lookup time.
+ *   - Total consumption (the gas-ref delta) is the authoritative gasUsed reported by the
+ *     evaluator.
+ */
 object GasAwareSemantics {
 
   def make[F[_]: Sync](
@@ -47,56 +66,65 @@ object GasAwareSemantics {
 
     new JsonLogicSemantics[F, ResultContext.WithGas] {
 
+      /** Atomically consume `cost` from the shared gas ref, or fail with GasExhaustedException. */
+      private def consumeGas(cost: GasCost): F[Either[JsonLogicException, Unit]] =
+        gasLimitRef.modify { limit =>
+          limit.consume(cost) match {
+            case Right(newLimit) => (newLimit, ().asRight[JsonLogicException])
+            case Left(err)       => (limit, (err: JsonLogicException).asLeft[Unit])
+          }
+        }
+
       override def getVar(
         key: String,
         ctx: Option[JsonLogicValue] = None
-      ): F[Either[JsonLogicException, ResultContext.WithGas[JsonLogicValue]]] =
-        baseSemantics
-          .getVar(key, ctx)
-          .map(_.map {
-            case (value, metrics) =>
-              val varCost = gasConfig.varAccess + GasCost(key.split("\\.").length.toLong)
-              (value, metrics.withCost(varCost))
-          })
+      ): F[Either[JsonLogicException, ResultContext.WithGas[JsonLogicValue]]] = {
+        val varCost = gasConfig.varAccess + GasCost(key.split("\\.").length.toLong)
+        // The lookup itself is the work being priced, so consume from the gas ref here
+        // (exactly once); ancestors never re-consume it.
+        consumeGas(varCost).flatMap {
+          case Left(err) => err.asLeft[ResultContext.WithGas[JsonLogicValue]].pure[F]
+          case Right(()) =>
+            baseSemantics
+              .getVar(key, ctx)
+              .map(_.map {
+                case (value, metrics) =>
+                  (value, metrics.withCost(varCost))
+              })
+        }
+      }
 
       override def applyOp(
         op: JsonLogicOp
       ): List[ResultContext.WithGas[JsonLogicValue]] => F[Either[JsonLogicException, ResultContext.WithGas[JsonLogicValue]]] =
         args => {
-          val baseCost = getOpCost(op)(gasConfig)
           val argValues = args.map { case (value, _) => value }
+          val argMaxDepth = if (args.isEmpty) 0 else args.map(_._2.depth).max
+          val newDepth = argMaxDepth + 1
+          val depthPenalty = gasConfig.depthPenalty(newDepth.toLong)
+          // Everything derivable from the (already evaluated, already paid-for) inputs is
+          // pre-charged BEFORE the primitive runs: out-of-gas must be raised before any
+          // input-scaled work (Miller loops, BLS key aggregation, proof folds, string
+          // concatenation) is performed. Children consumed their own cost while they were
+          // evaluated, so it is NOT re-consumed here (charge-once).
+          val preCost = getOpCost(op)(gasConfig) + depthPenalty + getInputScaledCost(op, argValues)
 
-          gasLimitRef.get.flatMap { currentLimit =>
-            currentLimit
-              .consume(baseCost)
-              .fold(
-                err => (err: JsonLogicException).asLeft[ResultContext.WithGas[JsonLogicValue]].pure[F],
-                newLimit =>
-                  gasLimitRef.set(newLimit) >>
-                  baseSemantics.applyOp(op)(args).flatMap {
-                    case Right((value, metrics)) =>
-                      val additionalCost = getAdditionalCost(op, argValues, value)
-                      val argMaxDepth = if (args.isEmpty) 0 else args.map(_._2.depth).max
-                      val newDepth = argMaxDepth + 1
-                      val depthPenalty = gasConfig.depthPenalty(newDepth.toLong)
-
-                      gasLimitRef.get.flatMap { limit =>
-                        limit
-                          .consume(metrics.cost + depthPenalty + additionalCost)
-                          .fold(
-                            err => (err: JsonLogicException).asLeft[ResultContext.WithGas[JsonLogicValue]].pure[F],
-                            finalLimit =>
-                              gasLimitRef
-                                .set(finalLimit)
-                                .as(
-                                  (value, metrics.withCost(baseCost + depthPenalty + additionalCost).withDepth(newDepth))
-                                    .asRight[JsonLogicException]
-                                )
-                          )
-                      }
-                    case Left(err) => err.asLeft[ResultContext.WithGas[JsonLogicValue]].pure[F]
+          consumeGas(preCost).flatMap {
+            case Left(err) => err.asLeft[ResultContext.WithGas[JsonLogicValue]].pure[F]
+            case Right(()) =>
+              baseSemantics.applyOp(op)(args).flatMap {
+                case Right((value, metrics)) =>
+                  // Residual component only observable on the produced value (e.g. split piece
+                  // count); the work it prices is bounded by inputs that were already paid for.
+                  val outputCost = getOutputScaledCost(op, value)
+                  consumeGas(outputCost).map {
+                    case Left(err) => err.asLeft[ResultContext.WithGas[JsonLogicValue]]
+                    case Right(()) =>
+                      (value, metrics.withCost(preCost + outputCost).withDepth(newDepth))
+                        .asRight[JsonLogicException]
                   }
-              )
+                case Left(err) => err.asLeft[ResultContext.WithGas[JsonLogicValue]].pure[F]
+              }
           }
         }
 
@@ -178,23 +206,43 @@ object GasAwareSemantics {
         case MptPrefixVerifyOp    => config.mptPrefixVerify
       }
 
-      private def getAdditionalCost(op: JsonLogicOp, args: List[JsonLogicValue], result: JsonLogicValue): GasCost =
+      /**
+       * Length of the string a value coerces to in `cat` / `join` (mirrors handleCatOp's
+       * coercion and handleJoinOp's arrayToString). Collections / functions price at zero:
+       * `cat` rejects them and `join` renders them as the empty string.
+       */
+      private def coercedStringLength(value: JsonLogicValue): Long = value match {
+        case NullValue         => 0L
+        case BoolValue(value)  => value.toString.length.toLong
+        case IntValue(value)   => value.toString.length.toLong
+        case FloatValue(value) => floatToPlainString(value).length.toLong
+        case StrValue(value)   => value.length.toLong
+        case _                 => 0L
+      }
+
+      /**
+       * Size-scaled cost derivable from the argument values ALONE. Consumed BEFORE the
+       * primitive runs, so out-of-gas is raised before the input-scaled work is performed.
+       * Output sizes that are exactly determined by the inputs (cat / join string length,
+       * entries count) are re-derived from the inputs and charged here as well.
+       */
+      private def getInputScaledCost(op: JsonLogicOp, args: List[JsonLogicValue]): GasCost =
         op match {
+          // cat output length == sum of the coerced input string lengths; charge it up front.
           case CatOp =>
-            result match {
-              case StrValue(s) => gasConfig.sizeCost(s.length.toLong)
-              case _           => GasCost.Zero
+            gasConfig.sizeCost(args.map(coercedStringLength).sum)
+          // join output length == sum of coerced element lengths + separators; charge it up front.
+          case JoinOp =>
+            args match {
+              case ArrayValue(arr) :: StrValue(separator) :: Nil =>
+                gasConfig.sizeCost(arr.map(coercedStringLength).sum + separator.length.toLong * Math.max(0, arr.size - 1).toLong)
+              case _ => GasCost.Zero
             }
-          case SplitOp =>
-            result match {
-              case ArrayValue(arr) => gasConfig.sizeCost(arr.size.toLong * 2)
-              case _               => GasCost.Zero
-            }
-          case MergeOp =>
-            result match {
-              case ArrayValue(arr) => gasConfig.sizeCost(arr.size.toLong)
-              case MapValue(m)     => gasConfig.sizeCost(m.size.toLong)
-              case _               => GasCost.Zero
+          // entries produces exactly one [key, value] pair per map entry.
+          case EntriesOp =>
+            args match {
+              case MapValue(m) :: Nil => gasConfig.sizeCost(m.size.toLong * 2)
+              case _                  => GasCost.Zero
             }
           case UniqueOp =>
             args match {
@@ -223,16 +271,6 @@ object GasAwareSemantics {
               case ArrayValue(arr) :: Nil => gasConfig.sizeCost(arr.size.toLong)
               case _                      => GasCost.Zero
             }
-          case FlattenOp =>
-            result match {
-              case ArrayValue(arr) => gasConfig.sizeCost(arr.size.toLong)
-              case _               => GasCost.Zero
-            }
-          case SliceOp =>
-            result match {
-              case ArrayValue(arr) => gasConfig.sizeCost(arr.size.toLong)
-              case _               => GasCost.Zero
-            }
           case InOp =>
             args match {
               case _ :: ArrayValue(arr) :: Nil => gasConfig.sizeCost(arr.size.toLong)
@@ -254,25 +292,10 @@ object GasAwareSemantics {
               case ArrayValue(arr) :: Nil => gasConfig.sizeCost(arr.size.toLong)
               case list                   => gasConfig.sizeCost(list.size.toLong)
             }
-          case JoinOp =>
-            result match {
-              case StrValue(s) => gasConfig.sizeCost(s.length.toLong)
-              case _           => GasCost.Zero
-            }
-          case SubStrOp =>
-            result match {
-              case StrValue(s) => gasConfig.sizeCost(s.length.toLong)
-              case _           => GasCost.Zero
-            }
           case MapValuesOp | MapKeysOp =>
             args match {
               case MapValue(m) :: Nil => gasConfig.sizeCost(m.size.toLong)
               case _                  => GasCost.Zero
-            }
-          case EntriesOp =>
-            result match {
-              case ArrayValue(arr) => gasConfig.sizeCost(arr.size.toLong * 2) // Each entry creates a 2-element array
-              case _               => GasCost.Zero
             }
           // poseidon cost scales with the number of inputs (the permutation width = #inputs + 1).
           case PoseidonOp =>
@@ -326,6 +349,44 @@ object GasAwareSemantics {
             args match {
               case _ :: _ :: MapValue(entries) :: _ :: Nil => gasConfig.mptPrefixPerEntry * entries.size.toLong
               case _                                       => GasCost.Zero
+            }
+          case _ => GasCost.Zero
+        }
+
+      /**
+       * Residual size-scaled cost that is only observable on the PRODUCED value and cannot be
+       * derived from the inputs without re-doing the op (split piece count depends on string
+       * content; merge / flatten / slice / substr output sizes depend on clamping or collision
+       * behavior). Consumed AFTER the primitive runs; the work these ops perform is linear in
+       * inputs that were already evaluated and paid for, so nothing unbounded runs un-charged.
+       */
+      private def getOutputScaledCost(op: JsonLogicOp, result: JsonLogicValue): GasCost =
+        op match {
+          case SplitOp =>
+            result match {
+              case ArrayValue(arr) => gasConfig.sizeCost(arr.size.toLong * 2)
+              case _               => GasCost.Zero
+            }
+          case MergeOp =>
+            result match {
+              case ArrayValue(arr) => gasConfig.sizeCost(arr.size.toLong)
+              case MapValue(m)     => gasConfig.sizeCost(m.size.toLong)
+              case _               => GasCost.Zero
+            }
+          case FlattenOp =>
+            result match {
+              case ArrayValue(arr) => gasConfig.sizeCost(arr.size.toLong)
+              case _               => GasCost.Zero
+            }
+          case SliceOp =>
+            result match {
+              case ArrayValue(arr) => gasConfig.sizeCost(arr.size.toLong)
+              case _               => GasCost.Zero
+            }
+          case SubStrOp =>
+            result match {
+              case StrValue(s) => gasConfig.sizeCost(s.length.toLong)
+              case _           => GasCost.Zero
             }
           case _ => GasCost.Zero
         }

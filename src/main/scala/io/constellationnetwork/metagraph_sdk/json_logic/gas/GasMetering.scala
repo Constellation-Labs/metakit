@@ -123,13 +123,24 @@ case class GasConfig(
   missing: GasCost = GasCost(10),
   missingSome: GasCost = GasCost(15),
   typeOf: GasCost = GasCost(1),
+  // Charging schedule (see GasAwareSemantics for the mechanics). Every operation is charged
+  // EXACTLY ONCE against the shared gas ref:
+  //   base(op) + depthPenalty(depth) + inputScaledCost(args) [+ outputScaledCost(result)].
+  // Children pay for themselves when they are evaluated; ancestors never re-charge their subtree.
+  // The base, depth, and input-scaled components are consumed BEFORE the primitive runs, so
+  // out-of-gas is raised before any input-scaled work (Miller loops, BLS aggregation, proof
+  // folds, string building) is performed. Only residual components that are observable solely on
+  // the produced value (split piece count, merge/flatten/slice output size, substr output length)
+  // are consumed after the primitive; the work they price is bounded by already-paid-for inputs.
+  //
   // ZK / crypto opcodes. Costs are set relative to real compute and are the DoS bound for the VM:
   //   - groth16Verify is by far the most expensive (a BN254 pairing product + final exponentiation),
   //   - ecvrf is high (Ed25519 scalar muls + hash-to-curve),
-  //   - pmtVerify is a flat base plus a per-sibling cost (pmtPerSibling) charged in the gas-aware
-  //     layer, since cost scales with path length,
-  //   - poseidon is a flat base plus a per-input cost (poseidonPerInput), since each input widens the
-  //     permutation.
+  //   - pmtVerify is a flat base plus a per-sibling cost (pmtPerSibling) pre-charged from the
+  //     proof's sibling count in the gas-aware layer before any hashing runs, since cost scales
+  //     with path length,
+  //   - poseidon is a flat base plus a per-input cost (poseidonPerInput) pre-charged from the
+  //     input count before the permutation runs, since each input widens the permutation.
   poseidon: GasCost = GasCost(150),
   poseidonPerInput: GasCost = GasCost(150),
   pmtVerify: GasCost = GasCost(200),
@@ -139,10 +150,11 @@ case class GasConfig(
   // ZK / crypto opcodes -- second wave (BN254 curve, BLS12-381, Schnorr). Costs follow the
   // wave-1 scale (groth16Verify = 250k, ecvrfVerify = 50k) and are the DoS bound for the VM:
   //   - bn254Pairing is the most expensive: a flat base plus a per-pair cost (bn254PairingPerPair,
-  //     charged in the gas-aware layer), since each pair adds a Miller loop; the final exponentiation
-  //     is amortized once across the product,
+  //     pre-charged from the pairs count in the gas-aware layer BEFORE any Miller loop runs), since
+  //     each pair adds a Miller loop; the final exponentiation is amortized once across the product,
   //   - blsVerify / blsAggregateVerify are high (hash-to-curve + two pairings); aggregation adds a
-  //     per-key cost (blsAggregatePerKey) for each extra public key summed into the aggregate,
+  //     per-key cost (blsAggregatePerKey, pre-charged from the key count before any key is summed)
+  //     for each extra public key summed into the aggregate,
   //   - schnorrVerify is medium (two BN254 scalar multiplications + a point add + a SHA-256),
   //   - bn254Mul (a scalar multiplication) is far more expensive than bn254Add (a single point add).
   bn254Add: GasCost = GasCost(500),
@@ -155,7 +167,8 @@ case class GasConfig(
   schnorrVerify: GasCost = GasCost(45_000),
   // ZK / crypto opcodes -- third wave (clear-text authenticated databases: SMT + MPT). These run an
   // authentication-path / witness fold that hashes one canonical-JSON commitment per node, so cost is
-  // a flat base plus a per-element charge (charged in the gas-aware layer):
+  // a flat base plus a per-element charge (pre-charged from the proof shape in the gas-aware layer
+  // before the fold runs):
   //   - smt_verify cost scales with the proof DEPTH (#siblings on the authentication path),
   //   - mpt_verify cost scales with the #nodes in the proof witness,
   //   - mpt_prefix_verify cost scales with the #entries proven complete under the prefix.
