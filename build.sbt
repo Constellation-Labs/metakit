@@ -36,6 +36,22 @@ lazy val commonSettings = Seq(
     Libraries.cats,
     Libraries.catsEffect,
     Libraries.levelDb
+  ),
+  // BLS-VENDORED-BETA: vendored BouncyCastle 1.85 beta until 1.85 is a stable managed dep.
+  // Mirrors the tessellation-bls build.sbt hack EXACTLY (canonical reference). The BLS12-381
+  // API (org.bouncycastle.crypto.bls.*) used by our eth2-ciphersuite BLS primitive
+  // (io.constellationnetwork.metagraph_sdk.crypto.bls.Bls12381) exists ONLY in the 1.85 beta
+  // jars dropped in ./lib (auto-picked up via sbt's unmanagedBase = <project>/lib). The
+  // tessellation-sdk dependency pulls BouncyCastle 1.70 (bcprov/bcpkix/bcutil-jdk15on)
+  // TRANSITIVELY; we drop that here so only the vendored 1.85 jdk18on jars provide
+  // org.bouncycastle on the classpath -- otherwise the 1.70 classes shadow the 1.85 ones and
+  // the org.bouncycastle.crypto.bls package is missing at compile time.
+  // MIGRATION DELTA when 1.85 is published: delete ./lib/*.jar, drop this excludeDependencies
+  // block, and add a managed `org.bouncycastle %% bcprov-jdk18on % 1.85` dependency.
+  excludeDependencies ++= Seq(
+    ExclusionRule("org.bouncycastle", "bcprov-jdk15on"),
+    ExclusionRule("org.bouncycastle", "bcpkix-jdk15on"),
+    ExclusionRule("org.bouncycastle", "bcutil-jdk15on")
   )
 ) ++ Defaults.itSettings
 

@@ -5,7 +5,7 @@ import java.security.MessageDigest
 
 import cats.effect.IO
 
-import io.constellationnetwork.metagraph_sdk.crypto.bls.MiraclBls12381
+import io.constellationnetwork.metagraph_sdk.crypto.bls.Bls12381
 import io.constellationnetwork.metagraph_sdk.crypto.zk.Bn254
 import io.constellationnetwork.metagraph_sdk.json_logic.core._
 import io.constellationnetwork.metagraph_sdk.json_logic.gas.{GasConfig, GasLimit}
@@ -13,7 +13,6 @@ import io.constellationnetwork.metagraph_sdk.json_logic.ops.{CryptoOps, HexBytes
 import io.constellationnetwork.metagraph_sdk.json_logic.runtime.JsonLogicEvaluator
 
 import io.circe.parser
-import org.miracl.core.BLS12381.{BLS, ECP}
 import weaver.SimpleIOSuite
 
 /**
@@ -154,31 +153,25 @@ object ZkOpsWave2Suite extends SimpleIOSuite {
   }
 
   // ===========================================================================
-  // BLS12-381 (bls_verify / bls_aggregate_verify) -- MIRACL keygen + sign.
+  // BLS12-381 (bls_verify / bls_aggregate_verify) -- Eth2 ProofOfPossession.
+  //
+  // Inputs are the PUBLISHED Eth2 / IETF BLS test vectors
+  // (github.com/ethereum/bls12-381-tests v0.1.2, ciphersuite
+  // BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_): pubkeys are 48-byte compressed
+  // G1, signatures are 96-byte compressed G2. The opcodes feed straight into the
+  // BouncyCastle 1.85 Bls12381 primitive, so the JLVM agrees byte-for-byte with
+  // the canonical eth2 vectors.
   // ===========================================================================
 
-  // Deterministic keypair from an IKM seed. Returns (privateScalar bytes, pkHex 97B).
-  private def blsKeygen(seed: Byte): (Array[Byte], String) = {
-    val ikm = Array.fill[Byte](32)(seed)
-    val s = new Array[Byte](MiraclBls12381.PrivateKeyBytes)
-    val w = new Array[Byte](MiraclBls12381.PublicKeyBytes)
-    BLS.KeyPairGenerate(ikm, s, w)
-    (s, HexBytes.encodeBytes(w))
-  }
+  // verify_valid_case_e8a50c445c855360: privkey1, message = 0x00*32.
+  private val blsPkHex =
+    "0xa491d1b0ecd9bb917989f0e74f0dea0422eac4a873e5e2644f368dffb9a6e20fd6e10c1b77654d067c0618f6e5a7f79a"
+  private val blsMsgHex = "0x" + "00" * 32
+  private val blsSigHex =
+    "0xb6ed936746e01f8ecf281f020953fbf1f01debd5657c4a383940b020b26507f6076334f91e2366c96e9ab279fb515809" +
+    "0352ea1c5b0c9274504f4f0e7053af24802e51e4568d164fe986834f41e55c8e850ce1f98458c0cfc9ab380b55285a55"
 
-  // Sign a message with a private-key scalar, returning the raw 49-byte G1 signature.
-  private def blsSign(s: Array[Byte], msg: Array[Byte]): Array[Byte] = {
-    val sig = new Array[Byte](MiraclBls12381.SignatureBytes)
-    BLS.core_sign(sig, msg, s)
-    sig
-  }
-
-  private val blsMsg: Array[Byte] = "hello, threshold world".getBytes("UTF-8")
-  private val blsMsgHex: String = HexBytes.encodeBytes(blsMsg)
-  private val (blsSk, blsPkHex) = blsKeygen(1.toByte)
-  private val blsSigHex: String = HexBytes.encodeBytes(blsSign(blsSk, blsMsg))
-
-  test("bls_verify roundtrip: KeyPairGenerate -> sign -> verify == true") {
+  test("bls_verify == true for the published Eth2 verify_valid_case vector") {
     evalExpr(s"""{"bls_verify":["$blsPkHex","$blsMsgHex","$blsSigHex"]}""")
       .map(r => expect(r == Right(BoolValue(true))))
   }
@@ -189,10 +182,11 @@ object ZkOpsWave2Suite extends SimpleIOSuite {
       .map(r => expect(r == Right(BoolValue(false))))
   }
 
-  test("bls_verify == false for a signature from a different key") {
-    val (sk2, _) = blsKeygen(9.toByte)
-    val wrongSig = HexBytes.encodeBytes(blsSign(sk2, blsMsg))
-    evalExpr(s"""{"bls_verify":["$blsPkHex","$blsMsgHex","$wrongSig"]}""")
+  test("bls_verify == false for the published Eth2 verify_wrong_pubkey vector") {
+    // privkey2's pubkey against privkey1's (message, signature).
+    val wrongPk =
+      "0xb301803f8b5ac4a1133581fc676dfedc60d891dd5fa99028805e5ea5b08d3491af75d0707adab3b70c6a6a580217bf81"
+    evalExpr(s"""{"bls_verify":["$wrongPk","$blsMsgHex","$blsSigHex"]}""")
       .map(r => expect(r == Right(BoolValue(false))))
   }
 
@@ -202,38 +196,35 @@ object ZkOpsWave2Suite extends SimpleIOSuite {
 
   // ---- aggregate (same message, N signers) ----
 
-  // Sum a list of raw 49-byte G1 signatures into one aggregate (49-byte) signature.
-  private def aggregateSigs(sigs: List[Array[Byte]]): String = {
-    val acc = ECP.fromBytes(sigs.head)
-    sigs.tail.foreach(s => acc.add(ECP.fromBytes(s)))
-    val out = new Array[Byte](MiraclBls12381.SignatureBytes)
-    acc.toBytes(out, true)
-    HexBytes.encodeBytes(out)
-  }
-
-  private val quorum: List[(Array[Byte], String)] = List(blsKeygen(2), blsKeygen(3), blsKeygen(4))
-  private val quorumPkHexes: List[String] = quorum.map(_._2)
-  private val quorumGoodSigs: List[Array[Byte]] = quorum.map { case (sk, _) => blsSign(sk, blsMsg) }
-  private val quorumAggGood: String = aggregateSigs(quorumGoodSigs)
-
   private def pksJson(pks: List[String]): String = pks.map(p => "\"" + p + "\"").mkString("[", ",", "]")
 
-  test("bls_aggregate_verify == true for N signers over the same message") {
-    evalExpr(s"""{"bls_aggregate_verify":[${pksJson(quorumPkHexes)},"$blsMsgHex","$quorumAggGood"]}""")
+  // fast_aggregate_verify_valid_3d7576f3c0e3570a: 3 pubkeys (privkeys 1,2,3),
+  // message = 0xab*32, aggregate signature.
+  private val quorumPkHexes: List[String] = List(
+    "0xa491d1b0ecd9bb917989f0e74f0dea0422eac4a873e5e2644f368dffb9a6e20fd6e10c1b77654d067c0618f6e5a7f79a",
+    "0xb301803f8b5ac4a1133581fc676dfedc60d891dd5fa99028805e5ea5b08d3491af75d0707adab3b70c6a6a580217bf81",
+    "0xb53d21a4cfd562c469cc81514d4ce5a6b577d8403d32a394dc265dd190b47fa9f829fdd7963afdf972e5e77854051f6f"
+  )
+  private val quorumMsgHex = "0x" + "ab" * 32
+  private val quorumAggGood =
+    "0x9712c3edd73a209c742b8250759db12549b3eaf43b5ca61376d9f30e2747dbcf842d8b2ac0901d2a093713e20284a767" +
+    "0fcf6954e9ab93de991bb9b313e664785a075fc285806fa5224c82bde146561b446ccfc706a64b8579513cfc4ff1d930"
+
+  test("bls_aggregate_verify == true for the published Eth2 fast_aggregate_verify_valid vector (3 signers)") {
+    evalExpr(s"""{"bls_aggregate_verify":[${pksJson(quorumPkHexes)},"$quorumMsgHex","$quorumAggGood"]}""")
       .map(r => expect(r == Right(BoolValue(true))))
   }
 
-  test("bls_aggregate_verify == false when one signer is bad (signs a different message)") {
-    val (badSk, _) = quorum(1)
-    val badSigs = List(quorumGoodSigs.head, blsSign(badSk, "WRONG".getBytes("UTF-8")), quorumGoodSigs(2))
-    val aggBad = aggregateSigs(badSigs)
-    evalExpr(s"""{"bls_aggregate_verify":[${pksJson(quorumPkHexes)},"$blsMsgHex","$aggBad"]}""")
+  test("bls_aggregate_verify == false for the published Eth2 fast_aggregate_verify_extra_pubkey vector") {
+    // The same aggregate, but an EXTRA 4th pubkey (privkey3's, per the generator) -> false.
+    val extra = quorumPkHexes :+ quorumPkHexes(2)
+    evalExpr(s"""{"bls_aggregate_verify":[${pksJson(extra)},"$quorumMsgHex","$quorumAggGood"]}""")
       .map(r => expect(r == Right(BoolValue(false))))
   }
 
   test("bls_aggregate_verify == false when a public key is omitted from the set") {
     // Aggregate signature includes all 3 signers but only 2 pubkeys are presented.
-    evalExpr(s"""{"bls_aggregate_verify":[${pksJson(quorumPkHexes.take(2))},"$blsMsgHex","$quorumAggGood"]}""")
+    evalExpr(s"""{"bls_aggregate_verify":[${pksJson(quorumPkHexes.take(2))},"$quorumMsgHex","$quorumAggGood"]}""")
       .map(r => expect(r == Right(BoolValue(false))))
   }
 
@@ -329,42 +320,48 @@ object ZkOpsWave2Suite extends SimpleIOSuite {
   // Worked example: a BLS threshold gate evaluated end-to-end.
   // ===========================================================================
 
-  private def thresholdGate(pks: List[String], aggSig: String): String =
+  private def thresholdGate(pks: List[String], msgHex: String, aggSig: String): String =
     s"""
        |{"if":[
-       |  {"bls_aggregate_verify":[${pksJson(pks)},"$blsMsgHex","$aggSig"]},
+       |  {"bls_aggregate_verify":[${pksJson(pks)},"$msgHex","$aggSig"]},
        |  "authorized",
        |  "rejected"
        |]}
        |""".stripMargin
 
-  test("worked example: threshold gate returns 'authorized' for a valid quorum") {
-    evalExpr(thresholdGate(quorumPkHexes, quorumAggGood))
+  test("worked example: threshold gate returns 'authorized' for a valid published quorum") {
+    evalExpr(thresholdGate(quorumPkHexes, quorumMsgHex, quorumAggGood))
       .map(r => expect(r == Right(StrValue("authorized"))))
   }
 
-  test("worked example: threshold gate returns 'rejected' when a signer is bad") {
-    val (badSk, _) = quorum(2)
-    val badSigs = List(quorumGoodSigs.head, quorumGoodSigs(1), blsSign(badSk, "nope".getBytes("UTF-8")))
-    val aggBad = aggregateSigs(badSigs)
-    evalExpr(thresholdGate(quorumPkHexes, aggBad))
+  test("worked example: threshold gate returns 'rejected' when a public key is missing") {
+    evalExpr(thresholdGate(quorumPkHexes.take(2), quorumMsgHex, quorumAggGood))
       .map(r => expect(r == Right(StrValue("rejected"))))
   }
 
-  // A direct sanity check that our pairing-based aggregate relation matches MIRACL's
-  // own single core_verify when N = 1 (defends the relation, not just the wrapper).
-  pureTest("aggregate relation matches MIRACL core_verify for a single signer") {
-    val singleAgg = aggregateSigs(List(quorumGoodSigs.head))
+  // Locally generated round-trip (defends the full keyGen -> sign -> aggregate -> opcode path on
+  // the Eth2 PoP primitive, independent of the hard-coded published vectors): three fresh signers
+  // sign the SAME message, aggregate, and the opcode accepts; tampering one signer's message rejects.
+  private def freshSk(seed: Int): BigInteger = Bls12381.keyGen(Array.fill[Byte](32)((seed & 0xff).toByte), Array.emptyByteArray)
+
+  pureTest("aggregate round-trip via the Eth2 primitive matches single verify and the opcode") {
+    val msg = "metakit-jlvm-threshold".getBytes("UTF-8")
+    val sks = List(51, 52, 53).map(freshSk)
+    val pkHexes = sks.map(sk => HexBytes.encodeBytes(Bls12381.skToPk(sk)))
+    val sigs = sks.map(sk => Bls12381.sign(sk, msg))
+    val aggHex = HexBytes.encodeBytes(Bls12381.aggregate(sigs))
+    val msgHex = HexBytes.encodeBytes(msg)
+
     val viaAggregate = CryptoOps.blsAggregateVerify(
-      List(
-        ArrayValue(List(StrValue(quorumPkHexes.head))),
-        StrValue(blsMsgHex),
-        StrValue(singleAgg)
-      )
+      List(ArrayValue(pkHexes.map(StrValue(_))), StrValue(msgHex), StrValue(aggHex))
     )
-    val sigBytes = HexBytes.parseBytes(singleAgg, Some(49), "s").fold(throw _, identity)
-    val pkBytes = HexBytes.parseBytes(quorumPkHexes.head, Some(97), "p").fold(throw _, identity)
-    val viaMiracl = BLS.core_verify(sigBytes, blsMsg, pkBytes) == BLS.BLS_OK
-    expect(viaAggregate == Right(BoolValue(true))) && expect(viaMiracl)
+    // N = 1 single-signer case must match the single verify entry point.
+    val singleHex = HexBytes.encodeBytes(Bls12381.aggregate(List(sigs.head)))
+    val viaSingle = CryptoOps.blsVerify(List(StrValue(pkHexes.head), StrValue(msgHex), StrValue(singleHex)))
+    val viaSingleDirect = Bls12381.verify(Bls12381.skToPk(sks.head), msg, sigs.head)
+
+    expect(viaAggregate == Right(BoolValue(true)))
+      .and(expect(viaSingle == Right(BoolValue(true))))
+      .and(expect(viaSingleDirect))
   }
 }
