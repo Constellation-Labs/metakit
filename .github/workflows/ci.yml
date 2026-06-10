@@ -19,6 +19,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Verify vendored BouncyCastle jar pins
+        # Pinned in lib/README.md — the vendored BC 1.85 beta jars must be the
+        # exact bytes the BLS byte-identity contract was validated against.
+        run: |
+          sha256sum -c <<'EOF'
+          03b4a7656d6aedcff28626e26c1645f4b9956bf0c6d614ee0fba3241a2ced5b8  lib/bcprov-jdk18on-1.85-SNAPSHOT.jar
+          8ec6507c99806587ec739f1e1c710226326f81aecfd8dccad4f6c5753a3e5349  lib/bcpkix-jdk18on-1.85-SNAPSHOT.jar
+          EOF
+
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
