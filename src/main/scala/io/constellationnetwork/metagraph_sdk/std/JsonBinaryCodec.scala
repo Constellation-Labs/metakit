@@ -84,20 +84,30 @@ object JsonBinaryCodec {
   /**
    * Recursively removes null values from JSON objects.
    *
+   * This is the normative first step of the content-hash rule (see
+   * `docs/content-hash.md`): drop null OBJECT fields recursively, then
+   * RFC 8785 canonicalize. Every typed-content hashing/signing surface in
+   * the stack MUST apply this transformation; it is applied internally by
+   * both codec derivations in this object, so anything routed through
+   * `JsonBinaryCodec.serialize` / `JsonBinaryHasher.computeDigest` is
+   * covered automatically.
+   *
    * This ensures that Option[T] fields encoded as null by Circe are omitted
    * from the canonical representation, matching the behavior of JSON serializers
    * that omit undefined/null fields (e.g., TypeScript's JSON.stringify with
    * replacer, or Circe's dropNullValues printer).
    *
-   * This is important for signature compatibility: the sender may omit optional
-   * fields entirely, while the receiver's decoder fills them with None (encoded
-   * as null). Without dropping nulls, the re-encoded JSON would differ from the
-   * original, causing signature verification to fail.
+   * This is important for signature compatibility and schema evolution: the
+   * sender may omit optional fields entirely, while the receiver's decoder
+   * fills them with None (encoded as null). Without dropping nulls, the
+   * re-encoded JSON would differ from the original, causing signature
+   * verification to fail — and adding an `Option` field to a schema would
+   * retroactively change the hashes of previously committed data.
    *
    * Note: null values inside arrays are preserved to maintain index positions.
    * Only object field values that are null are removed.
    */
-  private def dropNulls(json: Json): Json =
+  def dropNulls(json: Json): Json =
     json.arrayOrObject(
       json,
       arr => Json.fromValues(arr.map(dropNulls)),

@@ -87,4 +87,20 @@ object JsonCanonicalizerSuite extends SimpleIOSuite with Checkers {
       } yield expect.same(result1, result2)
     }
   }
+
+  // --- Layer distinction (docs/content-hash.md): this is the RAW value layer ---
+
+  test("raw canonicalizer PRESERVES null object fields (value layer — dropNulls is the codec's job)") {
+    for {
+      json      <- IO.fromEither(parser.parse("""{"b":null,"a":1}"""))
+      canonical <- json.toCanonical
+    } yield expect.same("""{"a":1,"b":null}""", canonical.value)
+  }
+
+  test("raw canonicalizer preserves array nulls") {
+    for {
+      json      <- IO.fromEither(parser.parse("""{"xs":[1,null,3]}"""))
+      canonical <- json.toCanonical
+    } yield expect.same("""{"xs":[1,null,3]}""", canonical.value)
+  }
 }

@@ -176,4 +176,54 @@ object JsonBinaryHasherSuite extends SimpleIOSuite with Checkers {
       testData.computeDigest.attempt.map(result => expect(result.isRight))
     }
   }
+
+  // --- Content-hash rule: dropNulls before RFC 8785 (docs/content-hash.md) ---
+
+  test("explicit-null object fields hash identically to absent fields") {
+    for {
+      withNulls    <- IO.fromEither(parser.parse("""{"a":1,"b":null,"c":{"d":null,"e":2},"f":[1,null,3]}"""))
+      withoutNulls <- IO.fromEither(parser.parse("""{"a":1,"c":{"e":2},"f":[1,null,3]}"""))
+      hashWith     <- withNulls.computeDigest
+      hashWithout  <- withoutNulls.computeDigest
+    } yield expect.same(hashWithout, hashWith)
+  }
+
+  test("absent ≡ null holds through Option fields (None vs decoded-from-absent)") {
+    // The sender omits the optional field entirely; the receiver decodes to None
+    // (encoded back as null by circe). Both must hash to the SAME digest.
+    val withNone = TestDataComplex("test", 42, None)
+    for {
+      digestNone <- withNone.computeDigest
+      // hash the circe encoding WITH its explicit null, as raw Json
+      jsonWithNull <- IO.pure(
+        Json.obj(
+          "id"     -> Json.fromString("test"),
+          "value"  -> Json.fromInt(42),
+          "nested" -> Json.Null
+        )
+      )
+      // and the same object with the field absent
+      jsonAbsent     <- IO.pure(Json.obj("id" -> Json.fromString("test"), "value" -> Json.fromInt(42)))
+      digestWithNull <- jsonWithNull.computeDigest
+      digestAbsent   <- jsonAbsent.computeDigest
+    } yield expect.same(digestAbsent, digestWithNull) && expect.same(digestAbsent, digestNone)
+  }
+
+  test("array nulls are PRESERVED (removing one changes the hash)") {
+    for {
+      withArrayNull <- IO.fromEither(parser.parse("""{"xs":[1,null,3]}"""))
+      withoutNull   <- IO.fromEither(parser.parse("""{"xs":[1,3]}"""))
+      hash1         <- withArrayNull.computeDigest
+      hash2         <- withoutNull.computeDigest
+    } yield expect(hash1 != hash2)
+  }
+
+  test("nulls nested inside array elements' objects are still dropped") {
+    for {
+      a     <- IO.fromEither(parser.parse("""{"xs":[{"k":1,"opt":null},null]}"""))
+      b     <- IO.fromEither(parser.parse("""{"xs":[{"k":1},null]}"""))
+      hashA <- a.computeDigest
+      hashB <- b.computeDigest
+    } yield expect.same(hashB, hashA)
+  }
 }
