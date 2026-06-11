@@ -18,9 +18,22 @@ package object models {
 
   object CanonicalJson {
 
+    /**
+     * RAW RFC 8785 canonicalization — does NOT drop null object fields.
+     *
+     * This is the value-layer primitive (nulls are preserved as real values).
+     * Do NOT use it to produce bytes for typed-content hashing or signing:
+     * those surfaces must apply the drop-nulls rule first. Route typed
+     * content through `JsonBinaryCodec.serialize` / `JsonBinaryHasher`
+     * instead. See `docs/content-hash.md`.
+     */
     def from[F[_]: MonadThrow, A: Encoder](content: A): F[CanonicalJson] =
       JsonCanonicalizer.make[F].canonicalize(content)
 
+    /**
+     * RAW RFC 8785 canonicalization — does NOT drop null object fields.
+     * See [[from]] for when this is (and is not) appropriate.
+     */
     def fromJson[F[_]: MonadThrow](json: Json): F[CanonicalJson] =
       JsonCanonicalizer.make[F].canonicalize(json)
 

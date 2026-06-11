@@ -250,4 +250,29 @@ object JsonBinaryCodecSuite extends SimpleIOSuite with Checkers {
       expect(ex.getMessage.contains("64"))
     )
   }
+
+  // --- Public dropNulls semantics (docs/content-hash.md) ---
+
+  test("dropNulls removes null object fields recursively but preserves array nulls") {
+    for {
+      json <- IO.fromEither(
+        io.circe.parser.parse("""{"a":1,"b":null,"c":{"d":null,"e":[{"f":null,"g":2},null]}}""")
+      )
+      expected <- IO.fromEither(io.circe.parser.parse("""{"a":1,"c":{"e":[{"g":2},null]}}"""))
+    } yield expect.same(expected, JsonBinaryCodec.dropNulls(json))
+  }
+
+  test("serialize bytes for explicit-null and absent fields are identical") {
+    val withNone = TestDataComplex("test", 42, None)
+    for {
+      bytesNone <- withNone.toBinary
+      // a hand-built JSON with the explicit null, serialized as raw Json
+      jsonWithNull <- IO.fromEither(
+        io.circe.parser.parse("""{"id":"test","value":42,"nested":null}""")
+      )
+      bytesNull <- JsonBinaryCodec[IO, io.circe.Json].serialize(jsonWithNull)
+      strNone = new String(bytesNone, StandardCharsets.UTF_8)
+      strNull = new String(bytesNull, StandardCharsets.UTF_8)
+    } yield expect.same(strNone, strNull)
+  }
 }

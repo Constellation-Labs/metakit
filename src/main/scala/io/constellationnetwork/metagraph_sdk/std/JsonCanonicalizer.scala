@@ -25,6 +25,17 @@ import io.constellationnetwork.metagraph_sdk.models.CanonicalJson
 import io.circe._
 import io.circe.syntax.EncoderOps
 
+/**
+ * RAW RFC 8785 canonicalizer — the value layer. Nulls are REAL values here:
+ * this layer preserves null object fields (the JLVM value canonicalizers in
+ * Rust/TS behave identically).
+ *
+ * Typed-content hashing/signing MUST NOT call this directly: the normative
+ * content-hash rule (`docs/content-hash.md`) prepends
+ * `JsonBinaryCodec.dropNulls`. Route typed content through
+ * `JsonBinaryCodec.serialize` / `JsonBinaryHasher.computeDigest`, which apply
+ * drop-nulls internally before delegating here.
+ */
 trait JsonCanonicalizer[F[_]] {
   def canonicalize[A: Encoder](content: A): F[CanonicalJson]
 }
