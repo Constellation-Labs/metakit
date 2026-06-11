@@ -71,7 +71,7 @@ object CommittedApp {
       )
     } yield {
 
-      /**
+      /*
        * The latest SIGNED snapshot's on-chain breadcrumb, when a context (and snapshot) exists.
        * Consensus-attested: the on-chain bytes are part of the signed artifact.
        */
