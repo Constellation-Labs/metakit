@@ -55,4 +55,4 @@ jobs:
         run: sbt scalafmtCheckAll
 
       - name: Compile and test
-        run: sbt test
+        run: sbt test doc
