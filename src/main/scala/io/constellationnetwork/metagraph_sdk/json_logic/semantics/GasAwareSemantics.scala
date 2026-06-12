@@ -5,7 +5,7 @@ import cats.syntax.all._
 
 import io.constellationnetwork.metagraph_sdk.json_logic.core.JsonLogicOp._
 import io.constellationnetwork.metagraph_sdk.json_logic.core._
-import io.constellationnetwork.metagraph_sdk.json_logic.gas.{GasConfig, GasCost, GasLimit}
+import io.constellationnetwork.metagraph_sdk.json_logic.gas.{GasConfig, GasCost, GasLimit, JsonLogicGasEstimator}
 import io.constellationnetwork.metagraph_sdk.json_logic.ops.NumericOps.floatToPlainString
 import io.constellationnetwork.metagraph_sdk.json_logic.runtime.ResultContext
 
@@ -154,83 +154,8 @@ object GasAwareSemantics {
           }
         }
 
-      private def getOpCost(op: JsonLogicOp)(config: GasConfig): GasCost = op match {
-        case NoOp                 => GasCost.Zero
-        case MissingNoneOp        => config.exists
-        case ExistsOp             => config.exists
-        case MissingSomeOp        => config.missingSome
-        case IfElseOp             => config.ifElse
-        case LetOp                => config.ifElse // Similar cost to if/else (control flow)
-        case EqOp                 => config.eq
-        case EqStrictOp           => config.eqStrict
-        case NEqOp                => config.neq
-        case NEqStrictOp          => config.neqStrict
-        case NotOp                => config.not
-        case NOp                  => config.doubleNot
-        case OrOp                 => config.or
-        case AndOp                => config.and
-        case Lt                   => config.lt
-        case Leq                  => config.leq
-        case Gt                   => config.gt
-        case Geq                  => config.geq
-        case ModuloOp             => config.modulo
-        case MaxOp                => config.max
-        case MinOp                => config.min
-        case AddOp                => config.add
-        case TimesOp              => config.times
-        case MinusOp              => config.minus
-        case DivOp                => config.div
-        case MergeOp              => config.merge
-        case InOp                 => config.in
-        case CatOp                => config.cat
-        case SubStrOp             => config.substr
-        case MapOp                => config.map
-        case FilterOp             => config.filter
-        case ReduceOp             => config.reduce
-        case AllOp                => config.all
-        case NoneOp               => config.none
-        case SomeOp               => config.some
-        case MapValuesOp          => config.mapValues
-        case MapKeysOp            => config.mapKeys
-        case GetOp                => config.get
-        case IntersectOp          => config.intersect
-        case CountOp              => config.count
-        case LengthOp             => config.length
-        case FindOp               => config.find
-        case LowerOp              => config.lower
-        case UpperOp              => config.upper
-        case JoinOp               => config.join
-        case SplitOp              => config.split
-        case DefaultOp            => config.default
-        case UniqueOp             => config.unique
-        case SliceOp              => config.slice
-        case ReverseOp            => config.reverse
-        case FlattenOp            => config.flatten
-        case TrimOp               => config.trim
-        case StartsWithOp         => config.startsWith
-        case EndsWithOp           => config.endsWith
-        case AbsOp                => config.abs
-        case RoundOp              => config.round
-        case FloorOp              => config.floor
-        case CeilOp               => config.ceil
-        case PowOp                => config.pow
-        case HasOp                => config.has
-        case EntriesOp            => config.entries
-        case TypeOfOp             => config.typeOf
-        case PoseidonOp           => config.poseidon
-        case PmtVerifyOp          => config.pmtVerify
-        case Groth16VerifyOp      => config.groth16Verify
-        case EcVrfVerifyOp        => config.ecvrfVerify
-        case Bn254AddOp           => config.bn254Add
-        case Bn254MulOp           => config.bn254Mul
-        case Bn254PairingOp       => config.bn254Pairing
-        case BlsVerifyOp          => config.blsVerify
-        case BlsAggregateVerifyOp => config.blsAggregateVerify
-        case SchnorrVerifyOp      => config.schnorrVerify
-        case SmtVerifyOp          => config.smtVerify
-        case MptVerifyOp          => config.mptVerify
-        case MptPrefixVerifyOp    => config.mptPrefixVerify
-      }
+      private def getOpCost(op: JsonLogicOp)(config: GasConfig): GasCost =
+        JsonLogicGasEstimator.baseCost(op)(config)
 
       /**
        * Length of the string a value coerces to in `cat` / `join` (mirrors handleCatOp's
