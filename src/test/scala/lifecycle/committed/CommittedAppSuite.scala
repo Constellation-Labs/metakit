@@ -97,6 +97,21 @@ object CommittedAppSuite extends SimpleIOSuite {
       }
   }
 
+  test("combine resolves the genesis breadcrumb after the cell advanced (tessellation re-run; the e2e stall)") {
+    // tessellation interleaves combine and setCalculatedState and RE-RUNS combine(parent=genesis)
+    // for the first incremental AFTER setCalculatedState has advanced the cell. Reproduce that: advance
+    // the cell to ordinal 1 WITHOUT going through combine (so the work cache never holds the genesis
+    // breadcrumb), then combine from genesis. Only the empty-catalog fallback in resolveCatalog can
+    // resolve the genesis breadcrumb here (the cell is past it, work is empty, and the journal — which
+    // now records ordinal 0 — recomposes to a non-empty catalog). Without it: BreadcrumbUnresolvable
+    // and the metagraph stalls at ordinal 1.
+    for {
+      service <- makeService
+      _       <- service.setCalculatedState(ord(1), ToyPrv(s0))
+      rerun   <- service.combine(service.genesis, List.empty).attempt
+    } yield expect(rerun.isRight)
+  }
+
   test("combine rejects a forged incoming breadcrumb (follower-side transition validation)") {
     for {
       service <- makeService
