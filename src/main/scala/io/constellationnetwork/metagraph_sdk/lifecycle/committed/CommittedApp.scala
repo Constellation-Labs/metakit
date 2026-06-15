@@ -1,18 +1,20 @@
 package io.constellationnetwork.metagraph_sdk.lifecycle.committed
 
-import cats.Parallel
 import cats.data.NonEmptyList
 import cats.effect.Async
 import cats.syntax.all._
+import cats.{Applicative, Parallel}
 
 import scala.reflect.ClassTag
 
 import io.constellationnetwork.currency.dataApplication._
 import io.constellationnetwork.currency.dataApplication.dataApplication.DataApplicationValidationErrorOr
+import io.constellationnetwork.currency.schema.currency.CurrencyIncrementalSnapshot
 import io.constellationnetwork.metagraph_sdk.MetagraphCommonService
 import io.constellationnetwork.metagraph_sdk.lifecycle.{CombinerService, ValidationService}
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryCodec
 import io.constellationnetwork.schema.SnapshotOrdinal
+import io.constellationnetwork.security.Hashed
 import io.constellationnetwork.security.hash.Hash
 import io.constellationnetwork.security.signature.Signed
 
@@ -55,7 +57,8 @@ object CommittedApp {
     validator: ValidationService[F, TX, PUB, PRV],
     journal: CatalogJournal[F],
     extraRoutes: Option[CommittedReader[F, PRV] => HttpRoutes[F]] = None,
-    config: CommittedConfig = CommittedConfig.default
+    config: CommittedConfig = CommittedConfig.default,
+    onConsensusResult: Option[(CommittedReader[F, PRV], Hashed[CurrencyIncrementalSnapshot]) => F[Unit]] = None
   ): F[BaseDataApplicationL0Service[F]] = {
     implicit val wrappedEncoder: Encoder[CommittedOnChain[PUB]] = CommittedOnChain.encoder[PUB]
     implicit val wrappedDecoder: Decoder[CommittedOnChain[PUB]] = CommittedOnChain.decoder[PUB]
@@ -93,6 +96,12 @@ object CommittedApp {
           with DataApplicationL0Service[F, TX, CommittedOnChain[PUB], PRV] {
 
           override def genesis: DataState[CommittedOnChain[PUB], PRV] = genesisData
+
+          /** Forward the consensus result to the dev hook (if any), handing it the committed reader. */
+          override def onSnapshotConsensusResult(
+            snapshot: Hashed[CurrencyIncrementalSnapshot]
+          )(implicit A: Applicative[F]): F[Unit] =
+            onConsensusResult.traverse_(f => f(committedState, snapshot))
 
           override def validateData(
             state: DataState[CommittedOnChain[PUB], PRV],
