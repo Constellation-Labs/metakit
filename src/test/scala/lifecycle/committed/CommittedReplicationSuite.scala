@@ -32,7 +32,7 @@ object CommittedReplicationSuite extends SimpleIOSuite {
 
   test("a replica applying the delta stream matches the source's roots at every step") {
     for {
-      source  <- CommittedState.make[IO, ToyState](s0)
+      source  <- mkCommitted(s0)
       genesis <- source.committed
       replica <- CommittedReplica.fromSnapshot[IO](snapshotOf(genesis)).flatMap(IO.fromEither(_))
 
@@ -51,7 +51,7 @@ object CommittedReplicationSuite extends SimpleIOSuite {
     val config = CommittedConfig(epochSize = 2, sealedEpochRetention = 2)
     val states = (1 to 6).toList.map(i => ToyState(Map("aaa" -> i), Map.empty))
     for {
-      source  <- CommittedState.make[IO, ToyState](s0, config)
+      source  <- mkCommitted(s0, config)
       genesis <- source.committed
       replica <- CommittedReplica.fromSnapshot[IO](snapshotOf(genesis), config).flatMap(IO.fromEither(_))
 
@@ -73,7 +73,7 @@ object CommittedReplicationSuite extends SimpleIOSuite {
 
   test("a tampered delta is rejected (modified upsert, dropped remove, forged roots)") {
     for {
-      source  <- CommittedState.make[IO, ToyState](s0)
+      source  <- mkCommitted(s0)
       genesis <- source.committed
       replica <- CommittedReplica.fromSnapshot[IO](snapshotOf(genesis)).flatMap(IO.fromEither(_))
       c1      <- source.setCommitted(ord(1), stream(1))
@@ -98,7 +98,7 @@ object CommittedReplicationSuite extends SimpleIOSuite {
 
   test("a forged catalog root is rejected by the replica's local recomputation") {
     for {
-      source  <- CommittedState.make[IO, ToyState](s0)
+      source  <- mkCommitted(s0)
       genesis <- source.committed
       replica <- CommittedReplica.fromSnapshot[IO](snapshotOf(genesis)).flatMap(IO.fromEither(_))
       c1      <- source.setCommitted(ord(1), stream.head)
@@ -110,7 +110,7 @@ object CommittedReplicationSuite extends SimpleIOSuite {
 
   test("a delta that does not chain from the replica's roots is rejected") {
     for {
-      source  <- CommittedState.make[IO, ToyState](s0)
+      source  <- mkCommitted(s0)
       genesis <- source.committed
       replica <- CommittedReplica.fromSnapshot[IO](snapshotOf(genesis)).flatMap(IO.fromEither(_))
       _       <- source.setCommitted(ord(1), stream.head)
@@ -122,7 +122,7 @@ object CommittedReplicationSuite extends SimpleIOSuite {
 
   test("a snapshot that does not reproduce its claimed roots is rejected") {
     for {
-      genesis <- CommittedState.make[IO, ToyState](s0).flatMap(_.committed)
+      genesis <- mkCommitted(s0).flatMap(_.committed)
       forged = snapshotOf(genesis).copy(entries = snapshotOf(genesis).entries - CommitKey.unsafe("fiber/aaa"))
       result <- CommittedReplica.fromSnapshot[IO](forged)
     } yield expect(result.left.exists(_.isInstanceOf[ReplicationError.SnapshotRootsMismatch]))
@@ -130,7 +130,7 @@ object CommittedReplicationSuite extends SimpleIOSuite {
 
   test("ring-buffer eviction forces the snapshot fallback, after which the stream resumes") {
     for {
-      source  <- CommittedState.make[IO, ToyState](s0, CommittedConfig(maxRecentDeltas = 1))
+      source  <- mkCommitted(s0, CommittedConfig(maxRecentDeltas = 1))
       genesis <- source.committed
       replica <- CommittedReplica.fromSnapshot[IO](snapshotOf(genesis)).flatMap(IO.fromEither(_))
 

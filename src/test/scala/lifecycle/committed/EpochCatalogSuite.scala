@@ -22,7 +22,7 @@ object EpochCatalogSuite extends SimpleIOSuite {
   /** Drive a fresh committed cell through ordinals 1..n (committing state(i) at ordinal i). */
   private def driveTo(n: Int, config: CommittedConfig): IO[(CommittedState[IO, ToyState], Vector[Committed[IO, ToyState]])] =
     for {
-      st <- CommittedState.make[IO, ToyState](state(0), config)
+      st <- mkCommitted(state(0), config)
       g  <- st.committed
       cs <- (1 to n).toList.traverse(i => st.setCommitted(ord(i.toLong), state(i)))
     } yield (st, g +: cs.toVector)

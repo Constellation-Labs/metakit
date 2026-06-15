@@ -1,5 +1,7 @@
 package io.constellationnetwork.metagraph_sdk.lifecycle.committed
 
+import cats.effect.IO
+
 import scala.collection.immutable.SortedMap
 
 import io.constellationnetwork.currency.dataApplication.{DataCalculatedState, DataOnChainState, DataUpdate}
@@ -13,6 +15,14 @@ import io.circe.{Decoder, Encoder, Json}
  * assembly internals (`CommittedState.make`) for white-box tests.
  */
 object ToyFixtures {
+
+  /**
+   * Shared committed-state constructor for the non-bootstrap suites: wires a fresh empty in-memory
+   * journal. An empty journal cannot recompose any attested catalog root, so this behaves exactly
+   * like the old journal-less default for every seed/unhydrated test.
+   */
+  def mkCommitted(s: ToyState, config: CommittedConfig = CommittedConfig.default): IO[CommittedState[IO, ToyState]] =
+    CatalogJournal.inMemory[IO].flatMap(CommittedState.make[IO, ToyState](s, _, config))
 
   final case class ToyState(fibers: Map[String, Int], registry: Map[String, String])
 
