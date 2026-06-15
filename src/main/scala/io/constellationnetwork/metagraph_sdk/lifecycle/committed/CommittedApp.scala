@@ -56,7 +56,7 @@ object CommittedApp {
     combiner: CombinerService[F, TX, PUB, PRV],
     validator: ValidationService[F, TX, PUB, PRV],
     journal: CatalogJournal[F],
-    extraRoutes: Option[CommittedReader[F, PRV] => HttpRoutes[F]] = None,
+    extraRoutes: Option[(CommittedReader[F, PRV], L0NodeContext[F]) => HttpRoutes[F]] = None,
     config: CommittedConfig = CommittedConfig.default,
     onConsensusResult: Option[(CommittedReader[F, PRV], Hashed[CurrencyIncrementalSnapshot]) => F[Unit]] = None
   ): F[BaseDataApplicationL0Service[F]] = {
@@ -129,7 +129,7 @@ object CommittedApp {
 
           override def routes(implicit context: L0NodeContext[F]): HttpRoutes[F] =
             new CommittedRoutes[F, PRV](committedState).public <+>
-            extraRoutes.fold(HttpRoutes.empty[F])(f => f(committedState))
+            extraRoutes.fold(HttpRoutes.empty[F])(f => f(committedState, context))
         }
       )
     }
