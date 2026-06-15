@@ -33,9 +33,9 @@ import io.circe.Json
  *     breadcrumb of exactly that ordinal (from the latest SIGNED snapshot's on-chain state);
  *     verifies the value reproduces the breadcrumb's `mptRoot` and adopts its `catalogRoot`
  *     sight-unseen -- consensus attested. The catalog itself starts [[CatalogView.SeededCatalog]];
- *     if a [[CatalogJournal]] is configured and its persisted entries recompose to the attested
- *     root, the cell hydrates immediately (the restart path). Otherwise hydration arrives later
- *     via [[hydrate]].
+ *     if the [[CatalogJournal]]'s persisted entries recompose to the attested root, the cell
+ *     hydrates immediately (the restart path -- a persistent `levelDb` journal; an `inMemory`
+ *     journal is empty after a process restart). Otherwise hydration arrives later via [[hydrate]].
  *
  * ==The work cache==
  * `combine` runs BEFORE `setCalculatedState` and must emit the NEXT breadcrumb without mutating
@@ -47,7 +47,7 @@ import io.circe.Json
 final class CommittedState[F[_]: Async: JsonBinaryHasher, S] private (
   view: CommittedView[S],
   val config: CommittedConfig,
-  journal: Option[CatalogJournal[F]],
+  journal: CatalogJournal[F],
   cell: AtomicCell[F, Committed[F, S]],
   work: Ref[F, Vector[(CommittedBreadcrumb, EpochCatalog[F])]]
 ) extends CommittedReader[F, S] {
@@ -112,21 +112,27 @@ final class CommittedState[F[_]: Async: JsonBinaryHasher, S] private (
       }
     } yield result
 
-  /** Rebuild from the journal and accept ONLY if it recomposes to the attested roots. */
+  /**
+   * Rebuild from the journal and accept ONLY if it recomposes to the attested roots. Resolution is
+   * by ROOTS -- the catalog root cryptographically commits the full ordinal history, so a matching
+   * root uniquely determines the state -- NOT by the breadcrumb's claimed ordinal. Honest callers
+   * always pass a consensus-signed, ordinal-bound breadcrumb (the latest snapshot's on-chain
+   * state), so root-matching is sufficient. Possible future hardening: also reject a breadcrumb
+   * whose claimed ordinal is inconsistent with the recomposed catalog's frontier (defence in depth
+   * against a forged ordinal -- currently caught downstream when the derived breadcrumb diverges).
+   */
   private def journalCatalogMatching(roots: CommittedRoots): F[Option[EpochCatalog[F]]] =
-    journal.flatTraverse { j =>
-      j.contents.flatMap {
-        case (hot, level1) =>
-          EpochCatalog
-            .fromContents[F](config, CatalogContents(config.epochSize, hot, level1, SortedMap.empty))
-            .flatMap {
-              case Left(_) => none[EpochCatalog[F]].pure[F]
-              case Right(catalog) =>
-                catalog.compose(roots.mptRoot).map {
-                  case (_, composedRoot) => Option.when(composedRoot == roots.catalogRoot)(catalog)
-                }
-            }
-      }
+    journal.contents.flatMap {
+      case (hot, level1) =>
+        EpochCatalog
+          .fromContents[F](config, CatalogContents(config.epochSize, hot, level1, SortedMap.empty))
+          .flatMap {
+            case Left(_) => none[EpochCatalog[F]].pure[F]
+            case Right(catalog) =>
+              catalog.compose(roots.mptRoot).map {
+                case (_, composedRoot) => Option.when(composedRoot == roots.catalogRoot)(catalog)
+              }
+          }
     }
 
   // ---------------------------------------------------------------------------------------------
@@ -227,10 +233,8 @@ final class CommittedState[F[_]: Async: JsonBinaryHasher, S] private (
           .raiseError[F, Unit]
           .whenA(b.roots != roots)
       }
-      _ <- journal.traverse_ { j =>
-        j.recordOrdinal(prev.ordinal.value.value, prev.roots.mptRoot) >>
-        sealEvent.traverse_(j.recordSeal)
-      }
+      _ <- journal.recordOrdinal(prev.ordinal.value.value, prev.roots.mptRoot) >>
+      sealEvent.traverse_(journal.recordSeal)
       stateDelta = StateDelta(ordinal, prev.roots, roots, delta.upserts, delta.removes)
       deltas = (prev.recentDeltas :+ stateDelta).takeRight(config.maxRecentDeltas)
     } yield Committed(ordinal, nextState, applied, CatalogView.LiveCatalog(nextEpochs, top), roots, deltas)
@@ -269,7 +273,7 @@ final class CommittedState[F[_]: Async: JsonBinaryHasher, S] private (
   /**
    * Install full catalog contents on a SEEDED cell. Trustless: the rebuilt rollup must recompose
    * to the breadcrumb-attested catalog root, so any peer (or operator) can supply the payload. A
-   * hydrated cell is returned unchanged. On success the journal (if any) is rewritten to match.
+   * hydrated cell is returned unchanged. On success the journal is rewritten to match.
    */
   def hydrate(contents: CatalogContents): F[Either[CommittedStateError, Committed[F, S]]] =
     cell.evalModify { prev =>
@@ -289,7 +293,7 @@ final class CommittedState[F[_]: Async: JsonBinaryHasher, S] private (
                     ).pure[F]
                   else {
                     val hydrated = prev.copy(catalog = CatalogView.LiveCatalog(epochs, top))
-                    journal.traverse_(_.reset(contents.hot, contents.level1)).as((hydrated, hydrated.asRight[CommittedStateError]))
+                    journal.reset(contents.hot, contents.level1).as((hydrated, hydrated.asRight[CommittedStateError]))
                   }
               }
           }
@@ -307,8 +311,8 @@ object CommittedState {
    */
   private[committed] def make[F[_]: Async: JsonBinaryHasher, S](
     genesisState: S,
-    config: CommittedConfig = CommittedConfig.default,
-    journal: Option[CatalogJournal[F]] = None
+    journal: CatalogJournal[F],
+    config: CommittedConfig = CommittedConfig.default
   )(implicit view: CommittedView[S]): F[CommittedState[F, S]] =
     for {
       trie   <- CommittedCommitment.buildTrie[F](view.entries(genesisState))

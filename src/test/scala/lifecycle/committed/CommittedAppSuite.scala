@@ -55,11 +55,14 @@ object CommittedAppSuite extends SimpleIOSuite {
     }
 
   private def makeService: IO[BaseDataApplicationL0Service[IO]] =
-    CommittedApp.makeL0[IO, ToyTx, ToyPub, ToyPrv](
-      DataState(ToyPub(0), ToyPrv(s0)),
-      combiner,
-      validator
-    )
+    CatalogJournal.inMemory[IO].flatMap { j =>
+      CommittedApp.makeL0[IO, ToyTx, ToyPub, ToyPrv](
+        DataState(ToyPub(0), ToyPrv(s0)),
+        combiner,
+        validator,
+        journal = j
+      )
+    }
 
   private def get(service: BaseDataApplicationL0Service[IO], path: String): IO[Response[IO]] =
     service.routes.orNotFound.run(Request[IO](Method.GET, Uri.unsafeFromString(path)))
@@ -67,7 +70,7 @@ object CommittedAppSuite extends SimpleIOSuite {
   test("genesis on-chain state carries the genesis breadcrumb (correct by construction)") {
     for {
       service  <- makeService
-      expected <- CommittedState.make[IO, ToyState](s0).flatMap(_.committed)
+      expected <- mkCommitted(s0).flatMap(_.committed)
     } yield
       service.genesis.onChain match {
         case CommittedOnChain(ToyPub(0), breadcrumb) =>
@@ -85,7 +88,7 @@ object CommittedAppSuite extends SimpleIOSuite {
       service <- makeService
       out     <- service.combine(service.genesis, List.empty)
       // committing the same transition produces the same breadcrumb
-      reference <- CommittedState.make[IO, ToyState](s0).flatMap(st => st.setCommitted(ord(1), s0))
+      reference <- mkCommitted(s0).flatMap(st => st.setCommitted(ord(1), s0))
     } yield
       out.onChain match {
         case CommittedOnChain(ToyPub(0), breadcrumb) =>
@@ -114,7 +117,7 @@ object CommittedAppSuite extends SimpleIOSuite {
     for {
       service  <- makeService
       h        <- service.hashCalculatedState(ToyPrv(s1))
-      expected <- CommittedState.make[IO, ToyState](s0).flatMap(_.hashFor(s1, None))
+      expected <- mkCommitted(s0).flatMap(_.hashFor(s1, None))
     } yield expect(h == expected)
   }
 
@@ -132,7 +135,7 @@ object CommittedAppSuite extends SimpleIOSuite {
       _         <- service.setCalculatedState(ord(1), ToyPrv(s1))
       res       <- get(service, "/committed/root")
       json      <- res.as[Json]
-      reference <- CommittedState.make[IO, ToyState](s0).flatMap(st => st.setCommitted(ord(1), s1))
+      reference <- mkCommitted(s0).flatMap(st => st.setCommitted(ord(1), s1))
     } yield
       expect.all(
         res.status == Status.Ok,
@@ -197,7 +200,7 @@ object CommittedAppSuite extends SimpleIOSuite {
       attestation <- OrdinalCatalogProofVerifier
         .verify[IO](root, proof, CommittedConfig.DefaultEpochSize)
         .flatMap(IO.fromEither(_))
-      genesisRoots <- CommittedState.make[IO, ToyState](s0).flatMap(_.committed)
+      genesisRoots <- mkCommitted(s0).flatMap(_.committed)
     } yield
       expect.all(
         res.status == Status.Ok,

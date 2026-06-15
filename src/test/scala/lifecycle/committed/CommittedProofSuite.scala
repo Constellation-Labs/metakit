@@ -29,7 +29,7 @@ object CommittedProofSuite extends SimpleIOSuite {
 
   test("single-key proof verifies against the committed mptRoot; absent key is PathNotFound") {
     for {
-      c       <- CommittedState.make[IO, ToyState](s0).flatMap(_.committed)
+      c       <- mkCommitted(s0).flatMap(_.committed)
       proof   <- c.proveKey(CommitKey.unsafe("fiber/aaa")).flatMap(IO.fromEither(_))
       ok      <- MerklePatriciaVerifier.make[IO](c.roots.mptRoot).confirm(proof)
       missing <- c.proveKey(CommitKey.unsafe("fiber/zzz"))
@@ -39,7 +39,7 @@ object CommittedProofSuite extends SimpleIOSuite {
   test("batch proof covers all requested keys and verifies") {
     val keys = List(CommitKey.unsafe("fiber/aaa"), CommitKey.unsafe("registry/alpha"))
     for {
-      c     <- CommittedState.make[IO, ToyState](s0).flatMap(_.committed)
+      c     <- mkCommitted(s0).flatMap(_.committed)
       proof <- c.proveKeys(keys).flatMap(IO.fromEither(_))
       ok    <- MerklePatriciaBatchInclusionVerifier.make[IO](c.roots.mptRoot).confirm(proof)
     } yield expect.all(ok.isRight, proof.paths.toSet == keys.map(_.toHex).toSet)
@@ -47,7 +47,7 @@ object CommittedProofSuite extends SimpleIOSuite {
 
   test("namespace attestation covers exactly the namespace's keys and verifies") {
     for {
-      c     <- CommittedState.make[IO, ToyState](s0).flatMap(_.committed)
+      c     <- mkCommitted(s0).flatMap(_.committed)
       proof <- c.attestNamespace(CommitNamespace.unsafe("fiber")).flatMap(IO.fromEither(_))
       ok    <- MerklePatriciaBatchInclusionVerifier.make[IO](c.roots.mptRoot).confirm(proof)
     } yield
@@ -65,7 +65,7 @@ object CommittedProofSuite extends SimpleIOSuite {
       json.as[JsonLogicValue].fold(e => throw new RuntimeException(s"bad bridge: $e"), identity)
 
     for {
-      c     <- CommittedState.make[IO, ToyState](s0).flatMap(_.committed)
+      c     <- mkCommitted(s0).flatMap(_.committed)
       proof <- c.attestNamespace(ns).flatMap(IO.fromEither(_))
       entriesJlv = MapValue(entries.map { case (k, v) => k.toHex.value -> jlv(v) }.toMap)
       args = List[JsonLogicValue](
@@ -83,7 +83,7 @@ object CommittedProofSuite extends SimpleIOSuite {
 
   test("TOP catalog: current:mpt binds the state-dict root; an unknown family is provably absent") {
     for {
-      st <- CommittedState.make[IO, ToyState](s0)
+      st <- mkCommitted(s0)
       _  <- st.setCommitted(ord(1), s1)
       c2 <- st.setCommitted(ord(2), s2)
       verifier = SparseMerkleVerifier.make[IO]
@@ -109,10 +109,10 @@ object CommittedProofSuite extends SimpleIOSuite {
 
   test("ordinal attestations: historical membership at every ordinal, and NON-membership of an absent one") {
     for {
-      st           <- CommittedState.make[IO, ToyState](s0)
+      st           <- mkCommitted(s0)
       c1           <- st.setCommitted(ord(1), s1)
       c2           <- st.setCommitted(ord(2), s2)
-      genesisRoots <- CommittedState.make[IO, ToyState](s0).flatMap(_.committed).map(_.roots)
+      genesisRoots <- mkCommitted(s0).flatMap(_.committed).map(_.roots)
 
       p0 <- c2.proveOrdinal(ord(0)).flatMap(IO.fromEither(_))
       a0 <- OrdinalCatalogProofVerifier.verify[IO](c2.roots.catalogRoot, p0, CommittedConfig.DefaultEpochSize).flatMap(IO.fromEither(_))
@@ -134,7 +134,7 @@ object CommittedProofSuite extends SimpleIOSuite {
 
   test("ordinal proof JSON round-trips (route payload format)") {
     for {
-      st    <- CommittedState.make[IO, ToyState](s0)
+      st    <- mkCommitted(s0)
       _     <- st.setCommitted(ord(1), s1)
       c     <- st.committed
       proof <- c.proveOrdinal(ord(0)).flatMap(IO.fromEither(_))

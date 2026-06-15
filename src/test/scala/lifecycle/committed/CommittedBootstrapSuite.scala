@@ -25,9 +25,14 @@ object CommittedBootstrapSuite extends SimpleIOSuite {
   /** A source chain advanced to ordinal `n`. */
   private def source(n: Int, journal: Option[CatalogJournal[IO]] = None): IO[CommittedState[IO, ToyState]] =
     for {
-      st <- CommittedState.make[IO, ToyState](state(0), config, journal)
+      j  <- journal.fold(CatalogJournal.inMemory[IO])(IO.pure)
+      st <- CommittedState.make[IO, ToyState](state(0), j, config)
       _  <- (1 to n).toList.traverse_(i => st.setCommitted(ord(i.toLong), state(i)))
     } yield st
+
+  /** A "fresh downloading node": its own empty in-memory journal (behaves like the old None). */
+  private val freshNode: IO[CommittedState[IO, ToyState]] =
+    CatalogJournal.inMemory[IO].flatMap(CommittedState.make[IO, ToyState](state(0), _, config))
 
   test("O(1) bootstrap: hashCalculatedState is verifiable from state + breadcrumb alone") {
     for {
@@ -35,7 +40,7 @@ object CommittedBootstrapSuite extends SimpleIOSuite {
       cSrc <- src.committed
       bc = cSrc.breadcrumb
 
-      fresh <- CommittedState.make[IO, ToyState](state(0), config)
+      fresh <- freshNode
       // the downloading node has NO history; it hashes the fetched state with the attested breadcrumb
       h <- fresh.hashFor(state(5), Some(bc))
     } yield expect(h == cSrc.roots.combinedHash)
@@ -45,7 +50,7 @@ object CommittedBootstrapSuite extends SimpleIOSuite {
     for {
       src    <- source(5)
       cSrc   <- src.committed
-      fresh  <- CommittedState.make[IO, ToyState](state(0), config)
+      fresh  <- freshNode
       seeded <- fresh.setCommitted(ord(5), state(5), Some(cSrc.breadcrumb))
     } yield
       expect.all(
@@ -60,7 +65,7 @@ object CommittedBootstrapSuite extends SimpleIOSuite {
     for {
       src          <- source(5)
       cSrc         <- src.committed
-      fresh        <- CommittedState.make[IO, ToyState](state(0), config)
+      fresh        <- freshNode
       wrongState   <- fresh.setCommitted(ord(5), state(4), Some(cSrc.breadcrumb)).attempt
       wrongOrdinal <- fresh.setCommitted(ord(6), state(5), Some(cSrc.breadcrumb)).attempt
       noBreadcrumb <- fresh.setCommitted(ord(5), state(5), None).attempt
@@ -76,7 +81,7 @@ object CommittedBootstrapSuite extends SimpleIOSuite {
     for {
       src     <- source(5)
       cSrc    <- src.committed
-      fresh   <- CommittedState.make[IO, ToyState](state(0), config)
+      fresh   <- freshNode
       seeded  <- fresh.setCommitted(ord(5), state(5), Some(cSrc.breadcrumb))
       attempt <- fresh.advanceWork(seeded.breadcrumb, ToyState.view.entries(state(6))).attempt
     } yield expect(attempt.left.exists(_.isInstanceOf[CommittedStateError.BreadcrumbUnresolvable]))
@@ -88,7 +93,7 @@ object CommittedBootstrapSuite extends SimpleIOSuite {
       cSrc <- src.committed
       contents = cSrc.catalogContents.getOrElse(throw new RuntimeException("source must be hydrated"))
 
-      fresh <- CommittedState.make[IO, ToyState](state(0), config)
+      fresh <- freshNode
       _     <- fresh.setCommitted(ord(5), state(5), Some(cSrc.breadcrumb))
 
       forged = contents.copy(hot = contents.hot.map { case (o, _) => o -> cSrc.roots.mptRoot })
@@ -110,12 +115,12 @@ object CommittedBootstrapSuite extends SimpleIOSuite {
 
   test("journal restart: a seeded cell hydrates immediately from its own persisted catalog") {
     for {
-      journal <- CatalogJournal.inMemory[IO].map(_.some)
-      src     <- source(5, journal) // writes through to the journal on every transition
+      journal <- CatalogJournal.inMemory[IO]
+      src     <- source(5, journal.some) // writes through to the journal on every transition
       cSrc    <- src.committed
 
       // 'restart': a new cell over the SAME journal, seeded from the attested breadcrumb
-      restarted <- CommittedState.make[IO, ToyState](state(0), config, journal)
+      restarted <- CommittedState.make[IO, ToyState](state(0), journal, config)
       seeded    <- restarted.setCommitted(ord(5), state(5), Some(cSrc.breadcrumb))
 
       // and it can continue producing transitions in lock-step with the source
@@ -160,7 +165,7 @@ object CommittedBootstrapSuite extends SimpleIOSuite {
         // second 'process': fresh cell, SAME db path -- the journal alone hydrates the seed
         seeded <- CatalogJournal.levelDb[IO](dir).use { journal =>
           CommittedState
-            .make[IO, ToyState](state(0), config, journal.some)
+            .make[IO, ToyState](state(0), journal, config)
             .flatMap(_.setCommitted(ord(5), state(5), Some(cSrc.breadcrumb)))
         }
       } yield expect.all(seeded.isHydrated, seeded.roots == cSrc.roots)
@@ -189,8 +194,12 @@ object CommittedBootstrapSuite extends SimpleIOSuite {
       forged = c4.breadcrumb.copy(roots = c4.roots.copy(mptRoot = cSrc.roots.mptRoot))
       rejected <- src.advanceWork(forged, ToyState.view.entries(state(5))).attempt
 
-      // forged at an unknown ordinal: unresolvable, equally fatal
-      unknown = CommittedBreadcrumb(ord(9), c4.roots)
+      // forged roots that correspond to NO committed state (a real mptRoot paired with a catalog
+      // root that does not recompose from it): not the cell, not the work cache, unreproducible
+      // from the journal -- unresolvable, equally fatal. Resolution is by ROOTS, not the claimed
+      // ordinal: a populated journal legitimately resolves genuine historical roots (the restart /
+      // replay path), so the "unresolvable" case must use roots the node never committed.
+      unknown = CommittedBreadcrumb(ord(9), c4.roots.copy(catalogRoot = cSrc.roots.catalogRoot))
       unresolvable <- src.advanceWork(unknown, ToyState.view.entries(state(5))).attempt
     } yield
       expect.all(

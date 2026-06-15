@@ -53,16 +53,16 @@ object CommittedApp {
     genesisState: DataState[PUB, PRV],
     combiner: CombinerService[F, TX, PUB, PRV],
     validator: ValidationService[F, TX, PUB, PRV],
+    journal: CatalogJournal[F],
     extraRoutes: Option[CommittedReader[F, PRV] => HttpRoutes[F]] = None,
-    config: CommittedConfig = CommittedConfig.default,
-    journal: Option[CatalogJournal[F]] = None
+    config: CommittedConfig = CommittedConfig.default
   ): F[BaseDataApplicationL0Service[F]] = {
     implicit val wrappedEncoder: Encoder[CommittedOnChain[PUB]] = CommittedOnChain.encoder[PUB]
     implicit val wrappedDecoder: Decoder[CommittedOnChain[PUB]] = CommittedOnChain.decoder[PUB]
     val view = CommittedView[PRV]
 
     for {
-      committedState   <- CommittedState.make[F, PRV](genesisState.calculated, config, journal)
+      committedState   <- CommittedState.make[F, PRV](genesisState.calculated, journal, config)
       genesisCommitted <- committedState.committed
       genesisData = DataState(
         CommittedOnChain(genesisState.onChain, genesisCommitted.breadcrumb),

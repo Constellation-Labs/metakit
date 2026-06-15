@@ -32,17 +32,17 @@ object CommittedStateSuite extends SimpleIOSuite {
     val b = ToyState(Map("k4" -> 4, "k3" -> 3, "k2" -> 2, "k1" -> 1), Map("r" -> "v"))
 
     for {
-      c1 <- CommittedState.make[IO, ToyState](a).flatMap(_.committed)
-      c2 <- CommittedState.make[IO, ToyState](b).flatMap(_.committed)
+      c1 <- mkCommitted(a).flatMap(_.committed)
+      c2 <- mkCommitted(b).flatMap(_.committed)
     } yield expect.all(c1.roots == c2.roots, c1.roots.combinedHash == c2.roots.combinedHash)
   }
 
   test("delta-apply == full rebuild (and equals a fresh genesis at the new state)") {
     for {
-      st      <- CommittedState.make[IO, ToyState](s0)
+      st      <- mkCommitted(s0)
       c1      <- st.setCommitted(ord(1), s1)
       derived <- CommittedCommitment.buildTrie[IO](ToyState.view.entries(s1))
-      fresh   <- CommittedState.make[IO, ToyState](s1).flatMap(_.committed)
+      fresh   <- mkCommitted(s1).flatMap(_.committed)
     } yield
       expect.all(
         c1.roots.mptRoot == derived.rootNode.digest,
@@ -52,7 +52,7 @@ object CommittedStateSuite extends SimpleIOSuite {
 
   test("empty <-> nonempty boundary stays canonical in both directions") {
     for {
-      st        <- CommittedState.make[IO, ToyState](ToyState.empty)
+      st        <- mkCommitted(ToyState.empty)
       c1        <- st.setCommitted(ord(1), s0)
       c2        <- st.setCommitted(ord(2), ToyState.empty)
       derived   <- CommittedCommitment.buildTrie[IO](ToyState.view.entries(s0))
@@ -66,7 +66,7 @@ object CommittedStateSuite extends SimpleIOSuite {
 
   test("combined hash is sha256(rawBytes(mptRoot) ++ rawBytes(liveCatalogRoot))") {
     for {
-      st <- CommittedState.make[IO, ToyState](s0)
+      st <- mkCommitted(s0)
       c1 <- st.setCommitted(ord(1), s1)
       manual = Hash.fromBytes(Hex(c1.roots.mptRoot.value).toBytes ++ Hex(c1.roots.catalogRoot.value.value).toBytes)
     } yield expect(c1.roots.combinedHash == manual)
@@ -74,10 +74,10 @@ object CommittedStateSuite extends SimpleIOSuite {
 
   test("the live catalog COMMITS history: same state value at different ordinals -> different catalog roots") {
     for {
-      st <- CommittedState.make[IO, ToyState](s0)
+      st <- mkCommitted(s0)
       c1 <- st.setCommitted(ord(1), s1)
       c2 <- st.setCommitted(ord(2), s0) // back to the s0 VALUE, but with two ordinals of history
-      g  <- CommittedState.make[IO, ToyState](s0).flatMap(_.committed)
+      g  <- mkCommitted(s0).flatMap(_.committed)
     } yield
       expect.all(
         c2.roots.mptRoot == g.roots.mptRoot, // tier 1 is pure in the value
@@ -89,7 +89,7 @@ object CommittedStateSuite extends SimpleIOSuite {
 
   test("hashFor on the steady-state path equals the next transition's combined hash") {
     for {
-      st <- CommittedState.make[IO, ToyState](s0)
+      st <- mkCommitted(s0)
       h  <- st.hashFor(s1, None) // cell at genesis = parent of ordinal 1
       c1 <- st.setCommitted(ord(1), s1)
     } yield expect(h == c1.roots.combinedHash)
@@ -97,7 +97,7 @@ object CommittedStateSuite extends SimpleIOSuite {
 
   test("re-committing the same ordinal is idempotent for the same value and refused for a different one") {
     for {
-      st     <- CommittedState.make[IO, ToyState](s0)
+      st     <- mkCommitted(s0)
       c1     <- st.setCommitted(ord(1), s1)
       again  <- st.setCommitted(ord(1), s1)
       forged <- st.setCommitted(ord(1), s0).attempt
@@ -115,7 +115,8 @@ object CommittedStateSuite extends SimpleIOSuite {
     }
 
     for {
-      st <- CommittedState.make[IO, ToyState](s0, CommittedConfig.default)(
+      journal <- CatalogJournal.inMemory[IO]
+      st <- CommittedState.make[IO, ToyState](s0, journal, CommittedConfig.default)(
         IO.asyncForIO,
         JsonBinaryHasher.deriveFromCodec[IO],
         lyingView
@@ -133,7 +134,7 @@ object CommittedStateSuite extends SimpleIOSuite {
     )
 
     for {
-      st <- CommittedState.make[IO, ToyState](s0, CommittedConfig(maxRecentDeltas = 2))
+      st <- mkCommitted(s0, CommittedConfig(maxRecentDeltas = 2))
       _  <- states.zipWithIndex.traverse { case (s, i) => st.setCommitted(ord(i.toLong + 1), s) }
       c  <- st.committed
     } yield
