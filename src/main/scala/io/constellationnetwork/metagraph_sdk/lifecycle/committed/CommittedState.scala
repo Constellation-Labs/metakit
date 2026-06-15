@@ -108,7 +108,11 @@ final class CommittedState[F[_]: Async: JsonBinaryHasher, S] private (
       }
       result <- fromWork match {
         case s @ Some(_) => (s: Option[EpochCatalog[F]]).pure[F]
-        case None        => journalCatalogMatching(bc.roots)
+        case None =>
+          journalCatalogMatching(bc.roots).flatMap {
+            case s @ Some(_) => (s: Option[EpochCatalog[F]]).pure[F]
+            case None        => emptyCatalogMatching(bc.roots)
+          }
       }
     } yield result
 
@@ -133,6 +137,27 @@ final class CommittedState[F[_]: Async: JsonBinaryHasher, S] private (
                 case (_, composedRoot) => Option.when(composedRoot == roots.catalogRoot)(catalog)
               }
           }
+    }
+
+  /**
+   * The genesis fallback. The genesis breadcrumb's catalog is the EMPTY epoch catalog (no ordinals
+   * recorded yet); once the cell advances past genesis its catalog is no longer the live cell, and
+   * the journal can never reproduce it either, because the genesis->1 transition records ordinal 0
+   * into the journal -- so a journal rebuild yields a catalog that already contains ordinal 0, which
+   * recomposes to a DIFFERENT root than the (empty-catalog) genesis root.
+   *
+   * tessellation re-runs `combine(parent = genesis)` while accepting the first incremental snapshot,
+   * AFTER `setCalculatedState` may have advanced the cell; without this fallback that re-run raises
+   * [[CommittedStateError.BreadcrumbUnresolvable]] and the metagraph stalls at ordinal 1. Rebuild the
+   * empty catalog and accept it ONLY if it recomposes to the attested roots -- true only for genesis,
+   * where the state-dict carries just the genesis mptRoot and no history, so this never matches a
+   * non-genesis breadcrumb.
+   */
+  private def emptyCatalogMatching(roots: CommittedRoots): F[Option[EpochCatalog[F]]] =
+    EpochCatalog.empty[F](config).flatMap { empty =>
+      empty.compose(roots.mptRoot).map {
+        case (_, composedRoot) => Option.when(composedRoot == roots.catalogRoot)(empty)
+      }
     }
 
   // ---------------------------------------------------------------------------------------------
