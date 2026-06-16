@@ -1,6 +1,7 @@
 # RFC: `sigma_verify` — recursive Σ-protocol proposition verifier
 
-- **Status:** design / deferred (Phase 2)
+- **Status:** implemented — Phase 0–2 shipped, registered **live** on the default JLVM dispatch (no
+  feature flag, no opt-in). **Not yet externally audited** (see §0).
 - **Scope:** metakit JLVM (`json_logic`) crypto opcodes
 - **Curve:** BN254 (alt_bn128) G1 — same as `schnorr_verify` / `groth16_verify`. We do **not** add
   secp256k1.
@@ -10,10 +11,31 @@
   - `CryptoOps.dlogComputeCommitment` / `CryptoOps.dhtupleComputeCommitment` — the bottom-up
     commitment-recovery helpers this verifier reuses.
 - **Crown-jewel correctness target:** the **strong Fiat-Shamir transcript binding** plus the CDS
-  challenge-splitting. An external audit of the FS + CDS surface is a **hard gate** before this
-  opcode guards real value.
+  challenge-splitting. An external audit of the FS + CDS surface is **strongly recommended** before
+  this opcode guards high-value flows — but it is *not* enforced as a runtime gate (see §0).
+- **Maturity:** the whole Σ-protocol opcode family (`prove_dlog_verify`, `prove_dhtuple_verify`,
+  `sigma_verify`) is **registered and live** on the default JLVM dispatch — no feature flag, no
+  opt-in. It is **not yet externally audited** (see §0).
 
 ---
+
+## §0. Status & maturity — live, not yet externally audited
+
+The three Σ-protocol opcodes (`prove_dlog_verify`, `prove_dhtuple_verify`, `sigma_verify`) are
+**implemented and registered live** on the default JLVM dispatch in both implementations (metakit
+Scala reference + metakit-sdk Rust). There is **no feature flag and no opt-in**: a call dispatches
+straight to the verifier in production, in tests, and in the conformance / differential harness
+alike. Malformed input is a hard error and a cryptographically-invalid proof returns `false` (the
+error-vs-`false` discipline of §5) — the opcodes never silently pass.
+
+**They are not yet covered by an external cryptographic audit.** The FS + CDS surface is exactly the
+class that broke on Solana (§6), so an external audit of the strong-Fiat-Shamir transcript and the
+CDS challenge-splitting is **strongly recommended before these opcodes guard high-value flows** (mint
+policies, asset morphisms). That recommendation is a *deployment / integration* decision, **not** a
+runtime gate baked into the VM: the cross-language conformance vectors (§4) are a **necessary but not
+sufficient** check, and integrators are responsible for tracking the audit. (An earlier
+OFF-by-default runtime flag was removed in favour of this honest maturity note, so the opcode behaves
+identically everywhere it runs.)
 
 ## 1. Motivation
 
@@ -106,9 +128,12 @@ then runs the non-interactive CDS verifier. The algorithm is the Ergo `SigSerial
    `a1,a2`). The exact byte layout is normative and frozen (see §4) — any divergence between prover
    and verifier serialization is an `InvalidSignature`-class break.
 6. **Hash → compare to the root challenge.** Compute
-   `e_root* = SHA256( serialized_tree ‖ message ) mod R` and accept iff `e_root*` equals the root
-   challenge that was propagated in step 3. Mismatch ⇒ `false` (well-formed but cryptographically
-   invalid).
+   `e_root* = low31( SHA256( DomainSep ‖ serialized_tree ‖ message ) )` and accept iff `e_root*`
+   equals (byte-for-byte) the root challenge that was propagated in step 3. `DomainSep =
+   ascii("sigma_verify:v1")` separates this hash family from the per-leaf transcripts; `low31` is
+   the low-order 31 bytes of the digest (the injective challenge domain, see §4). The comparison is
+   over the 31 challenge bytes — **no mod-R reduction on either side** (the 31-byte challenge is
+   already a canonical Fr element). Mismatch ⇒ `false` (well-formed but cryptographically invalid).
 
 This is **strong Fiat-Shamir**: the hash in step 6 binds the **entire** statement (every leaf's
 points, the tree shape, the threshold parameters) **and** every reconstructed commitment **and** the
@@ -145,14 +170,14 @@ as every other crypto opcode):
   challenge and per-leaf response(s):
 
   ```jsonc
-  // every node carries its propagated challenge (32B):
-  {"e": "0x..(32B)", ...}
-  // a leaf additionally carries its response(s):
-  {"type": "dlog",    "e": "0x..", "z": "0x..(32B)"}
-  {"type": "dhtuple", "e": "0x..", "z": "0x..(32B)"}
+  // every node carries its propagated challenge (31B — the injective challenge domain, §4a):
+  {"e": "0x..(31B)", ...}
+  // a leaf additionally carries its response(s) (z is a full 32B mod-R scalar):
+  {"type": "dlog",    "e": "0x..(31B)", "z": "0x..(32B)"}
+  {"type": "dhtuple", "e": "0x..(31B)", "z": "0x..(32B)"}
   // a connective additionally carries its children's proofs:
-  {"type": "or", "e": "0x..", "children": [ <proofNode>, ... ]}
-  {"type": "threshold", "e": "0x..", "k": <int>, "children": [ <proofNode>, ... ]}
+  {"type": "or", "e": "0x..(31B)", "children": [ <proofNode>, ... ]}
+  {"type": "threshold", "e": "0x..(31B)", "k": <int>, "children": [ <proofNode>, ... ]}
   ```
 
   Commitments are **not** carried in the proof — they are reconstructed (§2 step 4). This both
@@ -181,7 +206,41 @@ the `HexBytes` fixed-width discipline and the existing `mpt-spec` canonical-JSON
 - **Points:** every G1 point (`pk`, `g`, `h`, `u`, `v`, and the reconstructed `a` / `a1` / `a2`) is
   the canonical 64-byte big-endian `x‖y` form produced by `HexBytes.encodeG1` — the same fixed-width
   encoding the leaf opcodes already use. No compression, no variable width.
-- **Challenges / responses:** 32-byte big-endian, reduced mod `R` where they are challenges.
+- **Challenges:** **31-byte (248-bit) big-endian — the INJECTIVE-into-Fr challenge domain (§4a).**
+  Because `2^248 < R` (BN254 `R ≈ 2^253.6`), every 31-byte value is a distinct, canonical Fr element,
+  so the byte↔scalar map is a *bijection* — there is no `e` vs `e+R` aliasing. The SAME 31 bytes are
+  used both as the CDS / GF(2^8) object (XOR / Shamir, closed in GF(2)^248) **and**, taken directly
+  with **no mod-R reduction**, as the Fr scalar in the leaf reconstruction (`z·G − e·pk`). Note:
+  challenges are **not** part of the serialized transcript (only the statement points + reconstructed
+  commitments are); they live in the proof tree and are checked against the recomputed root.
+- **Responses (`z`):** 32-byte big-endian, reduced mod `R` (they are full curve scalars).
+
+### 4a. Challenge domain — the injective byte↔scalar map (normative)
+
+The challenge byte width is **31 bytes, not 32** (the auditor-suggested "smaller challenge byte
+width"). This kills a malleability / weakened-CDS-soundness hazard that 32-byte challenges carried:
+a 32-byte challenge was used **raw** for the OR-XOR / GF(2^8) split but **reduced mod R** for the
+leaf scalar arithmetic, so two distinct raw challenges `e` and `e+R` (both `< 2^256`, since `R <
+2^256`) collapsed to the **same** scalar — distinct transcripts, identical algebraic check.
+
+The fix makes the challenge↔scalar map a bijection:
+
+- `CHALLENGE_BYTES = 31`. Every challenge — the root challenge AND every per-leaf / per-node
+  challenge in the proof AND every challenge **derived** in the CDS split — is a 31-byte value.
+- Challenges are derived from SHA-256 by a **single canonical rule**: the **low-order 31 bytes** of
+  the digest (`low31(d) = d[1..32]`, i.e. drop the most-significant byte). The root challenge is
+  `e_root = low31( SHA256( DomainSep ‖ serializedTree ‖ message ) )`.
+- **CDS XOR (OR)** and **GF(2^8) Shamir (THRESHOLD)** operate on the 31-byte challenges — closed in
+  `GF(2)^248` (31 independent byte-lanes for the threshold interpolation, was 32).
+- **Scalar use:** the 31-byte challenge is converted **directly** to an Fr element (`BigInt(1, e)`).
+  Because `e < 2^248 < R` this needs **no mod-R reduction** — the byte↔scalar map is the bijection,
+  so the alias is gone by construction (a challenge `≥ 2^248` is impossible: it would not fit in 31
+  bytes, and `e+R ≥ R > 2^248` can never be a 31-byte challenge).
+- **Encoding deltas:** per-leaf / per-node challenges are now **31 bytes** (were 32). Responses `z`
+  stay full 32-byte mod-R scalars; commitments stay 64-byte G1. The serialized **transcript** (tags,
+  arities, `k`, statement points, reconstructed commitments, message) is **unchanged** — challenges
+  were never in it — so the serialization KATs are stable in layout (only the reconstructed
+  commitment bytes move, because they depend on the new challenge values).
 
 This serialization is the part most likely to diverge silently between the metakit verifier and the
 metakit-sdk prover, so it gets its own conformance vectors (cf. `docs/mpt-spec`, `docs/sig-spec`):
@@ -203,7 +262,7 @@ Identical discipline to `groth16_verify` / `schnorr_verify` / `prove_dhtuple_ver
   leaf with an identity statement point (same forgery vectors the leaf opcodes already reject as
   `false`).
 
-This keeps the gate's failure mode aligned with the rest of the crypto-opcode family: a block does
+This keeps the opcode's failure mode aligned with the rest of the crypto-opcode family: a block does
 not get *poisoned* by a malformed proof being mistaken for a consensus-relevant error.
 
 ---
@@ -238,18 +297,19 @@ How this RFC bakes in **strong** Fiat-Shamir:
    *and* the message. `schnorr_verify` / `prove_dlog_verify` bind `R ‖ pk ‖ msg`. The
    `SigmaOpsSuite` proves the binding by negative tests: changing `g`, `u`, `v`, or `msg` flips a
    valid proof to `false`.
-2. **The tree hash (step 6) binds the whole tree.** The root challenge is `SHA256(canonical_tree ‖
-   message)` where `canonical_tree` includes **every** leaf's statement points, **every**
-   reconstructed commitment, the connective structure, and the threshold parameters. Nothing the
-   prover controls is left out of the transcript.
+2. **The tree hash (step 6) binds the whole tree.** The root challenge is `low31( SHA256(DomainSep ‖
+   canonical_tree ‖ message) )` where `canonical_tree` includes **every** leaf's statement points,
+   **every** reconstructed commitment, the connective structure, and the threshold parameters.
+   Nothing the prover controls is left out of the transcript. The `low31` reduction (§4a) makes the
+   root challenge a canonical Fr element with no `e` vs `e+R` aliasing.
 3. **Commitments are reconstructed, not trusted** (§2 step 4), so a tampered response necessarily
    changes the hashed commitment and breaks step 6.
 
-**Hard gate:** because this is precisely the surface that broke on Solana, the FS + CDS
-implementation MUST pass an **external cryptographic audit** before `sigma_verify` is allowed to
-guard real value (mint policies, asset morphisms). Until then it ships behind the same "design /
-deferred" status as this document, and the conformance vectors (§4) are a *necessary but not
-sufficient* check.
+**Audit recommendation:** because this is precisely the surface that broke on Solana, the FS + CDS
+implementation **should pass an external cryptographic audit** before `sigma_verify` guards
+high-value flows (mint policies, asset morphisms). This is a deployment-time recommendation, **not** a
+runtime gate — the opcode is registered live everywhere it runs (see §0) — and the conformance
+vectors (§4) are a *necessary but not sufficient* check.
 
 ---
 
@@ -309,7 +369,8 @@ inside a **morphism** or **mintPolicy**, via the shipped `ZkVerify`-morphism pat
 `threshold(2, [dlog(A), dlog(B), dlog(C)])` proposition; an asset-compose authorization "key A or key
 B" becomes `or([dlog(A), dlog(B)])`. Because the leaves and the helpers are already shipped (Phase
 0–1) and re-used unchanged, Phase 2 is purely the recursive CDS layer + canonical serialization +
-gas wiring + the external audit gate.
+gas wiring — all shipped. A follow-up external audit of the FS + CDS surface is recommended before
+high-value use (§0).
 
 ---
 
@@ -319,10 +380,10 @@ gas wiring + the external audit gate.
   unit-tested.
 - **Phase 1 (DONE):** `prove_dhtuple_verify` standalone leaf with strong-FS transcript;
   `dhtupleComputeCommitment` extracted + unit-tested; full `SigmaOpsSuite`.
-- **Phase 2 (THIS RFC, deferred):** `sigma_verify` recursive CDS verifier — proposition/proof
-  encoding, challenge propagation (AND/OR/THRESHOLD), commitment reconstruction, canonical
-  serialization, gas, conformance vectors. **Blocked on an external audit of the FS + CDS surface
-  before it guards real value.**
+- **Phase 2 (DONE):** `sigma_verify` recursive CDS verifier — proposition/proof encoding, challenge
+  propagation (AND/OR/THRESHOLD), commitment reconstruction, canonical serialization, gas,
+  cross-language conformance vectors. Registered live (no runtime gate). **An external audit of the
+  FS + CDS surface is recommended before it guards high-value flows (§0).**
 
 ---
 

@@ -75,9 +75,18 @@ object SigmaVectorGen extends SimpleIOSuite {
   private def encG1(p: Bn254.G1): String = HexBytes.encodeG1(BigInt(p.x), BigInt(p.y)).toOption.get
   private def g1Bytes(p: Bn254.G1): Array[Byte] = HexBytes.parseBytes(encG1(p), Some(64), "g1").toOption.get
   private def hex32(v: BigInt): String = HexBytes.encodeUInt(v.mod(R), 32).toOption.get
-  private def hexRaw(v: BigInt): String = HexBytes.encodeUInt(v, 32).toOption.get
   private def sha256(bytes: Array[Byte]): Array[Byte] = MessageDigest.getInstance("SHA-256").digest(bytes)
   private def sha256Big(bytes: Array[Byte]): BigInt = BigInt(1, sha256(bytes))
+
+  // CHALLENGE DOMAIN (audit finding #1): challenges are 31-byte (248-bit) values (the injective
+  // -into-Fr domain; 2^248 < R). MUST match CryptoOps.Sigma.ChallengeBytes exactly.
+  private val ChallengeBytes: Int = 31
+  // A random 31-byte challenge (a free/simulated CDS challenge) — < 2^248 by construction.
+  private def randChallenge(): BigInt = BigInt(1, { val b = new Array[Byte](ChallengeBytes); rng.nextBytes(b); b })
+  // Emit a 31-byte challenge as fixed-width hex (the proof `e` field).
+  private def hexChallenge(v: BigInt): String = HexBytes.encodeUInt(v, ChallengeBytes).toOption.get
+  // The single SHA256->challenge rule (finding #1): low-order 31 bytes of the digest, as a BigInt.
+  private def low31(bytes: Array[Byte]): BigInt = BigInt(1, sha256(bytes).takeRight(ChallengeBytes))
 
   // Frozen serialization constants — MUST match CryptoOps.Sigma exactly.
   private val TagDlog: Byte = 0x00
@@ -87,7 +96,7 @@ object SigmaVectorGen extends SimpleIOSuite {
   private val TagThreshold: Byte = 0x04
   private val DomainSep: Array[Byte] = "sigma_verify:v1".getBytes("US-ASCII")
   private def uint32(v: Int): Array[Byte] = Array((v >>> 24).toByte, (v >>> 16).toByte, (v >>> 8).toByte, v.toByte)
-  private def challengeBytes(e: BigInt): Array[Byte] = HexBytes.parseBytes(hexRaw(e), Some(32), "e").toOption.get
+  private def challengeBytes(e: BigInt): Array[Byte] = HexBytes.parseBytes(hexChallenge(e), Some(ChallengeBytes), "e").toOption.get
 
   // ===========================================================================
   // LEAF provers (from SigmaOpsSuite).
@@ -202,7 +211,7 @@ object SigmaVectorGen extends SimpleIOSuite {
   }
 
   private def commit(p: Prop, mustSimulate: Boolean = false): PreProof =
-    if (mustSimulate || !satisfiable(p)) simulateForced(p, randScalar())
+    if (mustSimulate || !satisfiable(p)) simulateForced(p, randChallenge()) // 31-byte free node e (finding #1)
     else
       p match {
         case Dlog(xOpt, pk) => val r = randScalar(); PreDlog(pk, sat = true, xOpt, r, g1.multiply(r.bigInteger))
@@ -239,21 +248,21 @@ object SigmaVectorGen extends SimpleIOSuite {
     case And(cs) =>
       val node = PreAnd(cs.map(c => simulateForced(c, e)), sat = false); node.e = e; node
     case Or(cs) =>
-      val frees = cs.dropRight(1).map(c => simulateForced(c, randScalar()))
+      val frees = cs.dropRight(1).map(c => simulateForced(c, randChallenge()))
       val lastE = frees.foldLeft(e)((acc, c) => acc ^ c.e)
       val node = PreOr(frees :+ simulateForced(cs.last, lastE), sat = false); node.e = e; node
     case Threshold(k, cs) =>
       val n = cs.length
       val degree = n - k
       val freeIdxs = (0 until degree).toSet
-      val freeChildren: Map[Int, PreProof] = freeIdxs.map(i => i -> simulateForced(cs(i), randScalar())).toMap
+      val freeChildren: Map[Int, PreProof] = freeIdxs.map(i => i -> simulateForced(cs(i), randChallenge())).toMap
       val xs = (0 :: freeIdxs.toList.sorted.map(_ + 1)).toArray
       val children = (0 until n).toList.map { i =>
         if (freeIdxs.contains(i)) freeChildren(i)
         else {
           val forced = BigInt(
             1,
-            Array.tabulate(32) { lane =>
+            Array.tabulate(ChallengeBytes) { lane =>
               val ys = (0 :: freeIdxs.toList.sorted).zipWithIndex.map {
                 case (fi, pos) =>
                   if (pos == 0) challengeBytes(e)(lane) & 0xff
@@ -298,7 +307,7 @@ object SigmaVectorGen extends SimpleIOSuite {
 
   private def setChallenge(pp: PreProof, e: BigInt): Unit =
     if (!pp.sat) {
-      require(pp.e == e || pp.e == e.mod(R), s"simulated subtree challenge mismatch: ${pp.e} vs $e")
+      require(pp.e == e, s"simulated subtree challenge mismatch: ${pp.e} vs $e") // 31-byte domain: no mod R
     } else
       pp match {
         case d: PreDlog => d.e = e; d.z = (d.r + e * d.witness.get).mod(R)
@@ -324,7 +333,7 @@ object SigmaVectorGen extends SimpleIOSuite {
           require(simIdxs.length == degree, s"threshold prover: expected $degree simulated children, got ${simIdxs.length}")
           val xs = (0 :: simIdxs.map(_ + 1)).toArray
           val realE: Map[Int, BigInt] = realIdxs.map { ri =>
-            val bytes = Array.tabulate(32) { lane =>
+            val bytes = Array.tabulate(ChallengeBytes) { lane =>
               val ys = (0 :: simIdxs).zipWithIndex.map {
                 case (si, pos) =>
                   if (pos == 0) challengeBytes(e)(lane) & 0xff
@@ -340,16 +349,17 @@ object SigmaVectorGen extends SimpleIOSuite {
       }
 
   private def proofJson(pp: PreProof): String = pp match {
-    case d: PreDlog => s"""{"type":"dlog","e":"${hexRaw(d.e)}","z":"${hex32(d.z)}"}"""
-    case d: PreDh   => s"""{"type":"dhtuple","e":"${hexRaw(d.e)}","z":"${hex32(d.z)}"}"""
-    case a: PreAnd  => s"""{"type":"and","e":"${hexRaw(a.e)}","children":[${a.children.map(proofJson).mkString(",")}]}"""
-    case o: PreOr   => s"""{"type":"or","e":"${hexRaw(o.e)}","children":[${o.children.map(proofJson).mkString(",")}]}"""
-    case t: PreThr  => s"""{"type":"threshold","e":"${hexRaw(t.e)}","k":${t.k},"children":[${t.children.map(proofJson).mkString(",")}]}"""
+    case d: PreDlog => s"""{"type":"dlog","e":"${hexChallenge(d.e)}","z":"${hex32(d.z)}"}"""
+    case d: PreDh   => s"""{"type":"dhtuple","e":"${hexChallenge(d.e)}","z":"${hex32(d.z)}"}"""
+    case a: PreAnd  => s"""{"type":"and","e":"${hexChallenge(a.e)}","children":[${a.children.map(proofJson).mkString(",")}]}"""
+    case o: PreOr   => s"""{"type":"or","e":"${hexChallenge(o.e)}","children":[${o.children.map(proofJson).mkString(",")}]}"""
+    case t: PreThr =>
+      s"""{"type":"threshold","e":"${hexChallenge(t.e)}","k":${t.k},"children":[${t.children.map(proofJson).mkString(",")}]}"""
   }
 
   private def prove(prop: Prop, m: Array[Byte]): (String, String) = {
     val pp = commit(prop)
-    val rootChallenge = sha256Big(DomainSep ++ pp.serializeWithCommitments ++ m).mod(R)
+    val rootChallenge = low31(DomainSep ++ pp.serializeWithCommitments ++ m) // 31-byte root (finding #1)
     setChallenge(pp, rootChallenge)
     (propJson(prop), proofJson(pp))
   }
@@ -584,8 +594,8 @@ object SigmaVectorGen extends SimpleIOSuite {
       val prop = Or(List(a, b))
       val ca = commit(a).asInstanceOf[PreDlog]
       val cb = commit(b).asInstanceOf[PreDlog]
-      val orE = ca.e ^ cb.e
-      val proofJ = s"""{"type":"or","e":"${hexRaw(orE)}","children":[${proofJson(ca)},${proofJson(cb)}]}"""
+      val orE = ca.e ^ cb.e // 31-byte XOR (finding #1)
+      val proofJ = s"""{"type":"or","e":"${hexChallenge(orE)}","children":[${proofJson(ca)},${proofJson(cb)}]}"""
       cases += valueCase(
         sigmaExpr(propJson(prop), proofJ, msgHex),
         "false",
@@ -599,8 +609,8 @@ object SigmaVectorGen extends SimpleIOSuite {
       val ca = commit(a).asInstanceOf[PreDlog]
       val cb = commit(b).asInstanceOf[PreDlog]
       val orNode = PreOr(List(ca, cb), sat = false)
-      val root = sha256Big(DomainSep ++ orNode.serializeWithCommitments ++ msg).mod(R)
-      val proofJ = s"""{"type":"or","e":"${hex32(root)}","children":[${proofJson(ca)},${proofJson(cb)}]}"""
+      val root = low31(DomainSep ++ orNode.serializeWithCommitments ++ msg) // 31-byte root (finding #1)
+      val proofJ = s"""{"type":"or","e":"${hexChallenge(root)}","children":[${proofJson(ca)},${proofJson(cb)}]}"""
       cases += valueCase(
         sigmaExpr(propJson(prop), proofJ, msgHex),
         "false",
@@ -613,8 +623,8 @@ object SigmaVectorGen extends SimpleIOSuite {
       val prop = Threshold(2, List(known, dlogUnknown(), dlogUnknown()))
       val cs = prop.children.map(_ => commit(dlogUnknown()).asInstanceOf[PreDlog])
       val thrNode = PreThr(2, cs, sat = false)
-      val root = sha256Big(DomainSep ++ thrNode.serializeWithCommitments ++ msg).mod(R)
-      val proofJ = s"""{"type":"threshold","e":"${hex32(root)}","k":2,"children":[${cs.map(proofJson).mkString(",")}]}"""
+      val root = low31(DomainSep ++ thrNode.serializeWithCommitments ++ msg) // 31-byte root (finding #1)
+      val proofJ = s"""{"type":"threshold","e":"${hexChallenge(root)}","k":2,"children":[${cs.map(proofJson).mkString(",")}]}"""
       cases += valueCase(sigmaExpr(propJson(prop), proofJ, msgHex), "false", "soundness: THRESHOLD 2-of-3 with only k-1 witnesses -> false")
     }
     // --- SOUNDNESS: wrong message -> false ---
@@ -642,7 +652,7 @@ object SigmaVectorGen extends SimpleIOSuite {
     {
       val identity = "0x" + "0" * 128
       val prop = s"""{"type":"dlog","pk":"$identity"}"""
-      val proof = s"""{"type":"dlog","e":"${hex32(BigInt(123))}","z":"${hex32(BigInt(456))}"}"""
+      val proof = s"""{"type":"dlog","e":"${hexChallenge(BigInt(123))}","z":"${hex32(BigInt(456))}"}"""
       cases += valueCase(sigmaExpr(prop, proof, msgHex), "false", "identity dlog pk universal-forgery vector -> false (not error)")
     }
 
@@ -650,13 +660,15 @@ object SigmaVectorGen extends SimpleIOSuite {
     {
       val offCurve = HexBytes.encodeG1(BigInt(1), BigInt(1)).toOption.get
       val prop = s"""{"type":"dlog","pk":"$offCurve"}"""
-      val proof = s"""{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(BigInt(2))}"}"""
+      val proof = s"""{"type":"dlog","e":"${hexChallenge(BigInt(1))}","z":"${hex32(BigInt(2))}"}"""
       cases += errorCase(sigmaExpr(prop, proof, msgHex), "off-curve statement point -> error")
     }
     // --- ERROR: unknown node type ---
     {
       val prop = s"""{"type":"xor","children":[{"type":"dlog","pk":"${encG1(g1)}"}]}"""
-      val proof = s"""{"type":"xor","e":"${hex32(BigInt(1))}","children":[{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(
+      val proof = s"""{"type":"xor","e":"${hexChallenge(BigInt(1))}","children":[{"type":"dlog","e":"${hexChallenge(
+          BigInt(1)
+        )}","z":"${hex32(
           BigInt(1)
         )}"}]}"""
       cases += errorCase(sigmaExpr(prop, proof, msgHex), "unknown node type -> error")
@@ -664,21 +676,25 @@ object SigmaVectorGen extends SimpleIOSuite {
     // --- ERROR: threshold k > n ---
     {
       val prop = s"""{"type":"threshold","k":5,"children":[{"type":"dlog","pk":"${encG1(g1)}"},{"type":"dlog","pk":"${encG1(g1)}"}]}"""
-      val proof = s"""{"type":"threshold","e":"${hex32(BigInt(1))}","k":5,"children":[{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(
+      val proof = s"""{"type":"threshold","e":"${hexChallenge(BigInt(1))}","k":5,"children":[{"type":"dlog","e":"${hexChallenge(
           BigInt(1)
-        )}"},{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(BigInt(1))}"}]}"""
+        )}","z":"${hex32(
+          BigInt(1)
+        )}"},{"type":"dlog","e":"${hexChallenge(BigInt(1))}","z":"${hex32(BigInt(1))}"}]}"""
       cases += errorCase(sigmaExpr(prop, proof, msgHex), "threshold k > n -> error")
     }
     // --- ERROR: prop/proof shape mismatch (dlog vs dhtuple) ---
     {
       val prop = s"""{"type":"dlog","pk":"${encG1(g1)}"}"""
-      val proof = s"""{"type":"dhtuple","e":"${hex32(BigInt(1))}","z":"${hex32(BigInt(1))}"}"""
+      val proof = s"""{"type":"dhtuple","e":"${hexChallenge(BigInt(1))}","z":"${hex32(BigInt(1))}"}"""
       cases += errorCase(sigmaExpr(prop, proof, msgHex), "proposition/proof shape mismatch -> error")
     }
     // --- ERROR: child-count mismatch ---
     {
       val prop = s"""{"type":"and","children":[{"type":"dlog","pk":"${encG1(g1)}"},{"type":"dlog","pk":"${encG1(g1)}"}]}"""
-      val proof = s"""{"type":"and","e":"${hex32(BigInt(1))}","children":[{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(
+      val proof = s"""{"type":"and","e":"${hexChallenge(BigInt(1))}","children":[{"type":"dlog","e":"${hexChallenge(
+          BigInt(1)
+        )}","z":"${hex32(
           BigInt(1)
         )}"}]}"""
       cases += errorCase(sigmaExpr(prop, proof, msgHex), "proposition/proof child-count mismatch -> error")
@@ -692,7 +708,7 @@ object SigmaVectorGen extends SimpleIOSuite {
     // --- ERROR: malformed message hex ---
     {
       val prop = s"""{"type":"dlog","pk":"${encG1(g1)}"}"""
-      val proof = s"""{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(BigInt(1))}"}"""
+      val proof = s"""{"type":"dlog","e":"${hexChallenge(BigInt(1))}","z":"${hex32(BigInt(1))}"}"""
       cases += errorCase(sigmaExpr(prop, proof, "0xZZ"), "malformed message hex -> error")
     }
 
@@ -722,7 +738,7 @@ object SigmaVectorGen extends SimpleIOSuite {
       case (name, prop) =>
         // commit deterministically (seeded RNG), hash the root, fill responses.
         val pp = commit(prop)
-        val rootChallenge = sha256Big(DomainSep ++ pp.serializeWithCommitments ++ msg).mod(R)
+        val rootChallenge = low31(DomainSep ++ pp.serializeWithCommitments ++ msg) // 31-byte root (finding #1)
         setChallenge(pp, rootChallenge)
         val serializedHex = HexBytes.encodeBytes(pp.serializeWithCommitments)
         // Sanity: the emitted (prop, proof) must verify true under the REAL opcode.

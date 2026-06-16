@@ -1,13 +1,17 @@
 package json_logic
 
+import java.math.BigInteger
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Paths}
+import java.security.{MessageDigest, SecureRandom}
 
 import cats.effect.{ExitCode, IO, IOApp}
 import cats.syntax.all._
 
+import io.constellationnetwork.metagraph_sdk.crypto.zk.Bn254
 import io.constellationnetwork.metagraph_sdk.json_logic.core.{JsonLogicExpression, JsonLogicValue}
 import io.constellationnetwork.metagraph_sdk.json_logic.gas.{GasConfig, GasExhaustedException, GasLimit}
+import io.constellationnetwork.metagraph_sdk.json_logic.ops.{CryptoOps, HexBytes}
 import io.constellationnetwork.metagraph_sdk.json_logic.runtime.JsonLogicEvaluator
 
 import io.circe.syntax._
@@ -55,6 +59,214 @@ object GasVectorGenerator extends IOApp {
 
   final private case class CategorySpec(category: String, note: Option[String], cases: List[CaseSpec])
 
+  // --- compact CDS prover for the sigma_verify gas fixtures (31-byte challenges, finding #1) -----
+  // A condensed copy of the SigmaVerifySuite / SigmaVectorGen prover, emitting a full
+  // {"sigma_verify":[prop, proof, msg]} expression for a proposition the prover can satisfy. Fixed
+  // seed -> deterministic, reproducible fixtures. Challenges are the 31-byte injective domain.
+  private object SigmaProver {
+    private val R: BigInt = BigInt(Bn254.R)
+    private val g1: Bn254.G1 = Bn254.G1(BigInteger.ONE, BigInteger.valueOf(2))
+    private val ChallengeBytes: Int = 31
+    private val rng: SecureRandom = {
+      val r = SecureRandom.getInstance("SHA1PRNG"); r.setSeed(0x6761_5347_4153L); r
+    }
+    def randScalar(): BigInt = BigInt(1, { val b = new Array[Byte](32); rng.nextBytes(b); b }).mod(R)
+    private def randChallenge(): BigInt = BigInt(1, { val b = new Array[Byte](ChallengeBytes); rng.nextBytes(b); b })
+    private def encG1(p: Bn254.G1): String = HexBytes.encodeG1(BigInt(p.x), BigInt(p.y)).toOption.get
+    private def g1Bytes(p: Bn254.G1): Array[Byte] = HexBytes.parseBytes(encG1(p), Some(64), "g1").toOption.get
+    private def hex32(v: BigInt): String = HexBytes.encodeUInt(v.mod(R), 32).toOption.get
+    private def hexChallenge(v: BigInt): String = HexBytes.encodeUInt(v, ChallengeBytes).toOption.get
+    private def sha256(b: Array[Byte]): Array[Byte] = MessageDigest.getInstance("SHA-256").digest(b)
+    private def low31(b: Array[Byte]): BigInt = BigInt(1, sha256(b).takeRight(ChallengeBytes))
+    private def challengeBytes(e: BigInt): Array[Byte] = HexBytes.parseBytes(hexChallenge(e), Some(ChallengeBytes), "e").toOption.get
+    private val TagDlog: Byte = 0x00; private val TagDhTuple: Byte = 0x01
+    private val TagAnd: Byte = 0x02; private val TagOr: Byte = 0x03; private val TagThreshold: Byte = 0x04
+    private val DomainSep: Array[Byte] = "sigma_verify:v1".getBytes("US-ASCII")
+    private def uint32(v: Int): Array[Byte] = Array((v >>> 24).toByte, (v >>> 16).toByte, (v >>> 8).toByte, v.toByte)
+    private val msg: Array[Byte] = "authorize sigma".getBytes("UTF-8")
+    private val msgHex: String = HexBytes.encodeBytes(msg)
+
+    sealed trait Prop
+    final case class Dlog(x: Option[BigInt], pk: Bn254.G1) extends Prop
+    final case class DhTuple(w: Option[BigInt], g: Bn254.G1, h: Bn254.G1, u: Bn254.G1, v: Bn254.G1) extends Prop
+    final case class And(children: List[Prop]) extends Prop
+    final case class Or(children: List[Prop]) extends Prop
+    final case class Threshold(k: Int, children: List[Prop]) extends Prop
+
+    def dlogKnown(x: BigInt): Dlog = Dlog(Some(x.mod(R)), g1.multiply(x.bigInteger))
+    def dlogUnknown(): Dlog = { val x = randScalar(); Dlog(None, g1.multiply(x.bigInteger)) }
+    def dhKnown(w: BigInt, gS: BigInt, hS: BigInt): DhTuple = {
+      val g = g1.multiply(gS.bigInteger); val h = g1.multiply(hS.bigInteger)
+      DhTuple(Some(w.mod(R)), g, h, g.multiply(w.bigInteger), h.multiply(w.bigInteger))
+    }
+    private def satisfiable(p: Prop): Boolean = p match {
+      case Dlog(x, _)             => x.isDefined
+      case DhTuple(w, _, _, _, _) => w.isDefined
+      case And(cs)                => cs.forall(satisfiable)
+      case Or(cs)                 => cs.exists(satisfiable)
+      case Threshold(k, cs)       => cs.count(satisfiable) >= k
+    }
+    private def propJson(p: Prop): String = p match {
+      case Dlog(_, pk)            => s"""{"type":"dlog","pk":"${encG1(pk)}"}"""
+      case DhTuple(_, g, h, u, v) => s"""{"type":"dhtuple","g":"${encG1(g)}","h":"${encG1(h)}","u":"${encG1(u)}","v":"${encG1(v)}"}"""
+      case And(cs)                => s"""{"type":"and","children":[${cs.map(propJson).mkString(",")}]}"""
+      case Or(cs)                 => s"""{"type":"or","children":[${cs.map(propJson).mkString(",")}]}"""
+      case Threshold(k, cs)       => s"""{"type":"threshold","k":$k,"children":[${cs.map(propJson).mkString(",")}]}"""
+    }
+
+    sealed trait Pre { var e: BigInt = BigInt(-1); def sat: Boolean; def ser: Array[Byte] }
+    final case class PreDlog(pk: Bn254.G1, sat: Boolean, w: Option[BigInt], r: BigInt, a: Bn254.G1) extends Pre {
+      var z: BigInt = BigInt(-1); def ser: Array[Byte] = Array(TagDlog) ++ g1Bytes(pk) ++ g1Bytes(a)
+    }
+    final case class PreDh(
+      g: Bn254.G1,
+      h: Bn254.G1,
+      u: Bn254.G1,
+      v: Bn254.G1,
+      sat: Boolean,
+      w: Option[BigInt],
+      r: BigInt,
+      a1: Bn254.G1,
+      a2: Bn254.G1
+    ) extends Pre {
+      var z: BigInt = BigInt(-1)
+      def ser: Array[Byte] = Array(TagDhTuple) ++ g1Bytes(g) ++ g1Bytes(h) ++ g1Bytes(u) ++ g1Bytes(v) ++ g1Bytes(a1) ++ g1Bytes(a2)
+    }
+    final case class PreAnd(children: List[Pre], sat: Boolean) extends Pre {
+      def ser: Array[Byte] = Array(TagAnd) ++ uint32(children.length) ++ children.flatMap(_.ser).toArray
+    }
+    final case class PreOr(children: List[Pre], sat: Boolean) extends Pre {
+      def ser: Array[Byte] = Array(TagOr) ++ uint32(children.length) ++ children.flatMap(_.ser).toArray
+    }
+    final case class PreThr(k: Int, children: List[Pre], sat: Boolean) extends Pre {
+      def ser: Array[Byte] = Array(TagThreshold) ++ uint32(k) ++ uint32(children.length) ++ children.flatMap(_.ser).toArray
+    }
+
+    private def commit(p: Prop, mustSimulate: Boolean = false): Pre =
+      if (mustSimulate || !satisfiable(p)) simulateForced(p, randChallenge())
+      else
+        p match {
+          case Dlog(xOpt, pk) => val r = randScalar(); PreDlog(pk, sat = true, xOpt, r, g1.multiply(r.bigInteger))
+          case DhTuple(wOpt, g, h, u, v) =>
+            val r = randScalar(); PreDh(g, h, u, v, sat = true, wOpt, r, g.multiply(r.bigInteger), h.multiply(r.bigInteger))
+          case And(cs) => PreAnd(cs.map(c => commit(c)), sat = true)
+          case Or(cs) =>
+            val ri = cs.indexWhere(satisfiable); PreOr(cs.zipWithIndex.map { case (c, i) => commit(c, i != ri) }, sat = true)
+          case Threshold(k, cs) =>
+            val ris = cs.zipWithIndex.collect { case (c, i) if satisfiable(c) => i }.take(k).toSet
+            PreThr(k, cs.zipWithIndex.map { case (c, i) => commit(c, !ris.contains(i)) }, sat = true)
+        }
+    private def simulateForced(p: Prop, e: BigInt): Pre = p match {
+      case Dlog(_, pk) =>
+        val z = randScalar(); val n = PreDlog(pk, sat = false, None, BigInt(-1), CryptoOps.dlogComputeCommitment(pk, e, z)); n.e = e;
+        n.z = z; n
+      case DhTuple(_, g, h, u, v) =>
+        val z = randScalar()
+        val n = PreDh(
+          g,
+          h,
+          u,
+          v,
+          sat = false,
+          None,
+          BigInt(-1),
+          CryptoOps.dhtupleComputeCommitment(g, u, e, z),
+          CryptoOps.dhtupleComputeCommitment(h, v, e, z)
+        )
+        n.e = e; n.z = z; n
+      case And(cs) => val n = PreAnd(cs.map(c => simulateForced(c, e)), sat = false); n.e = e; n
+      case Or(cs) =>
+        val frees = cs.dropRight(1).map(c => simulateForced(c, randChallenge()))
+        val lastE = frees.foldLeft(e)((acc, c) => acc ^ c.e)
+        val n = PreOr(frees :+ simulateForced(cs.last, lastE), sat = false); n.e = e; n
+      case Threshold(k, cs) =>
+        val n0 = cs.length; val degree = n0 - k; val freeIdxs = (0 until degree).toSet
+        val freeChildren = freeIdxs.map(i => i -> simulateForced(cs(i), randChallenge())).toMap
+        val xs = (0 :: freeIdxs.toList.sorted.map(_ + 1)).toArray
+        val children = (0 until n0).toList.map { i =>
+          if (freeIdxs.contains(i)) freeChildren(i)
+          else {
+            val forced = BigInt(
+              1,
+              Array.tabulate(ChallengeBytes) { lane =>
+                val ys = (0 :: freeIdxs.toList.sorted).zipWithIndex.map {
+                  case (fi, pos) => if (pos == 0) challengeBytes(e)(lane) & 0xff else challengeBytes(freeChildren(fi).e)(lane) & 0xff
+                }.toArray
+                gfLagrange(xs, ys, i + 1).toByte
+              }
+            )
+            simulateForced(cs(i), forced)
+          }
+        }
+        val n = PreThr(k, children, sat = false); n.e = e; n
+    }
+    private def gfMul(a0: Int, b0: Int): Int = {
+      val (p, _, _) = (0 until 8).foldLeft((0, a0 & 0xff, b0 & 0xff)) {
+        case ((prod, a, b), _) =>
+          val np = if ((b & 1) != 0) prod ^ a else prod; val sh = (a << 1) & 0xff
+          (np, if ((a & 0x80) != 0) sh ^ 0x1b else sh, b >> 1)
+      }
+      p & 0xff
+    }
+    private def gfInv(a: Int): Int =
+      if ((a & 0xff) == 0) 0
+      else
+        (0 until 8)
+          .foldLeft((1, a & 0xff)) {
+            case ((acc, base), bit) => (if (((254 >> bit) & 1) != 0) gfMul(acc, base) else acc, gfMul(base, base))
+          }
+          ._1 & 0xff
+    private def gfLagrange(xs: Array[Int], ys: Array[Int], xEval: Int): Int =
+      xs.indices.foldLeft(0) { (acc, i) =>
+        val (num, den) = xs.indices.foldLeft((1, 1)) {
+          case ((nm, dn), j) => if (j == i) (nm, dn) else (gfMul(nm, xEval ^ xs(j)), gfMul(dn, xs(i) ^ xs(j)))
+        }
+        acc ^ gfMul(ys(i), gfMul(num, gfInv(den)))
+      } & 0xff
+    private def setChallenge(pp: Pre, e: BigInt): Unit =
+      if (!pp.sat) require(pp.e == e, s"simulated subtree challenge mismatch: ${pp.e} vs $e")
+      else
+        pp match {
+          case d: PreDlog => d.e = e; d.z = (d.r + e * d.w.get).mod(R)
+          case d: PreDh   => d.e = e; d.z = (d.r + e * d.w.get).mod(R)
+          case a: PreAnd  => a.e = e; a.children.foreach(c => setChallenge(c, e))
+          case o: PreOr =>
+            o.e = e; val ri = o.children.indexWhere(_.sat)
+            val xorSim = o.children.zipWithIndex.foldLeft(BigInt(0)) { case (acc, (c, i)) => if (i == ri) acc else acc ^ c.e }
+            o.children.zipWithIndex.foreach { case (c, i) => setChallenge(c, if (i == ri) e ^ xorSim else c.e) }
+          case t: PreThr =>
+            t.e = e; val n0 = t.children.length; val degree = n0 - t.k
+            val ris = t.children.zipWithIndex.collect { case (c, i) if c.sat => i }.toSet
+            val simIdxs = (0 until n0).filterNot(ris.contains).toList
+            require(simIdxs.length == degree, s"threshold prover: expected $degree simulated, got ${simIdxs.length}")
+            val xs = (0 :: simIdxs.map(_ + 1)).toArray
+            val realE = ris.map { ri =>
+              val bytes = Array.tabulate(ChallengeBytes) { lane =>
+                val ys = (0 :: simIdxs).zipWithIndex.map {
+                  case (si, pos) => if (pos == 0) challengeBytes(e)(lane) & 0xff else challengeBytes(t.children(si).e)(lane) & 0xff
+                }.toArray
+                gfLagrange(xs, ys, ri + 1).toByte
+              }
+              ri -> BigInt(1, bytes)
+            }.toMap
+            t.children.zipWithIndex.foreach { case (c, i) => setChallenge(c, if (ris.contains(i)) realE(i) else c.e) }
+        }
+    private def proofJson(pp: Pre): String = pp match {
+      case d: PreDlog => s"""{"type":"dlog","e":"${hexChallenge(d.e)}","z":"${hex32(d.z)}"}"""
+      case d: PreDh   => s"""{"type":"dhtuple","e":"${hexChallenge(d.e)}","z":"${hex32(d.z)}"}"""
+      case a: PreAnd  => s"""{"type":"and","e":"${hexChallenge(a.e)}","children":[${a.children.map(proofJson).mkString(",")}]}"""
+      case o: PreOr   => s"""{"type":"or","e":"${hexChallenge(o.e)}","children":[${o.children.map(proofJson).mkString(",")}]}"""
+      case t: PreThr =>
+        s"""{"type":"threshold","e":"${hexChallenge(t.e)}","k":${t.k},"children":[${t.children.map(proofJson).mkString(",")}]}"""
+    }
+    def sigmaExpr(prop: Prop): String = {
+      val pp = commit(prop)
+      val root = low31(DomainSep ++ pp.ser ++ msg)
+      setChallenge(pp, root)
+      s"""{"sigma_verify":[${propJson(prop)},${proofJson(pp)},"$msgHex"]}"""
+    }
+  }
+
   // --- crypto fixtures (verified-true cases lifted from the shared ZK opcode vectors v1.8.0) ----
 
   private val PoseidonTwoInputs =
@@ -87,23 +299,35 @@ object GasVectorGenerator extends IOApp {
   private val ProveDhtupleVerify =
     "{\"prove_dhtuple_verify\":[\"0x0769bf9ac56bea3ff40232bcb1b6bd159315d84715b8e679f2d355961915abf02ab799bee0489429554fdb7c8d086475319e63b40b9c5b57cdf1ff3dd9fe2261\",\"0x17c139df0efee0f766bc0204762b774362e4ded88953a39ce849a8a7fa163fa901e0559bacb160664764a357af8a9fe70baa9258e0b959273ffc5718c6d4cc7c\",\"0x0e1c874e45561967a2255d53d8c6444a0d2f859fbfcc586b27dd7dc337c2e10f11f1d07e4d5bc331552d5f59b999550538f781e8a8df3228b9d53db15d8a693d\",\"0x1717922852aa5a8d41e3c07b1ce90113870477c783f9bae370c746025f65ba812b1bb9988842b379971a902c34b7aee5dda67bd19f4b41b44710a4fe88caf9b7\",\"0x617574686f72697a65207369676d61\",\"0x0722a7de245ee113dddc175f0bf85ead53dd5a43f37645627119583ddf8144200591c67a93b6586889248690c06e241da4babfea7d3c41760c4aa882d5f1587e1b18396c26fde54b88bb2a48f24949ea08ba52784050e5528020ca2a41226c0b18a2738401209982d27d737ea00ff07284abed2bd89d71a72332e7f83f6a4e6e085c3a8870fe4557b7ab0b6105d3677b9e19c56fa7fa4d0f52bd25032256477c\"]}"
 
-  private val SigmaSingleDlog =
-    "{\"sigma_verify\":[{\"type\":\"dlog\",\"pk\":\"0x14e2946f9ea29efcd6c8d3bc8ebce97aff2267495f19207d83a5a278b3d1b6750d6d60e75a6a4aef02b7c664972665bbdfa16ef85493ca2cc449eea611b9ed31\"},{\"type\":\"dlog\",\"e\":\"0x11637156bc9fae70ad3df01f5f807517f47e968f2aa81590efb58c37c5c52d44\",\"z\":\"0x14e17f9b6d2b5e902105204499e1a3684d6fe044c78f6fd25565924ad28202fc\"},\"0x617574686f72697a65207369676d61\"]}"
-
-  private val SigmaSingleDhtuple =
-    "{\"sigma_verify\":[{\"type\":\"dhtuple\",\"g\":\"0x0769bf9ac56bea3ff40232bcb1b6bd159315d84715b8e679f2d355961915abf02ab799bee0489429554fdb7c8d086475319e63b40b9c5b57cdf1ff3dd9fe2261\",\"h\":\"0x17c139df0efee0f766bc0204762b774362e4ded88953a39ce849a8a7fa163fa901e0559bacb160664764a357af8a9fe70baa9258e0b959273ffc5718c6d4cc7c\",\"u\":\"0x2eba7a08251112136606485e9ef2e55c89618b022ba2026780f015eb009781e320142996aa0765cc8c5ecbc54fe1d745894e84e61a65a8be30e940299d267428\",\"v\":\"0x1bc98a3a15f93ae006e031b63507c00fd6f754a3d6f3412f8aada736ee976c0218fc62bcab6e3d356c9dd7946c656177f41c17ef2cd02a3955df2c75ab227d70\"},{\"type\":\"dhtuple\",\"e\":\"0x09a03caaeff45c2a042bc8ce5ca7410b395bdc6056ec11b569643249867e1402\",\"z\":\"0x2e38f32c39ecd387ea93549a88e6f6c23dbe11c23b3d4f58baf2ff2fc3ed5cc8\"},\"0x617574686f72697a65207369676d61\"]}"
-
+  // sigma_verify fixtures are GENERATED by a compact CDS prover (the dual of the verifier) so they
+  // carry VALID 31-byte challenges (audit finding #1): the old hardcoded 32-byte-challenge proofs
+  // would now be rejected at the width gate, breaking gas measurement. The gas charged depends only
+  // on the proposition SHAPE (arg 0), but the proof must still evaluate to Right(_) for the meter to
+  // report gasUsed — so we emit genuinely-valid proofs. Deterministic (fixed seed) -> reproducible.
+  private val SigmaSingleDlog = SigmaProver.sigmaExpr(SigmaProver.dlogKnown(BigInt("12345678901234567890")))
+  private val SigmaSingleDhtuple = SigmaProver.sigmaExpr(SigmaProver.dhKnown(BigInt("999888777666555"), BigInt(3), BigInt(5)))
   private val SigmaAnd =
-    "{\"sigma_verify\":[{\"type\":\"and\",\"children\":[{\"type\":\"dlog\",\"pk\":\"0x17072b2ed3bb8d759a5325f477629386cb6fc6ecb801bd76983a6b86abffe078168ada6cd130dd52017bb54bfa19377aadfe3bf05d18f41b77809f7f60d4af9e\"},{\"type\":\"dhtuple\",\"g\":\"0x030644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd315ed738c0e0a7c92e7845f96b2ae9c0a68a6a449e3538fc7ff3ebf7a5a18a2c4\",\"h\":\"0x039730ea8dff1254c0fee9c0ea777d29a9c710b7e616683f194f18c43b43b869073a5ffcc6fc7a28c30723d6e58ce577356982d65b833a5a5c15bf9024b43d98\",\"u\":\"0x22c54997b1e4f7710df6e925b259327d9bb23b29af52a8ab9d271c846c1f20752a537682cb57be952ce98746dc33229fbcd6bf0d113e45ffd2df20cadcc748e9\",\"v\":\"0x236ecf67512dd8b3157d61220f369e1ed51043a80aeb449252b4d617386d792716105ce337dce18aa0a9894c354e9365c14d312625d14e3334128af51a477c1f\"}]},{\"type\":\"and\",\"e\":\"0x0ef835255f8bfa52aa5832732ebea6f7aa2c3d0fbe38ac05354908e35bc1cace\",\"children\":[{\"type\":\"dlog\",\"e\":\"0x0ef835255f8bfa52aa5832732ebea6f7aa2c3d0fbe38ac05354908e35bc1cace\",\"z\":\"0x13d849d44836ec1ac6f62e3bba497cf4b36cb85b5d2c6f8fac7cf69ba6622cb1\"},{\"type\":\"dhtuple\",\"e\":\"0x0ef835255f8bfa52aa5832732ebea6f7aa2c3d0fbe38ac05354908e35bc1cace\",\"z\":\"0x155d578443bb2b7074dc778ff18d0ac5afde479f27fcb748ab13a1dc381a3484\"}]},\"0x617574686f72697a65207369676d61\"]}"
-
+    SigmaProver.sigmaExpr(SigmaProver.And(List(SigmaProver.dlogKnown(BigInt(7)), SigmaProver.dhKnown(BigInt(11), BigInt(2), BigInt(9)))))
   private val SigmaOr3 =
-    "{\"sigma_verify\":[{\"type\":\"or\",\"children\":[{\"type\":\"dlog\",\"pk\":\"0x2b29b992b925ddcff1c0c25e141586cc37ed18d34b410422ac72d503aada3556232b683d9c7648233ef45dfedec78dd7f9da500244352f57af755e191f9c7a59\"},{\"type\":\"dlog\",\"pk\":\"0x2f6de88d10820456986caeef0530e90d9ec034d801a09526fd0524c3b18921172b7b95ccd0d7454b38cc239ac4e22c5c2a53c8c0678ebc35427ce3d835510ca2\"},{\"type\":\"dlog\",\"pk\":\"0x213ac7f4cd2b5ea2bbdb0be1d538fb135743c39cd61421c11dc5c1e2929e8fc3005a88f2b65b3d827d6625159454e658e8f301b2c440f4dda06fac51de845fb1\"}]},{\"type\":\"or\",\"e\":\"0x0d6ce61d782ee8b947a71d05362e7745eb9fcbe12d8b1b3b52f4b59a752ce2f2\",\"children\":[{\"type\":\"dlog\",\"e\":\"0x0b63f23c589433fbc80d9132825183bf175f11f675653b5fbeb7b901424297c0\",\"z\":\"0x03a226ffd140ebd39f5fe18ab195e744a5f8a05e1850df2e98130274814deff4\"},{\"type\":\"dlog\",\"e\":\"0x0307eb84af064b906720378d111c9f0e9344150515843c075808cb0c7361eeb9\",\"z\":\"0x0216ecb57eb62c9d256428b2f9a1ead61c9e3ff096acfb13ce9cb2ad5612a866\"},{\"type\":\"dlog\",\"e\":\"0x0508ffa58fbc90d2e88abbbaa5636bf46f84cf124d6a1c63b44bc797440f9b8b\",\"z\":\"0x056a8db08b149e702600f779b75379b242c1152d9150bc1fb4bb8143e6c8e749\"}]},\"0x617574686f72697a65207369676d61\"]}"
-
+    SigmaProver.sigmaExpr(
+      SigmaProver.Or(List(SigmaProver.dlogUnknown(), SigmaProver.dlogUnknown(), SigmaProver.dlogKnown(SigmaProver.randScalar())))
+    )
   private val SigmaThreshold2of3 =
-    "{\"sigma_verify\":[{\"type\":\"threshold\",\"k\":2,\"children\":[{\"type\":\"dlog\",\"pk\":\"0x2e24790017352f20dae652f7a7c951cbd2cdbb4976b4b466f6cd93ee94d1a4d51d2a6c0fc6079752d4375d73f142b385d41021c74070b0a320165d5fe269171e\"},{\"type\":\"dlog\",\"pk\":\"0x1601098dcff3b60bd3b9eb73b96679084553b96a7152c76ae460b0d96bb1825a29f12efbe7269bc78ca3d4e128102413a18feeb236e8af9b3c29fc0ab1d55a78\"},{\"type\":\"dlog\",\"pk\":\"0x09357c356c10427bcd1d45caa0a9e126f59f0254ca1f8a0c9043b4d7106065a615b0935b70fa187bb8bf8046b4e705a2324993e76568b24a5c3ac52a7d15b7f1\"}]},{\"type\":\"threshold\",\"e\":\"0x0adf6a2a948b27cf1b85a3d4071079bea4a304807ae6fcdfc6f3f106f911a10a\",\"k\":2,\"children\":[{\"type\":\"dlog\",\"e\":\"0xf80bab4271d462cbb2e3b93da6b2104d7bdb1c347b15f93ce8058a4d440b32bc\",\"z\":\"0x0b5fbfe074d7f4709b0328a956865081f3682e472452aa4eb56bf90ae131a492\"},{\"type\":\"dlog\",\"e\":\"0xf56cf3fa4535adc75249971d5e4fab43015334f3781bf6029a04079098259c7d\",\"z\":\"0x27ac8cfd65275ef35e36889d0e9765893fb20f87a62296ef538a14db36357c7b\"},{\"type\":\"dlog\",\"e\":\"0x07b83292a06ae8c3fb2f8df4ffedc2b0de2b2c4779e8f3e1b4f27cdb253f0fcb\",\"z\":\"0x099256c98d9e29e8f8ea356e1a6e394e4f9f853a181ecd660e28416ce2468882\"}]},\"0x617574686f72697a65207369676d61\"]}"
-
+    SigmaProver.sigmaExpr(
+      SigmaProver.Threshold(
+        2,
+        List(SigmaProver.dlogKnown(SigmaProver.randScalar()), SigmaProver.dlogKnown(SigmaProver.randScalar()), SigmaProver.dlogUnknown())
+      )
+    )
   private val SigmaNested =
-    "{\"sigma_verify\":[{\"type\":\"and\",\"children\":[{\"type\":\"or\",\"children\":[{\"type\":\"dlog\",\"pk\":\"0x2469bd8dfa8fba5f4b61f780d16bd4d4cc0d55c420355f976ba65f23fc50a59b2caa48236368d91bcd3a41990727ad8e3c8197b6afaec692848f2ebee415e565\"},{\"type\":\"dlog\",\"pk\":\"0x02d218c25cea18e768b29f3b8f0a3e3745acbd84812c6c7e2ed2181b3c72939a1ea3e5040181600f8aa9cb1c06127f6e56cf8b5bd7bc45864fb5c6a7b2e3b0f1\"}]},{\"type\":\"or\",\"children\":[{\"type\":\"dlog\",\"pk\":\"0x1a5eb9517c3d54d6daf64580c2cc2ac839e4d4dd60c265e0d2d0b793abbdc2920bf0ca0f420d36afc4820f552aa2f2aa93ba4c70fdf7b772f6d24fd239ced360\"},{\"type\":\"dlog\",\"pk\":\"0x1c281799a8ee10842358ef2b33f7260788bbc59c7ab2cdcee21738f6ef3612041755159a6dc8e8c0731c4ea8cb9d61e5b4f32b9cebe8a4cab563ac38393daf82\"}]}]},{\"type\":\"and\",\"e\":\"0x130247bf63263b3bf2bd01253b369ef79dd6d1ca99b7af025a49dfcf62731fef\",\"children\":[{\"type\":\"or\",\"e\":\"0x130247bf63263b3bf2bd01253b369ef79dd6d1ca99b7af025a49dfcf62731fef\",\"children\":[{\"type\":\"dlog\",\"e\":\"0x1945f18482fd2bdd940b9cf95a09a3444b3101d48562cbd3e4522218acd49bbe\",\"z\":\"0x1f57b6a35c2575707eb092c4cb6e483a67557a7eb7adbdb0056db41cee7a2cc9\"},{\"type\":\"dlog\",\"e\":\"0x0a47b63be1db10e666b69ddc613f3db3d6e7d01e1cd564d1be1bfdd7cea78451\",\"z\":\"0x11da031aea8692cab239efc5a0f716ed3982a3e25c61be0cf967c5eb1ec40f2b\"}]},{\"type\":\"or\",\"e\":\"0x130247bf63263b3bf2bd01253b369ef79dd6d1ca99b7af025a49dfcf62731fef\",\"children\":[{\"type\":\"dlog\",\"e\":\"0x0e5d1b297b7589d4f5adc9824d28e855fec2b2212da408295d15120a742fe05a\",\"z\":\"0x04f5fd77d85c0422d7a03aebc1cfdfe745bf26902a2e23457cd9f300050e2fd8\"},{\"type\":\"dlog\",\"e\":\"0x1d5f5c961853b2ef0710c8a7761e76a2631463ebb413a72b075ccdc5165cffb5\",\"z\":\"0x051141d0e04a96793d39ea7455ba79c1405547def2b5fad5c0fb2fcf69a6ac88\"}]}]},\"0x617574686f72697a65207369676d61\"]}"
+    SigmaProver.sigmaExpr(
+      SigmaProver.And(
+        List(
+          SigmaProver.Or(List(SigmaProver.dlogKnown(SigmaProver.randScalar()), SigmaProver.dlogUnknown())),
+          SigmaProver.Or(List(SigmaProver.dlogUnknown(), SigmaProver.dlogKnown(SigmaProver.randScalar())))
+        )
+      )
+    )
 
   // --- the corpus -------------------------------------------------------------------------------
 

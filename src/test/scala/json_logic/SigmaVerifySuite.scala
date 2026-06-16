@@ -51,13 +51,21 @@ object SigmaVerifySuite extends SimpleIOSuite {
   private def g1Bytes(p: Bn254.G1): Array[Byte] = HexBytes.parseBytes(encG1(p), Some(64), "g1").fold(throw _, identity)
   // Response `z` is a curve scalar -> emit reduced mod R (32B).
   private def hex32(v: BigInt): String = HexBytes.encodeUInt(v.mod(R), 32).fold(throw _, identity)
-  // Challenge `e` is a 32-byte BYTE STRING (the CDS / GF(2^8) object). It is NOT reduced mod R for
-  // the transcript / interpolation; mod-R happens only where it is used as a curve scalar (the leaf
-  // commitment reconstruction). Derived (interpolated) challenges can be >= R, so they MUST be
-  // emitted as their RAW 32 bytes — reducing them mod R here would change the bytes the verifier
-  // does GF/XOR over and break the round-trip (this is THE subtlety of byte-string challenges).
-  private def hexRaw(v: BigInt): String = HexBytes.encodeUInt(v, 32).fold(throw _, identity)
+
+  // CHALLENGE DOMAIN (audit finding #1): challenges are 31-byte (248-bit) values. `2^248 < R`, so
+  // a challenge is ALWAYS a canonical Fr element — the byte↔scalar map is a bijection. The SAME
+  // 31 bytes are the GF(2^8)/XOR object AND, taken directly (no mod R), the Fr scalar. The width
+  // MUST match CryptoOps.Sigma.ChallengeBytes exactly.
+  private val ChallengeBytes: Int = 31
+  // A random 31-byte challenge (a free/simulated CDS challenge). Drawn as 31 raw bytes so it is
+  // always < 2^248 (the injective domain) — NOT `mod R`, which could exceed 2^248.
+  private def randChallenge(): BigInt = BigInt(1, { val b = new Array[Byte](ChallengeBytes); rng.nextBytes(b); b })
+  // Emit a 31-byte challenge as fixed-width hex (the proof's `e` field). The verifier parses
+  // exactly 31 bytes; values are < 2^248 by construction so they fit.
+  private def hexChallenge(v: BigInt): String = HexBytes.encodeUInt(v, ChallengeBytes).fold(throw _, identity)
   private def sha256(bytes: Array[Byte]): Array[Byte] = MessageDigest.getInstance("SHA-256").digest(bytes)
+  // The single SHA256->challenge rule (finding #1): low-order 31 bytes of the digest, as a BigInt.
+  private def low31(bytes: Array[Byte]): BigInt = BigInt(1, sha256(bytes).takeRight(ChallengeBytes))
 
   // Frozen serialization constants — MUST match CryptoOps.Sigma exactly.
   private val TagDlog: Byte = 0x00
@@ -67,8 +75,9 @@ object SigmaVerifySuite extends SimpleIOSuite {
   private val TagThreshold: Byte = 0x04
   private val DomainSep: Array[Byte] = "sigma_verify:v1".getBytes("US-ASCII")
   private def uint32(v: Int): Array[Byte] = Array((v >>> 24).toByte, (v >>> 16).toByte, (v >>> 8).toByte, v.toByte)
-  // The RAW 32 bytes of a challenge (NOT reduced mod R) — the object GF/XOR operate over.
-  private def challengeBytes(e: BigInt): Array[Byte] = HexBytes.parseBytes(hexRaw(e), Some(32), "e").fold(throw _, identity)
+  // The RAW 31 bytes of a challenge — the object GF/XOR operate over (and, directly, the Fr scalar).
+  private def challengeBytes(e: BigInt): Array[Byte] =
+    HexBytes.parseBytes(hexChallenge(e), Some(ChallengeBytes), "e").fold(throw _, identity)
 
   // ===========================================================================
   // Prover model: a proposition the prover can build a (real|simulated) proof for.
@@ -170,7 +179,7 @@ object SigmaVerifySuite extends SimpleIOSuite {
   // exact: a real OR has 1 derived + (n-1) free children; a real THRESHOLD has k derived + (n-k)
   // free children.
   private def commit(p: Prop, mustSimulate: Boolean = false): PreProof =
-    if (mustSimulate || !satisfiable(p)) simulateForced(p, randScalar()) // simulated branch, free node e
+    if (mustSimulate || !satisfiable(p)) simulateForced(p, randChallenge()) // simulated branch, free node e (31B)
     else
       p match {
         case Dlog(xOpt, pk) => val r = randScalar(); PreDlog(pk, sat = true, xOpt, r, g1.multiply(r.bigInteger))
@@ -224,7 +233,7 @@ object SigmaVerifySuite extends SimpleIOSuite {
       val node = PreAnd(cs.map(c => simulateForced(c, e)), sat = false); node.e = e; node
     case Or(cs) =>
       // Force the LAST child to absorb the XOR balance; the rest get free challenges.
-      val frees = cs.dropRight(1).map(c => simulateForced(c, randScalar()))
+      val frees = cs.dropRight(1).map(c => simulateForced(c, randChallenge()))
       val lastE = frees.foldLeft(e)((acc, c) => acc ^ c.e)
       val node = PreOr(frees :+ simulateForced(cs.last, lastE), sat = false); node.e = e; node
     case Threshold(k, cs) =>
@@ -232,14 +241,14 @@ object SigmaVerifySuite extends SimpleIOSuite {
       val degree = n - k
       // First `degree` children free; interpolate P through (0,e)+them; force the rest to P(i+1).
       val freeIdxs = (0 until degree).toSet
-      val freeChildren: Map[Int, PreProof] = freeIdxs.map(i => i -> simulateForced(cs(i), randScalar())).toMap
+      val freeChildren: Map[Int, PreProof] = freeIdxs.map(i => i -> simulateForced(cs(i), randChallenge())).toMap
       val xs = (0 :: freeIdxs.toList.sorted.map(_ + 1)).toArray
       val children = (0 until n).toList.map { i =>
         if (freeIdxs.contains(i)) freeChildren(i)
         else {
           val forced = BigInt(
             1,
-            Array.tabulate(32) { lane =>
+            Array.tabulate(ChallengeBytes) { lane =>
               val ys = (0 :: freeIdxs.toList.sorted).zipWithIndex.map {
                 case (fi, pos) =>
                   if (pos == 0) challengeBytes(e)(lane) & 0xff
@@ -297,8 +306,10 @@ object SigmaVerifySuite extends SimpleIOSuite {
     if (!pp.sat) {
       // A fully-simulated subtree is already internally consistent (built by simulateForced with a
       // free node challenge). The parent's split MUST have handed down exactly that free challenge,
-      // so we only ASSERT equality (no recursion needed — its responses are already fixed).
-      require(pp.e == e || pp.e == e.mod(R), s"simulated subtree challenge mismatch: ${pp.e} vs $e")
+      // so we only ASSERT equality (no recursion needed — its responses are already fixed). With the
+      // 31-byte injective challenge domain (finding #1) challenges are never mod-R-reduced, so this
+      // is a plain byte-value equality.
+      require(pp.e == e, s"simulated subtree challenge mismatch: ${pp.e} vs $e")
     } else
       pp match {
         case d: PreDlog => d.e = e; d.z = (d.r + e * d.witness.get).mod(R)
@@ -328,7 +339,7 @@ object SigmaVerifySuite extends SimpleIOSuite {
           // the degree-(n-k) polynomial byte-wise and assign each real child's e = P(its index+1).
           val xs = (0 :: simIdxs.map(_ + 1)).toArray
           val realE: Map[Int, BigInt] = realIdxs.map { ri =>
-            val bytes = Array.tabulate(32) { lane =>
+            val bytes = Array.tabulate(ChallengeBytes) { lane =>
               val ys = (0 :: simIdxs).zipWithIndex.map {
                 case (si, pos) =>
                   if (pos == 0) challengeBytes(e)(lane) & 0xff
@@ -336,7 +347,7 @@ object SigmaVerifySuite extends SimpleIOSuite {
               }.toArray
               gfLagrange(xs, ys, ri + 1).toByte
             }
-            ri -> BigInt(1, bytes) // RAW (NOT mod R): this is the challenge byte-string P(ri+1)
+            ri -> BigInt(1, bytes) // 31-byte challenge P(ri+1) (the injective domain; no mod R)
           }.toMap
           t.children.zipWithIndex.foreach {
             case (c, i) => setChallenge(c, if (realIdxs.contains(i)) realE(i) else c.e)
@@ -345,17 +356,20 @@ object SigmaVerifySuite extends SimpleIOSuite {
 
   // ----- Proof JSON emission. `e` = RAW 32-byte challenge; `z` = mod-R scalar response. -----
   private def proofJson(pp: PreProof): String = pp match {
-    case d: PreDlog => s"""{"type":"dlog","e":"${hexRaw(d.e)}","z":"${hex32(d.z)}"}"""
-    case d: PreDh   => s"""{"type":"dhtuple","e":"${hexRaw(d.e)}","z":"${hex32(d.z)}"}"""
-    case a: PreAnd  => s"""{"type":"and","e":"${hexRaw(a.e)}","children":[${a.children.map(proofJson).mkString(",")}]}"""
-    case o: PreOr   => s"""{"type":"or","e":"${hexRaw(o.e)}","children":[${o.children.map(proofJson).mkString(",")}]}"""
-    case t: PreThr  => s"""{"type":"threshold","e":"${hexRaw(t.e)}","k":${t.k},"children":[${t.children.map(proofJson).mkString(",")}]}"""
+    case d: PreDlog => s"""{"type":"dlog","e":"${hexChallenge(d.e)}","z":"${hex32(d.z)}"}"""
+    case d: PreDh   => s"""{"type":"dhtuple","e":"${hexChallenge(d.e)}","z":"${hex32(d.z)}"}"""
+    case a: PreAnd  => s"""{"type":"and","e":"${hexChallenge(a.e)}","children":[${a.children.map(proofJson).mkString(",")}]}"""
+    case o: PreOr   => s"""{"type":"or","e":"${hexChallenge(o.e)}","children":[${o.children.map(proofJson).mkString(",")}]}"""
+    case t: PreThr =>
+      s"""{"type":"threshold","e":"${hexChallenge(t.e)}","k":${t.k},"children":[${t.children.map(proofJson).mkString(",")}]}"""
   }
 
   /** Full prover: commit -> strong-FS root over the committed tree -> split -> responses -> JSON. */
   private def prove(prop: Prop, m: Array[Byte]): (String, String) = {
     val pp = commit(prop)
-    val rootChallenge = BigInt(1, sha256(DomainSep ++ pp.serializeWithCommitments ++ m)).mod(R)
+    // Root challenge = low31(SHA256(DomainSep ‖ committed-tree ‖ msg)) — the injective 31-byte
+    // domain (finding #1), NOT `mod R`. The verifier recomputes the same low31 and compares bytes.
+    val rootChallenge = low31(DomainSep ++ pp.serializeWithCommitments ++ m)
     setChallenge(pp, rootChallenge)
     (propJson(prop), proofJson(pp))
   }
@@ -467,6 +481,64 @@ object SigmaVerifySuite extends SimpleIOSuite {
   }
 
   // ===========================================================================
+  // CHALLENGE-DOMAIN INJECTIVITY (finding #1: 31-byte challenge ↔ Fr scalar bijection).
+  // ===========================================================================
+
+  pureTest("finding #1: the 31-byte challenge domain is INJECTIVE into Fr (no e vs e+R alias)") {
+    // The whole point of the 31-byte width: 2^248 < R, so EVERY 31-byte challenge is a distinct,
+    // canonical Fr element and the byte->scalar map is a bijection. Concretely:
+    //   (a) the max 31-byte value is < R, so challenge-as-scalar never wraps;
+    //   (b) low31(SHA256(...)) is always < 2^248 (it drops the digest's top byte);
+    //   (c) the previous aliasing pair (e, e+R) cannot both be 31-byte challenges, because
+    //       e+R >= R > 2^248 needs at least 32 bytes -> it is rejected at the width gate.
+    val twoPow248: BigInt = BigInt(1) << (8 * ChallengeBytes) // 2^248
+    val maxChallenge: BigInt = twoPow248 - 1 // all-0xff 31-byte value
+    // (a) injective domain sits strictly below R.
+    val rangeOk = expect(twoPow248 < R, s"2^248 must be < R for injectivity; R=$R")
+      .and(expect(maxChallenge < R, "the largest 31-byte challenge must be a canonical Fr element"))
+    // (b) low31 of an arbitrary digest is always a 31-byte value (< 2^248).
+    val sampleDigests = (0 until 64).map(i => low31(BigInt(i).toByteArray ++ DomainSep))
+    val low31Ok = expect(sampleDigests.forall(c => c >= 0 && c < twoPow248), "low31 must land in [0, 2^248)")
+    // (c) the classic alias e and e+R: at most ONE is representable as a 31-byte challenge.
+    //     For e in [0, 2^248), e is a valid challenge but e+R needs >= 32 bytes (e+R >= R > 2^248).
+    val e = maxChallenge
+    val aliasBlocked = expect(
+      HexBytes.encodeUInt(e + R, ChallengeBytes).isLeft,
+      "e+R must NOT fit in 31 bytes — so it can never collide with the 31-byte challenge e"
+    )
+    rangeOk.and(low31Ok).and(aliasBlocked)
+  }
+
+  // ===========================================================================
+  // DoS BOUND (finding #2: proof must mirror the gas-charged proposition; reject oversized fast).
+  // ===========================================================================
+
+  test("finding #2: a TINY proposition with a HUGE mismatched proof is rejected fast (DoS bound)") {
+    // The proposition is a single dlog leaf (gas-charged for ONE node). The proof is a deeply
+    // nested / wide AND tree of thousands of nodes — if the verifier parsed the whole proof before
+    // shape-matching, that is unpaid work. With the structural bound, the proof's node count/depth
+    // exceeds the proposition's (1 node) and is rejected as a hard error BEFORE any curve work.
+    val prop = s"""{"type":"dlog","pk":"${encG1(g1)}"}"""
+    // Build a wide OR proof with 5000 children — vastly more than the proposition's single node.
+    val child = s"""{"type":"dlog","e":"${hexChallenge(BigInt(1))}","z":"${hex32(BigInt(1))}"}"""
+    val hugeProof = s"""{"type":"or","e":"${hexChallenge(BigInt(1))}","children":[${List.fill(5000)(child).mkString(",")}]}"""
+    evalSigma(prop, hugeProof, msgHex).map(r => expect(r.isLeft))
+  }
+
+  test("finding #2: a deeply-NESTED proof beyond the proposition depth is rejected (DoS depth cap)") {
+    // Proposition: a single dlog leaf (depth 1). Proof: a chain of nested AND nodes 200 deep — far
+    // beyond the proposition's depth. Rejected by the depth bound before deep traversal.
+    val prop = s"""{"type":"dlog","pk":"${encG1(g1)}"}"""
+    val e = hexChallenge(BigInt(1))
+    val leaf = s"""{"type":"dlog","e":"$e","z":"${hex32(BigInt(1))}"}"""
+    // Nest 200 ANDs, innermost wrapping the leaf.
+    val nested = (0 until 200).foldLeft(leaf) { (inner, _) =>
+      s"""{"type":"and","e":"$e","children":[$inner]}"""
+    }
+    evalSigma(prop, nested, msgHex).map(r => expect(r.isLeft))
+  }
+
+  // ===========================================================================
   // SOUNDNESS NEGATIVES (the dangerous-bug surface).
   // ===========================================================================
 
@@ -480,9 +552,9 @@ object SigmaVerifySuite extends SimpleIOSuite {
     val cb = commit(b).asInstanceOf[PreDlog]
     // Assemble an OR proof whose node challenge = XOR of the two simulated child challenges (so the
     // XOR relation HOLDS) — but that XOR is NOT the FS root, so step 6 must reject.
-    val orE = ca.e ^ cb.e // raw byte-string XOR; the verifier checks ⊕ child e == node e over bytes
+    val orE = ca.e ^ cb.e // 31-byte XOR; the verifier checks ⊕ child e == node e over bytes
     val proofJ =
-      s"""{"type":"or","e":"${hexRaw(orE)}","children":[${proofJson(ca)},${proofJson(cb)}]}"""
+      s"""{"type":"or","e":"${hexChallenge(orE)}","children":[${proofJson(ca)},${proofJson(cb)}]}"""
     evalSigma(propJson(prop), proofJ, msgHex).map(r => expect(r == Right(BoolValue(false))))
   }
 
@@ -494,27 +566,57 @@ object SigmaVerifySuite extends SimpleIOSuite {
     val ca = commit(a).asInstanceOf[PreDlog]
     val cb = commit(b).asInstanceOf[PreDlog]
     // Build the would-be root over the committed tree, then claim it as the OR challenge while
-    // leaving the children's (random, fixed) challenges untouched (they will not XOR to it).
+    // leaving the children's (random, fixed) challenges untouched (they will not XOR to it). The
+    // root is the 31-byte low31 the verifier recomputes (finding #1), emitted as a 31-byte challenge.
     val orNode = PreOr(List(ca, cb), sat = false)
-    val root = BigInt(1, sha256(DomainSep ++ orNode.serializeWithCommitments ++ msg)).mod(R)
-    val proofJ = s"""{"type":"or","e":"${hex32(root)}","children":[${proofJson(ca)},${proofJson(cb)}]}"""
+    val root = low31(DomainSep ++ orNode.serializeWithCommitments ++ msg)
+    val proofJ = s"""{"type":"or","e":"${hexChallenge(root)}","children":[${proofJson(ca)},${proofJson(cb)}]}"""
     evalSigma(propJson(prop), proofJ, msgHex).map(r => expect(r == Right(BoolValue(false))))
   }
 
-  test("soundness: THRESHOLD 2-of-3 where the prover knows only k-1 = 1 witness => false") {
-    // Only one real witness; the prover must simulate the OTHER two -> degree n-k = 1 polynomial.
-    // With only 1 real branch it cannot place the second real point on P AND match the FS root.
-    // We attempt the honest construction but with insufficient witnesses; assert it cannot verify.
-    val known = dlogKnown(randScalar())
-    val prop = Threshold(2, List(known, dlogUnknown(), dlogUnknown()))
-    // Forge attempt: simulate all THREE (treat `known` as unknown too) so the (e_i) are all free.
-    val cs = prop.children.map(_ => commit(dlogUnknown()).asInstanceOf[PreDlog])
-    // Use the REAL FS root as the node challenge (so step-6's root check would PASS) — this
-    // isolates the discriminator to the CDS interpolation: 3 free child challenges generically do
-    // NOT lie on one degree-(n-k)=1 polynomial through (0, root), so the threshold relation fails.
-    val thrNode = PreThr(2, cs, sat = false)
-    val root = BigInt(1, sha256(DomainSep ++ thrNode.serializeWithCommitments ++ msg)).mod(R)
-    val proofJ = s"""{"type":"threshold","e":"${hex32(root)}","k":2,"children":[${cs.map(proofJson).mkString(",")}]}"""
+  test("soundness: THRESHOLD 2-of-3 with only k-1 = 1 real witness (rest HVZK-simulated) => false") {
+    // FINDING #5 rebuild. The earlier version built the proof's children from FRESH unrelated
+    // `dlogUnknown()` statements, so a rejection could have been a statement/commitment MISMATCH
+    // rather than threshold-interpolation unsoundness. Here every child is proven AGAINST THE
+    // PROPOSITION'S ACTUAL public key: the k-1 known children carry REAL transcripts (real nonce
+    // r, real response z), and the remaining n-(k-1) children are HVZK-SIMULATED on the SAME pks
+    // (a = computeCommitment(pk, e, z) for free (e, z)). So the statements/commitments are all
+    // internally consistent and the ONLY thing missing is the kth witness — isolating the
+    // discriminator to the CDS interpolation (degree / P(0)) soundness, exactly as intended.
+    val k = 2 // n = 3 children below (2-of-3)
+    val xKnown = randScalar()
+    val knownLeaf = dlogKnown(xKnown) // index 0: the one real witness
+    val sim1 = dlogUnknown(); val sim2 = dlogUnknown() // indices 1,2: pks whose witness is unknown
+    val prop = Threshold(k, List(knownLeaf, sim1, sim2))
+
+    // Child 0: REAL — pick a nonce, commit a = r·G, defer the response.
+    val r0 = randScalar()
+    val c0 = PreDlog(knownLeaf.pk, sat = true, knownLeaf.x, r0, g1.multiply(r0.bigInteger))
+    // Children 1,2: HVZK-SIMULATED on the proposition's REAL pks with FREE challenges.
+    val c1 = simulateForced(sim1, randChallenge()).asInstanceOf[PreDlog]
+    val c2 = simulateForced(sim2, randChallenge()).asInstanceOf[PreDlog]
+
+    // Use the REAL FS root as the threshold node challenge (so step-6's root check would PASS),
+    // isolating the failure to interpolation. With (k-1) real children the prover has only ONE
+    // free DOF on the polynomial besides (0, root) and the (n-k+1)=2 simulated free points: the
+    // degree is n-k = 1, so a line is fixed by (0, root) + the FIRST simulated point; the SECOND
+    // simulated point and the real child's derived challenge generically do NOT both lie on it.
+    val thrNode = PreThr(k, List(c0, c1, c2), sat = false)
+    val root = low31(DomainSep ++ thrNode.serializeWithCommitments ++ msg)
+    // Derive child 0's challenge as the line through (0, root) + the FIRST simulated child (index
+    // 1, evaluation point x=2) WOULD assign it at x=1 (so c0's transcript is self-consistent for
+    // its own challenge). The verifier still rejects: the SECOND simulated child (index 2, x=3) is
+    // over-determined relative to that line and breaks the per-lane interpolation check.
+    val e0 = {
+      val bytes = Array.tabulate(ChallengeBytes) { lane =>
+        val ys = Array(challengeBytes(root)(lane) & 0xff, challengeBytes(c1.e)(lane) & 0xff)
+        gfLagrange(Array(0, 2), ys, 1).toByte // P(1) for the real child at index 0 (x=1)
+      }
+      BigInt(1, bytes)
+    }
+    c0.e = e0; c0.z = (c0.r + e0 * xKnown).mod(R)
+    val proofJ =
+      s"""{"type":"threshold","e":"${hexChallenge(root)}","k":$k,"children":[${proofJson(c0)},${proofJson(c1)},${proofJson(c2)}]}"""
     evalSigma(propJson(prop), proofJ, msgHex).map(r => expect(r == Right(BoolValue(false))))
   }
 
@@ -577,29 +679,35 @@ object SigmaVerifySuite extends SimpleIOSuite {
   test("error: off-curve statement point => hard error") {
     val offCurve = HexBytes.encodeG1(BigInt(1), BigInt(1)).fold(throw _, identity) // (1,1) not on curve
     val prop = s"""{"type":"dlog","pk":"$offCurve"}"""
-    val proof = s"""{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(BigInt(2))}"}"""
+    val proof = s"""{"type":"dlog","e":"${hexChallenge(BigInt(1))}","z":"${hex32(BigInt(2))}"}"""
     evalSigma(prop, proof, msgHex).map(r => expect(r.isLeft))
   }
 
   test("error: unknown node type => hard error") {
     val prop = s"""{"type":"xor","children":[{"type":"dlog","pk":"${encG1(g1)}"}]}"""
     val proof =
-      s"""{"type":"xor","e":"${hex32(BigInt(1))}","children":[{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(BigInt(1))}"}]}"""
+      s"""{"type":"xor","e":"${hexChallenge(BigInt(1))}","children":[{"type":"dlog","e":"${hexChallenge(BigInt(1))}","z":"${hex32(
+          BigInt(1)
+        )}"}]}"""
     evalSigma(prop, proof, msgHex).map(r => expect(r.isLeft))
   }
 
   test("error: threshold k > n => hard error") {
     val prop = s"""{"type":"threshold","k":5,"children":[{"type":"dlog","pk":"${encG1(g1)}"},{"type":"dlog","pk":"${encG1(g1)}"}]}"""
     val proof =
-      s"""{"type":"threshold","e":"${hex32(BigInt(1))}","k":5,"children":[{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(
+      s"""{"type":"threshold","e":"${hexChallenge(BigInt(1))}","k":5,"children":[{"type":"dlog","e":"${hexChallenge(
           BigInt(1)
-        )}"},{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(BigInt(1))}"}]}"""
+        )}","z":"${hex32(
+          BigInt(1)
+        )}"},{"type":"dlog","e":"${hexChallenge(BigInt(1))}","z":"${hex32(BigInt(1))}"}]}"""
     evalSigma(prop, proof, msgHex).map(r => expect(r.isLeft))
   }
 
   test("error: threshold k <= 0 => hard error") {
     val prop = s"""{"type":"threshold","k":0,"children":[{"type":"dlog","pk":"${encG1(g1)}"}]}"""
-    val proof = s"""{"type":"threshold","e":"${hex32(BigInt(1))}","k":0,"children":[{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(
+    val proof = s"""{"type":"threshold","e":"${hexChallenge(BigInt(1))}","k":0,"children":[{"type":"dlog","e":"${hexChallenge(
+        BigInt(1)
+      )}","z":"${hex32(
         BigInt(1)
       )}"}]}"""
     evalSigma(prop, proof, msgHex).map(r => expect(r.isLeft))
@@ -607,20 +715,22 @@ object SigmaVerifySuite extends SimpleIOSuite {
 
   test("error: proposition / proof shape mismatch (dlog vs dhtuple) => hard error") {
     val prop = s"""{"type":"dlog","pk":"${encG1(g1)}"}"""
-    val proof = s"""{"type":"dhtuple","e":"${hex32(BigInt(1))}","z":"${hex32(BigInt(1))}"}"""
+    val proof = s"""{"type":"dhtuple","e":"${hexChallenge(BigInt(1))}","z":"${hex32(BigInt(1))}"}"""
     evalSigma(prop, proof, msgHex).map(r => expect(r.isLeft))
   }
 
   test("error: proposition / proof child-count mismatch => hard error") {
     val prop = s"""{"type":"and","children":[{"type":"dlog","pk":"${encG1(g1)}"},{"type":"dlog","pk":"${encG1(g1)}"}]}"""
     val proof =
-      s"""{"type":"and","e":"${hex32(BigInt(1))}","children":[{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(BigInt(1))}"}]}"""
+      s"""{"type":"and","e":"${hexChallenge(BigInt(1))}","children":[{"type":"dlog","e":"${hexChallenge(BigInt(1))}","z":"${hex32(
+          BigInt(1)
+        )}"}]}"""
     evalSigma(prop, proof, msgHex).map(r => expect(r.isLeft))
   }
 
   test("error: missing required field (pk) => hard error") {
     val prop = """{"type":"dlog"}"""
-    val proof = s"""{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(BigInt(1))}"}"""
+    val proof = s"""{"type":"dlog","e":"${hexChallenge(BigInt(1))}","z":"${hex32(BigInt(1))}"}"""
     evalSigma(prop, proof, msgHex).map(r => expect(r.isLeft))
   }
 
@@ -630,9 +740,18 @@ object SigmaVerifySuite extends SimpleIOSuite {
     evalSigma(prop, proof, msgHex).map(r => expect(r.isLeft))
   }
 
+  test("error: 32-byte challenge in proof => hard error (challenge domain is 31 bytes, finding #1)") {
+    // A challenge supplied at the OLD 32-byte width must now be rejected as wrong-width: the
+    // injective challenge domain is exactly 31 bytes. Pins the width change at the boundary.
+    val prop = s"""{"type":"dlog","pk":"${encG1(g1)}"}"""
+    val thirtyTwoByteE = HexBytes.encodeUInt(BigInt(1), 32).fold(throw _, identity)
+    val proof = s"""{"type":"dlog","e":"$thirtyTwoByteE","z":"${hex32(BigInt(1))}"}"""
+    evalSigma(prop, proof, msgHex).map(r => expect(r.isLeft))
+  }
+
   test("error: malformed message hex => hard error") {
     val prop = s"""{"type":"dlog","pk":"${encG1(g1)}"}"""
-    val proof = s"""{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(BigInt(1))}"}"""
+    val proof = s"""{"type":"dlog","e":"${hexChallenge(BigInt(1))}","z":"${hex32(BigInt(1))}"}"""
     evalSigma(prop, proof, "0xZZ").map(r => expect(r.isLeft))
   }
 
@@ -651,7 +770,7 @@ object SigmaVerifySuite extends SimpleIOSuite {
   test("false: identity dlog pk (universal-forgery vector) => false, not error") {
     val identity = "0x" + "0" * 128
     val prop = s"""{"type":"dlog","pk":"$identity"}"""
-    val proof = s"""{"type":"dlog","e":"${hex32(BigInt(123))}","z":"${hex32(BigInt(456))}"}"""
+    val proof = s"""{"type":"dlog","e":"${hexChallenge(BigInt(123))}","z":"${hex32(BigInt(456))}"}"""
     evalSigma(prop, proof, msgHex).map(r => expect(r == Right(BoolValue(false))))
   }
 
