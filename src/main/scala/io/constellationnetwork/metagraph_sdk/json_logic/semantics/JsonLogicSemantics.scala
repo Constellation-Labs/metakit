@@ -187,6 +187,8 @@ object JsonLogicSemantics {
           case SmtVerifyOp          => handleSmtVerifyOp
           case MptVerifyOp          => handleMptVerifyOp
           case MptPrefixVerifyOp    => handleMptPrefixVerifyOp
+          case ProveDlogVerifyOp    => handleProveDlogVerifyOp
+          case ProveDhTupleVerifyOp => handleProveDhTupleVerifyOp
         }
 
       private def isFieldMissing(field: JsonLogicValue): F[Option[JsonLogicValue]] = field match {
@@ -1319,6 +1321,18 @@ object JsonLogicSemantics {
       private def handleSchnorrVerifyOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>
           CryptoOps.schnorrVerify(values).map(_.pure[Result])
+        }
+
+      // Sigma-protocol leaves. prove_dlog_verify is a first-class alias for schnorr_verify (the
+      // DLog leaf); prove_dhtuple_verify is the standalone DDH / Diffie-Hellman-tuple leaf.
+      private def handleProveDlogVerifyOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
+        args.withMetrics { values =>
+          CryptoOps.proveDlogVerify(values).map(_.pure[Result])
+        }
+
+      private def handleProveDhTupleVerifyOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
+        args.withMetrics { values =>
+          CryptoOps.proveDhTupleVerify(values).map(_.pure[Result])
         }
 
       // WAVE 3 -- auth-DB verifiers. Unlike the pure CryptoOps above, these run in F (the verifiers

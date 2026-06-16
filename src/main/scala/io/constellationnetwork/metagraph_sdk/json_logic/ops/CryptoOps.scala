@@ -387,6 +387,188 @@ object CryptoOps {
         JsonLogicException(s"schnorr_verify: expected [pkHex(64B), msgHex, proofHex(96B)], got $values").asLeft
     }
 
+  // ===========================================================================
+  // SIGMA PROTOCOLS (classical, no-trusted-setup, Ergo / EIP-11 family).
+  //
+  // The Σ-protocol family is built from two atomic leaves over BN254 G1, both
+  // using the SAME conventions as `schnorr_verify` above (generator (1,2), the
+  // SHA256(transcript) mod R Fiat-Shamir hash family, the `0x`-fixed-width hex
+  // codec, and the on-curve / identity rejection + error-vs-false discipline of
+  // `groth16_verify` / `schnorr_verify`):
+  //
+  //   - DLog  (`proveDlog`):    knowledge of `x` s.t. `pk = x·G`.  This is the
+  //     Schnorr leaf; `prove_dlog_verify` is a first-class ALIAS over
+  //     `schnorrVerify` so the sigma-leaf naming is available standalone.
+  //   - DHTuple (`proveDHTuple`): knowledge of `w` s.t. `u = g^w ∧ v = h^w`
+  //     (a Diffie–Hellman / DDH tuple).  `prove_dhtuple_verify` is a NEW
+  //     standalone leaf.
+  //
+  // STANDALONE vs DEFERRED-TREE. `prove_dlog_verify` / `prove_dhtuple_verify`
+  // are the standalone SINGLE-leaf Σ-guards (one statement, one proof, accept
+  // iff the leaf verifies). Composing several of them with the JLVM `or` /
+  // `some` is CRYPTOGRAPHICALLY UNSOUND for OR / threshold: each standalone
+  // proof carries its own independently-derived Fiat-Shamir challenge, so there
+  // is no challenge-splitting and therefore no hiding of which leaf the prover
+  // actually knows. The sound CAND / COR / CTHRESHOLD composition is the
+  // DEFERRED recursive `sigma_verify` tree (see docs/sigma-verify.md), which
+  // reuses the two commitment-recovery helpers below. The helpers are extracted
+  // here, NOT inside the standalone verifiers (which recompute inline, exactly
+  // like `schnorrVerify`), so the future tree can share one audited copy.
+  // ===========================================================================
+
+  /**
+   * SHA256(bytes) reduced mod the BN254 group order R — the Fiat-Shamir hash family shared with
+   * `schnorr_verify`. The caller is responsible for the transcript byte layout (the LOAD-BEARING
+   * correctness choice: see `proveDhTupleVerify` for the strong-FS binding).
+   */
+  private def fiatShamirChallenge(transcript: Array[Byte]): BigInt =
+    BigInt(1, MessageDigest.getInstance("SHA-256").digest(transcript)).mod(BigInt(Bn254.R))
+
+  /**
+   * DLog commitment recovery: from a verified Schnorr / DLog transcript with public key `pk`,
+   * challenge `e` and response `z`, recover the prover's commitment
+   * {{{ a = z·G − e·pk }}}
+   * For an honest transcript (`z = r + e·x`, `pk = x·G`) this equals the original `a = r·G = R`,
+   * since `z·G − e·pk = (r + e·x)·G − e·(x·G) = r·G`.
+   *
+   * This is NOT used by the standalone `schnorr_verify` / `prove_dlog_verify` (which check the
+   * algebraic equation `s·G == R + c·pk` directly); it is the bottom-up reconstruction primitive
+   * the deferred `sigma_verify` tree needs (the tree is GIVEN the per-leaf `(e, z)` after top-down
+   * challenge propagation and must rebuild the leaf commitment to fold it into the root transcript).
+   *
+   * Subtraction on the curve is `a + (−e)·pk`, i.e. point-negate `pk` (negate the y-coordinate mod
+   * P) and add. `G` is the BN254 generator (1,2). The scalars are reduced mod R by `multiply`.
+   *
+   * Visibility: public (not `private[ops]`) so the deferred-tree unit tests can pin the
+   * `z·G − e·pk == R` round-trip directly; it is harmless pure curve arithmetic with no
+   * argument-shape / hex handling (unlike the opcode entry points).
+   */
+  def dlogComputeCommitment(pk: Bn254.G1, e: BigInt, z: BigInt): Bn254.G1 = {
+    val zG = SchnorrGenerator.multiply(bigInteger(z))
+    val ePk = pk.multiply(bigInteger(e))
+    // −ePk: negate the affine y-coordinate modulo P (the all-zero identity negates to itself).
+    val negEPk =
+      if (ePk.isInfinity) ePk
+      else Bn254.G1(ePk.x, Bn254.P.subtract(ePk.y))
+    zG.add(negEPk)
+  }
+
+  /**
+   * DHTuple commitment recovery for one base `base` (either `g` or `h`) of a DDH tuple, given the
+   * corresponding image `image` (`u` for `g`, `v` for `h`), challenge `e` and response `z`:
+   * {{{ a = z·base − e·image }}}
+   * For an honest transcript (`z = r + e·w`, `image = base^w`) this equals the original commitment
+   * `a = r·base`. As with [[dlogComputeCommitment]] this is the bottom-up reconstruction primitive
+   * for the deferred `sigma_verify` tree, NOT used by the standalone `prove_dhtuple_verify` (which
+   * checks `z·g == a1 + e·u ∧ z·h == a2 + e·v` directly). Public for the same test-seam reason as
+   * [[dlogComputeCommitment]].
+   */
+  def dhtupleComputeCommitment(base: Bn254.G1, image: Bn254.G1, e: BigInt, z: BigInt): Bn254.G1 = {
+    val zBase = base.multiply(bigInteger(z))
+    val eImg = image.multiply(bigInteger(e))
+    val negEImg =
+      if (eImg.isInfinity) eImg
+      else Bn254.G1(eImg.x, Bn254.P.subtract(eImg.y))
+    zBase.add(negEImg)
+  }
+
+  // ---------------------------------------------------------------------------
+  // prove_dlog_verify: [pkHex(64B G1), msgHex, proofHex(96B)] -> bool.
+  //   First-class sigma-leaf ALIAS for `schnorr_verify` (identical inputs and
+  //   semantics: the DLog Σ-leaf, proof of knowledge of `x` with `pk = x·G`).
+  //   Standalone single-key guard; see the SIGMA PROTOCOLS note above for why
+  //   it must NOT be composed by JLVM `or` for an OR/threshold policy.
+  // ---------------------------------------------------------------------------
+
+  def proveDlogVerify(values: List[JsonLogicValue]): Either[JsonLogicException, JsonLogicValue] =
+    schnorrVerify(values).leftMap(e => JsonLogicException(e.getMessage.replace("schnorr_verify", "prove_dlog_verify")))
+
+  // ---------------------------------------------------------------------------
+  // prove_dhtuple_verify: [gHex(64B), hHex(64B), uHex(64B), vHex(64B), msgHex, proofHex(160B)] -> bool.
+  //   DDH / Diffie–Hellman-tuple Σ-leaf on BN254 G1. Statement (g,h,u,v) ∈ G1⁴,
+  //   claim ∃w. u = g^w ∧ v = h^w. Convention:
+  //     proof    = a1(64B) || a2(64B) || z(32B)   (total 160 bytes)
+  //     a1 = g^r, a2 = h^r, z = r + e·w
+  //     STRONG Fiat-Shamir: e = SHA256(g‖h‖u‖v‖a1‖a2‖msg) mod R
+  //     accept iff  z·g == a1 + e·u  AND  z·h == a2 + e·v
+  //
+  //   STRONG-FS IS THE LOAD-BEARING CORRECTNESS POINT. The challenge MUST bind
+  //   the FULL statement (g,h,u,v) AND BOTH commitments (a1,a2) AND the message.
+  //   A weak transcript that omits any of these is forgeable (the prover could
+  //   adaptively choose a commitment after seeing the challenge, or rebind the
+  //   statement / message); see docs/sigma-verify.md and the cited weak-FS
+  //   attack class (SPL ZK-ElGamal, Trail of Bits "Weak Fiat-Shamir Attacks").
+  // ---------------------------------------------------------------------------
+
+  /** Total proof width: a1(64B) || a2(64B) || z(32B). */
+  private val DhTupleProofBytes: Int = HexBytes.G1Bytes + HexBytes.G1Bytes + HexBytes.ScalarBytes
+
+  def proveDhTupleVerify(values: List[JsonLogicValue]): Either[JsonLogicException, JsonLogicValue] =
+    values match {
+      case gV :: hV :: uV :: vV :: msgV :: proofV :: Nil =>
+        for {
+          gHex     <- expectStr("prove_dhtuple_verify g")(gV)
+          hHex     <- expectStr("prove_dhtuple_verify h")(hV)
+          uHex     <- expectStr("prove_dhtuple_verify u")(uV)
+          vHex     <- expectStr("prove_dhtuple_verify v")(vV)
+          msgHex   <- expectStr("prove_dhtuple_verify msg")(msgV)
+          proofHex <- expectStr("prove_dhtuple_verify proof")(proofV)
+          gC       <- HexBytes.parseG1(gHex, "prove_dhtuple_verify g")
+          hC       <- HexBytes.parseG1(hHex, "prove_dhtuple_verify h")
+          uC       <- HexBytes.parseG1(uHex, "prove_dhtuple_verify u")
+          vC       <- HexBytes.parseG1(vHex, "prove_dhtuple_verify v")
+          msg      <- HexBytes.parseBytes(msgHex, None, "prove_dhtuple_verify msg")
+          // proof = a1(64B) || a2(64B) || z(32B) -> total 160 bytes.
+          proof <- HexBytes.parseBytes(proofHex, Some(DhTupleProofBytes), "prove_dhtuple_verify proof")
+          a1Bytes = proof.slice(0, HexBytes.G1Bytes)
+          a2Bytes = proof.slice(HexBytes.G1Bytes, HexBytes.G1Bytes * 2)
+          zBytes = proof.slice(HexBytes.G1Bytes * 2, DhTupleProofBytes)
+          a1C <- HexBytes.parseG1(HexBytes.encodeBytes(a1Bytes), "prove_dhtuple_verify a1")
+          a2C <- HexBytes.parseG1(HexBytes.encodeBytes(a2Bytes), "prove_dhtuple_verify a2")
+          z = BigInt(1, zBytes)
+          g  <- g1OnCurve(gC, "prove_dhtuple_verify g")
+          h  <- g1OnCurve(hC, "prove_dhtuple_verify h")
+          u  <- g1OnCurve(uC, "prove_dhtuple_verify u")
+          v  <- g1OnCurve(vC, "prove_dhtuple_verify v")
+          a1 <- g1OnCurve(a1C, "prove_dhtuple_verify a1")
+          a2 <- g1OnCurve(a2C, "prove_dhtuple_verify a2")
+          // SOUNDNESS: reject the identity / point-at-infinity on ANY of the four statement
+          // points. BN254 G1 is prime-order (cofactor 1), so on-curve => in-subgroup EXCEPT for
+          // O = (0,0). An identity base (g or h) makes the corresponding equation collapse to
+          // `z·O == a + e·image`, i.e. `O == a + e·image`, which an attacker satisfies by
+          // choosing the matching commitment a freely (a universal forgery for that coordinate);
+          // an identity image (u or v) similarly degenerates the hiding of w. These are
+          // correct-WIDTH but cryptographically invalid, so `false`, NOT an error (malformed-width
+          // inputs still error above). a1 / a2 may legitimately be the identity (r ≡ 0), so they
+          // are NOT rejected here — they are still bound into the transcript below.
+          stmtHasIdentity = g.isInfinity || h.isInfinity || u.isInfinity || v.isInfinity
+        } yield
+          if (stmtHasIdentity) BoolValue(false)
+          else {
+            // STRONG Fiat-Shamir: bind the full statement AND both commitments AND the message.
+            // Re-encode each point to its canonical fixed-width 64-byte form (parseG1 already
+            // validated width, so .get is safe) so the transcript is layout-deterministic.
+            def fixed(role: String, hex: String): Array[Byte] =
+              HexBytes.parseBytes(hex, Some(HexBytes.G1Bytes), role).toOption.get
+            val transcript =
+              fixed("g", gHex) ++ fixed("h", hHex) ++ fixed("u", uHex) ++ fixed("v", vHex) ++
+              a1Bytes ++ a2Bytes ++ msg
+            val e = fiatShamirChallenge(transcript)
+            val zr = bigInteger(z.mod(BigInt(Bn254.R)))
+            // accept iff z·g == a1 + e·u  AND  z·h == a2 + e·v
+            val lhs1 = g.multiply(zr)
+            val rhs1 = a1.add(u.multiply(bigInteger(e)))
+            val lhs2 = h.multiply(zr)
+            val rhs2 = a2.add(v.multiply(bigInteger(e)))
+            val ok = lhs1.x == rhs1.x && lhs1.y == rhs1.y && lhs2.x == rhs2.x && lhs2.y == rhs2.y
+            BoolValue(ok)
+          }
+      case _ =>
+        JsonLogicException(
+          s"prove_dhtuple_verify: expected [gHex(64B), hHex(64B), uHex(64B), vHex(64B), msgHex, proofHex(160B)], got $values"
+        ).asLeft
+    }
+
   // ---------------------------------------------------------------------------
   // Shared argument helpers.
   // ---------------------------------------------------------------------------

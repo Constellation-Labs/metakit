@@ -106,4 +106,12 @@ object JsonLogicOp extends Enum[JsonLogicOp] with CirceEnum[JsonLogicOp] {
   case object SmtVerifyOp extends JsonLogicOp("smt_verify")
   case object MptVerifyOp extends JsonLogicOp("mpt_verify")
   case object MptPrefixVerifyOp extends JsonLogicOp("mpt_prefix_verify")
+
+  // ZK / Crypto Operations -- sigma protocols (classical no-trusted-setup Ergo/EIP-11 family).
+  // Standalone single-leaf Σ-guards on BN254 G1. `prove_dlog_verify` is a first-class alias for
+  // `schnorr_verify` (the DLog leaf); `prove_dhtuple_verify` is the new DDH / Diffie-Hellman-tuple
+  // leaf. The sound CAND/COR/CTHRESHOLD composition is the deferred `sigma_verify` tree (Phase 2,
+  // see docs/sigma-verify.md) -- composing these atomic leaves with JLVM `or` is UNSOUND for OR.
+  case object ProveDlogVerifyOp extends JsonLogicOp("prove_dlog_verify")
+  case object ProveDhTupleVerifyOp extends JsonLogicOp("prove_dhtuple_verify")
 }
