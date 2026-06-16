@@ -126,7 +126,7 @@ object SigmaOpsSuite extends SimpleIOSuite {
   private def proofBytes(a1: Bn254.G1, a2: Bn254.G1, z: BigInt): String = {
     val zHex = HexBytes.encodeUInt(z.mod(R), 32).fold(throw _, identity)
     "0x" + HexBytes.encodeBytes(g1Bytes(a1)).substring(2) +
-      HexBytes.encodeBytes(g1Bytes(a2)).substring(2) + zHex.substring(2)
+    HexBytes.encodeBytes(g1Bytes(a2)).substring(2) + zHex.substring(2)
   }
 
   /** A valid DH-tuple statement (g,h,u,v) and its proof for witness `w` and nonce `r`. */
@@ -259,12 +259,12 @@ object SigmaOpsSuite extends SimpleIOSuite {
         .flatMap(IO.fromEither)
     } yield
       expect(res.value == BoolValue(true)) &&
-        // base(prove_dhtuple_verify) + depthPenalty(1); arg constants cost 0. No input-scaled term.
-        expect(
-          res.gasUsed.amount ==
-            GasConfig.Default.proveDhtupleVerify.amount + GasConfig.Default.depthPenalty(1L).amount,
-          s"expected dhtuple base+depth, got ${res.gasUsed.amount}"
-        )
+      // base(prove_dhtuple_verify) + depthPenalty(1); arg constants cost 0. No input-scaled term.
+      expect(
+        res.gasUsed.amount ==
+          GasConfig.Default.proveDhtupleVerify.amount + GasConfig.Default.depthPenalty(1L).amount,
+        s"expected dhtuple base+depth, got ${res.gasUsed.amount}"
+      )
   }
 
   test("prove_dhtuple_verify is priced ~2x prove_dlog_verify and runs out of gas under a tight limit") {
@@ -273,10 +273,10 @@ object SigmaOpsSuite extends SimpleIOSuite {
     val tight = GasLimit(GasConfig.Default.proveDhtupleVerify.amount - 1L)
     for {
       expr <- IO.fromEither(parser.parse(dhExpr(dhGHex, dhHHex, dhUHex, dhVHex, dhMsgHex, dhProof)).flatMap(_.as[JsonLogicExpression]))
-      res <- evaluator.evaluateWithGas(expr, MapValue.empty, None, tight, GasConfig.Default)
+      res  <- evaluator.evaluateWithGas(expr, MapValue.empty, None, tight, GasConfig.Default)
     } yield
       expect(res.isLeft) &&
-        expect(GasConfig.Default.proveDhtupleVerify.amount == 2 * GasConfig.Default.proveDlogVerify.amount - 5_000)
+      expect(GasConfig.Default.proveDhtupleVerify.amount == 2 * GasConfig.Default.proveDlogVerify.amount - 5_000)
   }
 
   // ===========================================================================
