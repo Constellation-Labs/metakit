@@ -569,6 +569,527 @@ object CryptoOps {
         ).asLeft
     }
 
+  // ===========================================================================
+  // sigma_verify: the RECURSIVE CDS Σ-protocol proposition verifier (Phase 2).
+  //
+  //   {"sigma_verify": [ <proposition>, <proof>, <messageHex> ]} -> bool
+  //
+  // This is the sound CAND / COR / CTHRESHOLD composition of the DLog / DHTuple
+  // leaves above (the Ergo `SigSerializer` / `verifySignature` "Verifier Steps
+  // 1-6" restated for BN254 G1). It reuses `dlogComputeCommitment` /
+  // `dhtupleComputeCommitment` for the bottom-up commitment reconstruction. See
+  // docs/sigma-verify.md for the full rationale.
+  //
+  // CROWN-JEWEL CORRECTNESS TARGETS (audit these first):
+  //   1. STRONG Fiat-Shamir. The root challenge binds the WHOLE statement (every
+  //      leaf's points, the tree shape, threshold params), EVERY reconstructed
+  //      commitment, AND the message, under a FROZEN canonical byte layout (see
+  //      `serializeTree`). A transcript that omits any statement/commitment is
+  //      forgeable (the SPL ZK-ElGamal / Trail-of-Bits weak-FS class). Nothing
+  //      the prover controls is left out of the hash.
+  //   2. CDS challenge-splitting. OR = XOR over fixed-width 32-byte challenges;
+  //      THRESHOLD(k,n) = GF(2^8) Shamir, degree (n-k), constant term = parent
+  //      challenge, evaluated byte-wise across the 32 lanes (exactly Ergo). The
+  //      verifier RECOMPUTES the relations and rejects any inconsistency.
+  //   3. Commitments are RECONSTRUCTED, never trusted from the proof, so a forged
+  //      response necessarily changes the hashed commitment and breaks step 6.
+  //
+  // ERROR-VS-FALSE (lockstep with the leaves): malformed (bad hex/width, off-curve
+  // point, structurally invalid tree, k<=0 or k>n, prop/proof shape mismatch,
+  // duplicate/out-of-range threshold index, wrong polynomial degree) => hard
+  // JsonLogicException. Well-formed-but-cryptographically-wrong (root hash !=
+  // root challenge, OR challenges do not XOR, threshold does not interpolate,
+  // identity statement point) => `false`.
+  // ===========================================================================
+
+  /**
+   * FROZEN canonical serialization for the strong-FS transcript (docs/sigma-verify.md §4).
+   *
+   * NORMATIVE BYTE LAYOUT (pre-order, children in array order — array order is part of the
+   * statement; reordering children changes the proposition):
+   *
+   *   - Node tag: ONE fixed byte per kind — dlog=0x00, dhtuple=0x01, and=0x02, or=0x03,
+   *     threshold=0x04.
+   *   - Threshold k AND every child-count: fixed-width 4-byte big-endian (`encodeUInt(_, 4)`),
+   *     so the structure (arity, k) is itself bound — an attacker cannot re-bracket the tree.
+   *   - Points (pk, g, h, u, v, and the RECONSTRUCTED commitments a / a1 / a2): the canonical
+   *     64-byte big-endian `x‖y` form (`HexBytes.encodeG1`), the SAME fixed-width encoding the
+   *     leaf opcodes already use. No compression, no variable width.
+   *
+   *   dlog      := 0x00 ‖ pk(64) ‖ a(64)
+   *   dhtuple   := 0x01 ‖ g(64) ‖ h(64) ‖ u(64) ‖ v(64) ‖ a1(64) ‖ a2(64)
+   *   and       := 0x02 ‖ nChildren(4) ‖ child_0 ‖ … ‖ child_{n-1}
+   *   or        := 0x03 ‖ nChildren(4) ‖ child_0 ‖ … ‖ child_{n-1}
+   *   threshold := 0x04 ‖ k(4) ‖ nChildren(4) ‖ child_0 ‖ … ‖ child_{n-1}
+   *
+   * Root challenge := SHA256( DomainSep ‖ serializeTree(root) ‖ message ) mod R, with
+   * DomainSep = ascii("sigma_verify:v1") (separates this hash family from the per-leaf
+   * `schnorr_verify` / `prove_dhtuple_verify` transcripts so a leaf proof can never be
+   * replayed as a 1-node tree proof and vice-versa).
+   */
+  private object Sigma {
+
+    // One fixed tag byte per node kind (part of the bound transcript).
+    val TagDlog: Byte = 0x00
+    val TagDhTuple: Byte = 0x01
+    val TagAnd: Byte = 0x02
+    val TagOr: Byte = 0x03
+    val TagThreshold: Byte = 0x04
+
+    /** Domain separator for the sigma_verify root hash (distinct from the leaf transcripts). */
+    val DomainSep: Array[Byte] = "sigma_verify:v1".getBytes("US-ASCII")
+
+    /** Fixed challenge width in bytes (32-byte big-endian, reduced mod R). */
+    val ChallengeBytes: Int = HexBytes.ScalarBytes // 32
+
+    // --- Parsed PROPOSITION tree (statement only; no challenges/responses). ---
+    sealed trait PropNode
+    final case class PropDlog(pk: Bn254.G1, pkBytes: Array[Byte]) extends PropNode
+    final case class PropDhTuple(
+      g: Bn254.G1,
+      h: Bn254.G1,
+      u: Bn254.G1,
+      v: Bn254.G1,
+      gBytes: Array[Byte],
+      hBytes: Array[Byte],
+      uBytes: Array[Byte],
+      vBytes: Array[Byte]
+    ) extends PropNode
+    final case class PropAnd(children: List[PropNode]) extends PropNode
+    final case class PropOr(children: List[PropNode]) extends PropNode
+    final case class PropThreshold(k: Int, children: List[PropNode]) extends PropNode
+
+    // --- Parsed PROOF tree (per-node challenge `e`; per-leaf response `z`). ---
+    sealed trait ProofNode { def e: Array[Byte] }
+    final case class ProofDlog(e: Array[Byte], z: BigInt) extends ProofNode
+    final case class ProofDhTuple(e: Array[Byte], z: BigInt) extends ProofNode
+    final case class ProofAnd(e: Array[Byte], children: List[ProofNode]) extends ProofNode
+    final case class ProofOr(e: Array[Byte], children: List[ProofNode]) extends ProofNode
+    final case class ProofThreshold(e: Array[Byte], k: Int, children: List[ProofNode]) extends ProofNode
+  }
+
+  /** SHA256 of a byte string (no mod), used for the GF-independent transcript hash convention. */
+  private def sha256Bytes(bytes: Array[Byte]): Array[Byte] =
+    MessageDigest.getInstance("SHA-256").digest(bytes)
+
+  // ---------------------------------------------------------------------------
+  // GF(2^8) Shamir arithmetic for the CTHRESHOLD challenge split (Ergo / AES field).
+  //
+  // The challenge is a 32-byte array; threshold interpolation is performed BYTE-WISE
+  // (32 independent GF(2^8) lanes), exactly as Ergo's `GF2_192_Poly` reduced to the
+  // byte field. Field = GF(2^8) with the AES reduction polynomial x^8+x^4+x^3+x+1
+  // (0x11b). Indices are the child positions 1..n (0 is reserved for the parent
+  // challenge = the polynomial's value at 0).
+  // ---------------------------------------------------------------------------
+
+  /** GF(2^8) multiply (Russian-peasant, AES reduction poly 0x11b). Pure, fixed 8-round fold. */
+  private def gfMul(a0: Int, b0: Int): Int = {
+    // Fold over the 8 bits of b; (acc product, shifting a). Subtraction/addition in GF(2^m) is XOR.
+    val (p, _, _) = (0 until 8).foldLeft((0, a0 & 0xff, b0 & 0xff)) {
+      case ((prod, a, b), _) =>
+        val nextProd = if ((b & 1) != 0) prod ^ a else prod
+        val shifted = (a << 1) & 0xff
+        val nextA = if ((a & 0x80) != 0) shifted ^ 0x1b else shifted // reduce by 0x11b's low byte
+        (nextProd, nextA, b >> 1)
+    }
+    p & 0xff
+  }
+
+  /** GF(2^8) multiplicative inverse via Fermat (a^254 = a^-1 for a != 0). gfInv(0) = 0. */
+  private def gfInv(a: Int): Int =
+    if ((a & 0xff) == 0) 0
+    else {
+      // a^254: square-and-multiply over the 8 bits of the exponent 254 = 0b11111110.
+      val (result, _) = (0 until 8).foldLeft((1, a & 0xff)) {
+        case ((acc, base), bit) =>
+          val nextAcc = if (((254 >> bit) & 1) != 0) gfMul(acc, base) else acc
+          (nextAcc, gfMul(base, base))
+      }
+      result & 0xff
+    }
+
+  /**
+   * Lagrange evaluation in GF(2^8): given sample points `(xs(i), ys(i))` (all `xs` DISTINCT),
+   * return the interpolating polynomial evaluated at `xEval`. Used to (a) reconstruct the
+   * degree-`(n-k)` threshold polynomial from `(0, parentChallenge)` + the first `n-k` child
+   * points, and (b) check the remaining `k` child points lie on it. Pure GF(2^8) arithmetic.
+   *
+   * Caller guarantees `xs` are pairwise distinct (duplicate/out-of-range indices are rejected
+   * upstream as a hard error), so every `(x_i - x_j)` is non-zero and invertible.
+   */
+  private def gfLagrangeEval(xs: Array[Int], ys: Array[Int], xEval: Int): Int =
+    xs.indices.foldLeft(0) { (acc, i) =>
+      // basis_i(xEval) = ∏_{j!=i} (xEval - xs_j) / (xs_i - xs_j); subtraction == XOR in GF(2^m).
+      val (num, den) = xs.indices.foldLeft((1, 1)) {
+        case ((nm, dn), j) =>
+          if (j == i) (nm, dn)
+          else (gfMul(nm, xEval ^ xs(j)), gfMul(dn, xs(i) ^ xs(j)))
+      }
+      acc ^ gfMul(ys(i), gfMul(num, gfInv(den)))
+    } & 0xff
+
+  // ---------------------------------------------------------------------------
+  // sigma_verify entry point + recursive verifier.
+  // ---------------------------------------------------------------------------
+
+  def sigmaVerify(values: List[JsonLogicValue]): Either[JsonLogicException, JsonLogicValue] =
+    values match {
+      case propV :: proofV :: msgV :: Nil =>
+        for {
+          msgHex <- expectStr("sigma_verify message")(msgV)
+          msg    <- HexBytes.parseBytes(msgHex, None, "sigma_verify message")
+          prop   <- parsePropNode(propV, "sigma_verify.proposition")
+          proof  <- parseProofNode(proofV, "sigma_verify.proof")
+          // STRUCTURAL shape agreement (prop vs proof) is a hard error (encoding fault), checked
+          // as we go below. The cryptographic outcome (true/false) is computed in verifyTree.
+          result <- verifyTree(prop, proof, msg)
+        } yield BoolValue(result)
+      case _ =>
+        JsonLogicException(
+          s"sigma_verify: expected [proposition, proof, messageHex], got $values"
+        ).asLeft
+    }
+
+  // --- Proposition parsing (statement only). Malformed => hard error. ---
+
+  private def sigmaField(role: String, m: Map[String, JsonLogicValue], key: String): Either[JsonLogicException, JsonLogicValue] =
+    m.get(key).toRight(JsonLogicException(s"$role: missing required field '$key'"))
+
+  private def sigmaPoint(role: String, m: Map[String, JsonLogicValue], key: String): Either[JsonLogicException, (Bn254.G1, Array[Byte])] =
+    for {
+      v   <- sigmaField(role, m, key)
+      hex <- expectStr(s"$role.$key")(v)
+      c   <- HexBytes.parseG1(hex, s"$role.$key")
+      p   <- g1OnCurve(c, s"$role.$key")
+      // Canonical fixed-width 64-byte re-encoding for the transcript (parseG1 validated width).
+      bytes <- HexBytes.parseBytes(hex, Some(HexBytes.G1Bytes), s"$role.$key")
+    } yield (p, bytes)
+
+  private def sigmaChildrenValues(role: String, m: Map[String, JsonLogicValue]): Either[JsonLogicException, List[JsonLogicValue]] =
+    sigmaField(role, m, "children").flatMap {
+      case ArrayValue(arr) if arr.nonEmpty => arr.asRight
+      case ArrayValue(_)                   => JsonLogicException(s"$role: 'children' must be a non-empty array").asLeft
+      case other                           => JsonLogicException(s"$role: 'children' must be an array, got ${other.tag}").asLeft
+    }
+
+  private def sigmaInt(role: String, m: Map[String, JsonLogicValue], key: String): Either[JsonLogicException, Int] =
+    sigmaField(role, m, key).flatMap {
+      case IntValue(i) if i >= 0 && i <= Int.MaxValue => i.toInt.asRight
+      case IntValue(i)                                => JsonLogicException(s"$role.$key: out of range: $i").asLeft
+      case other                                      => JsonLogicException(s"$role.$key: expected an integer, got ${other.tag}").asLeft
+    }
+
+  private def parsePropNode(v: JsonLogicValue, role: String): Either[JsonLogicException, Sigma.PropNode] =
+    v match {
+      case MapValue(m) =>
+        sigmaField(role, m, "type").flatMap(expectStr(s"$role.type")).flatMap {
+          case "dlog" =>
+            sigmaPoint(role, m, "pk").map { case (pk, b) => Sigma.PropDlog(pk, b) }
+          case "dhtuple" =>
+            for {
+              g  <- sigmaPoint(role, m, "g")
+              h  <- sigmaPoint(role, m, "h")
+              u  <- sigmaPoint(role, m, "u")
+              vv <- sigmaPoint(role, m, "v")
+            } yield Sigma.PropDhTuple(g._1, h._1, u._1, vv._1, g._2, h._2, u._2, vv._2)
+          case "and" =>
+            for {
+              cs       <- sigmaChildrenValues(role, m)
+              children <- cs.zipWithIndex.traverse { case (c, i) => parsePropNode(c, s"$role.and[$i]") }
+            } yield Sigma.PropAnd(children)
+          case "or" =>
+            for {
+              cs       <- sigmaChildrenValues(role, m)
+              children <- cs.zipWithIndex.traverse { case (c, i) => parsePropNode(c, s"$role.or[$i]") }
+            } yield Sigma.PropOr(children)
+          case "threshold" =>
+            for {
+              k        <- sigmaInt(role, m, "k")
+              cs       <- sigmaChildrenValues(role, m)
+              children <- cs.zipWithIndex.traverse { case (c, i) => parsePropNode(c, s"$role.threshold[$i]") }
+              n = children.length
+              // Structural validity: 1 <= k <= n. A degree-(n-k) polynomial must exist, and the
+              // n child indices 1..n must be valid GF(2^8) field elements (n <= 255).
+              _ <- Either.cond(k >= 1, (), JsonLogicException(s"$role.threshold: k must be >= 1, got $k"))
+              _ <- Either.cond(k <= n, (), JsonLogicException(s"$role.threshold: k ($k) > number of children ($n)"))
+              _ <- Either.cond(n <= 255, (), JsonLogicException(s"$role.threshold: at most 255 children (GF(2^8) indices), got $n"))
+            } yield Sigma.PropThreshold(k, children)
+          case other =>
+            JsonLogicException(s"$role: unknown node type '$other'").asLeft
+        }
+      case other =>
+        JsonLogicException(s"$role: expected a proposition node object, got ${other.tag}").asLeft
+    }
+
+  // --- Proof parsing (per-node challenge + per-leaf response). Malformed => hard error. ---
+
+  private def sigmaChallenge(role: String, m: Map[String, JsonLogicValue]): Either[JsonLogicException, Array[Byte]] =
+    for {
+      v   <- sigmaField(role, m, "e")
+      hex <- expectStr(s"$role.e")(v)
+      // Challenge is a fixed 32-byte big-endian value, reduced mod R (canonicity not required:
+      // the verifier compares it byte-wise against the recomputed challenge, also reduced mod R).
+      bytes <- HexBytes.parseBytes(hex, Some(Sigma.ChallengeBytes), s"$role.e")
+    } yield bytes
+
+  private def sigmaResponse(role: String, m: Map[String, JsonLogicValue]): Either[JsonLogicException, BigInt] =
+    for {
+      v   <- sigmaField(role, m, "z")
+      hex <- expectStr(s"$role.z")(v)
+      z   <- HexBytes.parseScalar(hex, s"$role.z")
+    } yield z
+
+  private def parseProofNode(v: JsonLogicValue, role: String): Either[JsonLogicException, Sigma.ProofNode] =
+    v match {
+      case MapValue(m) =>
+        for {
+          e   <- sigmaChallenge(role, m)
+          typ <- sigmaField(role, m, "type").flatMap(expectStr(s"$role.type"))
+          node <- typ match {
+            case "dlog"    => sigmaResponse(role, m).map(z => Sigma.ProofDlog(e, z))
+            case "dhtuple" => sigmaResponse(role, m).map(z => Sigma.ProofDhTuple(e, z))
+            case "and" =>
+              for {
+                cs       <- sigmaChildrenValues(role, m)
+                children <- cs.zipWithIndex.traverse { case (c, i) => parseProofNode(c, s"$role.and[$i]") }
+              } yield Sigma.ProofAnd(e, children)
+            case "or" =>
+              for {
+                cs       <- sigmaChildrenValues(role, m)
+                children <- cs.zipWithIndex.traverse { case (c, i) => parseProofNode(c, s"$role.or[$i]") }
+              } yield Sigma.ProofOr(e, children)
+            case "threshold" =>
+              for {
+                k        <- sigmaInt(role, m, "k")
+                cs       <- sigmaChildrenValues(role, m)
+                children <- cs.zipWithIndex.traverse { case (c, i) => parseProofNode(c, s"$role.threshold[$i]") }
+              } yield Sigma.ProofThreshold(e, k, children)
+            case other =>
+              JsonLogicException(s"$role: unknown node type '$other'").asLeft
+          }
+        } yield node
+      case other =>
+        JsonLogicException(s"$role: expected a proof node object, got ${other.tag}").asLeft
+    }
+
+  /**
+   * The recursive verifier (Ergo Verifier Steps 1-6). Returns:
+   *   Left(JsonLogicException) -> MALFORMED (prop/proof shape mismatch, off-curve, identity
+   *                               base, bad threshold degree/index) — a hard encoding fault;
+   *   Right(false)             -> well-formed but cryptographically INVALID;
+   *   Right(true)              -> accept.
+   *
+   * Flow: (1) recursively check the CDS challenge-split relations top-down and reconstruct every
+   * leaf commitment bottom-up; (2) serialize the WHOLE tree (statement points + reconstructed
+   * commitments) under the frozen layout; (3) hash (domain-separated, mod R) and accept iff it
+   * equals the ROOT challenge carried in the proof.
+   */
+  private def verifyTree(prop: Sigma.PropNode, proof: Sigma.ProofNode, msg: Array[Byte]): Either[JsonLogicException, Boolean] =
+    for {
+      // Step 3 (CDS split) + Step 4 (commitment reconstruction), folded into one recursive walk.
+      // Returns (structurallyOk?, serializedBytes). The boolean carries the WELL-FORMED-but-wrong
+      // verdict (identity base, OR XOR mismatch, threshold non-interpolation); a structural fault
+      // short-circuits as Left.
+      walk <- verifyNode(prop, proof, "sigma_verify")
+      (cryptoOk, serialized) = walk
+    } yield
+      if (!cryptoOk) false
+      else {
+        // Steps 5-6: STRONG Fiat-Shamir over (DomainSep ‖ canonical tree ‖ message), mod R,
+        // compared against the ROOT challenge. Both sides reduced mod R (the proof's root e is
+        // a 32-byte value, the recomputed one is SHA256 mod R), so compare as BigInt mod R.
+        val recomputedRoot = BigInt(1, sha256Bytes(Sigma.DomainSep ++ serialized ++ msg)).mod(BigInt(Bn254.R))
+        val claimedRoot = BigInt(1, proof.e).mod(BigInt(Bn254.R))
+        recomputedRoot == claimedRoot
+      }
+
+  /**
+   * One recursive node visit. The PARENT challenge `proof.e` is the node's own propagated
+   * challenge (set by the parent's split, or the root challenge at the top). This call:
+   *   - reconstructs the leaf commitment(s) from `(e, z)` (Step 4) and serializes the subtree
+   *     (Step 5) under the frozen layout; and
+   *   - for connectives, CHECKS the child challenges satisfy the CDS relation (Step 3) and
+   *     recurses into each child with the child's own carried challenge.
+   * Returns `(cryptoOk, serializedBytes)`: `cryptoOk = false` is a well-formed-but-wrong verdict
+   * that propagates up (so the whole proof is `false`); `Left` is a structural/encoding fault.
+   *
+   * Prop/proof SHAPE MISMATCH (different `type`, different child counts) is a hard error.
+   */
+  private def verifyNode(
+    prop: Sigma.PropNode,
+    proof: Sigma.ProofNode,
+    role: String
+  ): Either[JsonLogicException, (Boolean, Array[Byte])] =
+    (prop, proof) match {
+      // --- DLog leaf: reconstruct a = z·G − e·pk, serialize 0x00 ‖ pk ‖ a. ---
+      case (Sigma.PropDlog(pk, pkBytes), Sigma.ProofDlog(e, z)) =>
+        // SOUNDNESS: reject the identity pk (universal forgery, mirrors schnorr_verify). The
+        // commitment is reconstructed from the challenge reduced mod R (same as the leaf opcode).
+        if (pk.isInfinity) (false, Array.emptyByteArray).asRight
+        else {
+          val eScalar = BigInt(1, e).mod(BigInt(Bn254.R))
+          val a = dlogComputeCommitment(pk, eScalar, z.mod(BigInt(Bn254.R)))
+          for {
+            aBytes <- encodeG1Bytes(a, s"$role.dlog.a")
+          } yield (true, Array(Sigma.TagDlog) ++ pkBytes ++ aBytes)
+        }
+
+      // --- DHTuple leaf: reconstruct a1 = z·g − e·u, a2 = z·h − e·v; serialize 0x01 ‖ g‖h‖u‖v‖a1‖a2. ---
+      case (
+            Sigma.PropDhTuple(g, h, u, vv, gB, hB, uB, vB),
+            Sigma.ProofDhTuple(e, z)
+          ) =>
+        // SOUNDNESS: reject identity on any statement point (g/h base => collapse; u/v image =>
+        // degenerate hiding), identical to prove_dhtuple_verify. The single shared response z is
+        // used for BOTH coordinate reconstructions (the DDH leaf has one witness, one response).
+        if (g.isInfinity || h.isInfinity || u.isInfinity || vv.isInfinity) (false, Array.emptyByteArray).asRight
+        else {
+          val eScalar = BigInt(1, e).mod(BigInt(Bn254.R))
+          val zr = z.mod(BigInt(Bn254.R))
+          val a1 = dhtupleComputeCommitment(g, u, eScalar, zr)
+          val a2 = dhtupleComputeCommitment(h, vv, eScalar, zr)
+          for {
+            a1Bytes <- encodeG1Bytes(a1, s"$role.dhtuple.a1")
+            a2Bytes <- encodeG1Bytes(a2, s"$role.dhtuple.a2")
+          } yield (true, Array(Sigma.TagDhTuple) ++ gB ++ hB ++ uB ++ vB ++ a1Bytes ++ a2Bytes)
+        }
+
+      // --- CAND: every child challenge MUST equal the node challenge (Step 3, AND rule). ---
+      case (Sigma.PropAnd(pChildren), Sigma.ProofAnd(e, prChildren)) =>
+        for {
+          _ <- Either.cond(
+            pChildren.length == prChildren.length,
+            (),
+            JsonLogicException(s"$role.and: proposition/proof child count mismatch (${pChildren.length} vs ${prChildren.length})")
+          )
+          // AND copies the parent challenge to each child; the proof must reflect that exactly.
+          childChallengesOk = prChildren.forall(c => constantTimeEq(c.e, e))
+          walked <- pChildren.zip(prChildren).zipWithIndex.traverse {
+            case ((pc, prc), i) => verifyNode(pc, prc, s"$role.and[$i]")
+          }
+          allOk = childChallengesOk && walked.forall(_._1)
+          body = walked.foldLeft(Array.emptyByteArray)((acc, w) => acc ++ w._2)
+        } yield (allOk, Array(Sigma.TagAnd) ++ uint32(pChildren.length) ++ body)
+
+      // --- COR: child challenges MUST XOR to the node challenge (Step 3, OR rule = CDS XOR). ---
+      case (Sigma.PropOr(pChildren), Sigma.ProofOr(e, prChildren)) =>
+        for {
+          _ <- Either.cond(
+            pChildren.length == prChildren.length,
+            (),
+            JsonLogicException(s"$role.or: proposition/proof child count mismatch (${pChildren.length} vs ${prChildren.length})")
+          )
+          // CDS OR: ⊕ eᵢ == e_parent over the fixed-width 32-byte challenges. This is the binding
+          // that makes simulating ALL branches impossible — the free challenges cannot be made to
+          // XOR to the FS-derived root unless the prover can invert the hash.
+          xorOk = constantTimeEq(xorBytes(prChildren.map(_.e), Sigma.ChallengeBytes), e)
+          walked <- pChildren.zip(prChildren).zipWithIndex.traverse {
+            case ((pc, prc), i) => verifyNode(pc, prc, s"$role.or[$i]")
+          }
+          allOk = xorOk && walked.forall(_._1)
+          body = walked.foldLeft(Array.emptyByteArray)((acc, w) => acc ++ w._2)
+        } yield (allOk, Array(Sigma.TagOr) ++ uint32(pChildren.length) ++ body)
+
+      // --- CTHRESHOLD(k,n): child challenges are P(1..n) for a degree-(n-k) GF(2^8) poly P,
+      //     P(0) = node challenge. Verify byte-wise interpolation (Step 3, threshold rule). ---
+      case (Sigma.PropThreshold(pk_, pChildren), Sigma.ProofThreshold(e, prk, prChildren)) =>
+        for {
+          _ <- Either.cond(
+            pk_ == prk,
+            (),
+            JsonLogicException(s"$role.threshold: proposition/proof k mismatch ($pk_ vs $prk)")
+          )
+          _ <- Either.cond(
+            pChildren.length == prChildren.length,
+            (),
+            JsonLogicException(s"$role.threshold: proposition/proof child count mismatch (${pChildren.length} vs ${prChildren.length})")
+          )
+          n = pChildren.length
+          // child index i (1..n) is the GF(2^8) evaluation point; 0 is the parent challenge.
+          interpOk = thresholdInterpolates(e, prChildren.map(_.e), pk_, n)
+          walked <- pChildren.zip(prChildren).zipWithIndex.traverse {
+            case ((pc, prc), i) => verifyNode(pc, prc, s"$role.threshold[$i]")
+          }
+          allOk = interpOk && walked.forall(_._1)
+          body = walked.foldLeft(Array.emptyByteArray)((acc, w) => acc ++ w._2)
+        } yield (allOk, Array(Sigma.TagThreshold) ++ uint32(pk_) ++ uint32(n) ++ body)
+
+      // --- Any other (prop, proof) pairing is a structural shape mismatch: hard error. ---
+      case (p, pr) =>
+        JsonLogicException(s"$role: proposition/proof node-type mismatch (${nodeKind(p)} vs ${nodeKind(pr)})").asLeft
+    }
+
+  /**
+   * CTHRESHOLD interpolation check (Step 3, byte-wise GF(2^8)). The `n` child challenges must be
+   * the evaluations `P(1), …, P(n)` of a polynomial `P` of degree `(n-k)` over GF(2^8) with
+   * `P(0) = parentChallenge`, computed independently in each of the 32 byte-lanes (exactly Ergo,
+   * which treats the challenge as a coefficient vector and interpolates per lane).
+   *
+   * Method: the polynomial has degree `(n-k)` => it is fully determined by `(n-k+1)` points. Use
+   * `(0, parentChallenge)` plus the FIRST `(n-k)` child points as the defining set, then verify
+   * the remaining `k` child points lie on the interpolant. (Equivalently: any `(n-k+1)`-subset
+   * determines `P`; the other points must be consistent. Choosing `0` + the first `(n-k)` matches
+   * the prover, which fixes `P(0)` and the `(n-k)` simulated child challenges and DERIVES the `k`
+   * real ones as `P(i)`.) When `k == n` the polynomial is the constant `parentChallenge`, so
+   * EVERY child challenge must equal the parent — the CAND-like degenerate case.
+   *
+   * `false` (not error) on mismatch: a well-formed proof whose shares simply do not interpolate.
+   */
+  private def thresholdInterpolates(parentE: Array[Byte], childEs: List[Array[Byte]], k: Int, n: Int): Boolean = {
+    val degree = n - k // polynomial degree; (degree + 1) points define it
+    val childArr = childEs.toArray
+    // Defining points: x = 0 (parent), then child indices 1..(n-k). Indices are DISTINCT by
+    // construction (0,1,2,…), so the Lagrange denominators are all invertible.
+    val knownCount = degree + 1
+    val xs = Array.tabulate(knownCount)(i => i) // 0,1,...,degree  (child j sits at x=j+1)
+    // Each of the 32 byte-lanes must independently interpolate. Per lane: build the (degree+1)
+    // defining y-values [P(0)=parent, child_0, …, child_{degree-1}] and verify the remaining
+    // children (x = degree+1 .. n) lie on the interpolant. `forall` short-circuits like the loop.
+    (0 until Sigma.ChallengeBytes).forall { lane =>
+      val ys = Array.tabulate(knownCount) { j =>
+        if (j == 0) parentE(lane) & 0xff // P(0) = parent challenge
+        else childArr(j - 1)(lane) & 0xff // child (j-1) sits at x = j
+      }
+      // Remaining (unconstrained) children: indices degree .. n-1, i.e. x = degree+1 .. n.
+      (degree until n).forall { c =>
+        (childArr(c)(lane) & 0xff) == gfLagrangeEval(xs, ys, c + 1)
+      }
+    }
+  }
+
+  /** Node-kind label for shape-mismatch error messages. */
+  private def nodeKind(n: Sigma.PropNode): String = n match {
+    case _: Sigma.PropDlog      => "dlog"
+    case _: Sigma.PropDhTuple   => "dhtuple"
+    case _: Sigma.PropAnd       => "and"
+    case _: Sigma.PropOr        => "or"
+    case _: Sigma.PropThreshold => "threshold"
+  }
+
+  private def nodeKind(n: Sigma.ProofNode): String = n match {
+    case _: Sigma.ProofDlog      => "dlog"
+    case _: Sigma.ProofDhTuple   => "dhtuple"
+    case _: Sigma.ProofAnd       => "and"
+    case _: Sigma.ProofOr        => "or"
+    case _: Sigma.ProofThreshold => "threshold"
+  }
+
+  /** Re-encode a reconstructed G1 commitment to its canonical 64-byte big-endian bytes. */
+  private def encodeG1Bytes(p: Bn254.G1, role: String): Either[JsonLogicException, Array[Byte]] =
+    encodeG1(p).flatMap(hex => HexBytes.parseBytes(hex, Some(HexBytes.G1Bytes), role))
+
+  /** Fixed 4-byte big-endian encoding of a non-negative count / threshold k (bounds the structure). */
+  private def uint32(v: Int): Array[Byte] =
+    Array((v >>> 24).toByte, (v >>> 16).toByte, (v >>> 8).toByte, v.toByte)
+
+  /** XOR a list of equal-width byte arrays into one `width`-byte array (the CDS OR fold). */
+  private def xorBytes(arrays: List[Array[Byte]], width: Int): Array[Byte] =
+    Array.tabulate(width)(i => arrays.foldLeft(0)((acc, a) => acc ^ a(i)).toByte)
+
+  /** Length-checked, data-independent byte equality (no early-exit timing leak across challenges). */
+  private def constantTimeEq(a: Array[Byte], b: Array[Byte]): Boolean =
+    a.length == b.length && a.indices.foldLeft(0)((diff, i) => diff | (a(i) ^ b(i))) == 0
+
   // ---------------------------------------------------------------------------
   // Shared argument helpers.
   // ---------------------------------------------------------------------------

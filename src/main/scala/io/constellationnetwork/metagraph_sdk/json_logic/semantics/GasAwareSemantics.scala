@@ -301,8 +301,50 @@ object GasAwareSemantics {
               case _ :: _ :: MapValue(entries) :: _ :: Nil => gasConfig.mptPrefixPerEntry * entries.size.toLong
               case _                                       => GasCost.Zero
             }
+          // sigma_verify cost scales with the PROPOSITION-TREE shape: one per-leaf charge per DLog /
+          // DHTuple leaf + one per-node charge per connective. Derived from the first argument (the
+          // proposition tree) ALONE and pre-charged BEFORE any curve arithmetic, so out-of-gas is
+          // raised before the (per-leaf scalar-mul) work — the DoS bound for the opcode. The shape
+          // is bounded by traversal; a malformed/non-tree first arg charges 0 here and the verifier
+          // raises the encoding fault.
+          case SigmaVerifyOp =>
+            args match {
+              case prop :: _ :: _ :: Nil =>
+                val (dlogLeaves, dhtupleLeaves, nodes) = sigmaPropShape(prop)
+                gasConfig.sigmaVerifyPerDlogLeaf * dlogLeaves.toLong +
+                gasConfig.sigmaVerifyPerDhtupleLeaf * dhtupleLeaves.toLong +
+                gasConfig.sigmaVerifyPerNode * nodes.toLong
+              case _ => GasCost.Zero
+            }
           case _ => GasCost.Zero
         }
+
+      /**
+       * Count `(dlogLeaves, dhtupleLeaves, connectiveNodes)` in a sigma_verify proposition tree, to
+       * pre-charge per-leaf / per-node gas from the shape. Recognises the same node schema the
+       * verifier parses (`{"type": dlog|dhtuple|and|or|threshold, ...}`); any unrecognised shape
+       * contributes 0 (the verifier will raise the structural fault). Bounded recursion over the
+       * already-materialised value tree.
+       */
+      private def sigmaPropShape(v: JsonLogicValue): (Int, Int, Int) = v match {
+        case MapValue(m) =>
+          m.get("type") match {
+            case Some(StrValue("dlog"))    => (1, 0, 0)
+            case Some(StrValue("dhtuple")) => (0, 1, 0)
+            case Some(StrValue("and")) | Some(StrValue("or")) | Some(StrValue("threshold")) =>
+              val children = m.get("children") match {
+                case Some(ArrayValue(cs)) => cs
+                case _                    => Nil
+              }
+              children.foldLeft((0, 0, 1)) {
+                case ((d, t, n), c) =>
+                  val (cd, ct, cn) = sigmaPropShape(c)
+                  (d + cd, t + ct, n + cn)
+              }
+            case _ => (0, 0, 0)
+          }
+        case _ => (0, 0, 0)
+      }
 
       /**
        * Residual size-scaled cost that is only observable on the PRODUCED value and cannot be

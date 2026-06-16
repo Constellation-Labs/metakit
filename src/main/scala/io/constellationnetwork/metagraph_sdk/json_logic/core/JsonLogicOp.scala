@@ -114,4 +114,9 @@ object JsonLogicOp extends Enum[JsonLogicOp] with CirceEnum[JsonLogicOp] {
   // see docs/sigma-verify.md) -- composing these atomic leaves with JLVM `or` is UNSOUND for OR.
   case object ProveDlogVerifyOp extends JsonLogicOp("prove_dlog_verify")
   case object ProveDhTupleVerifyOp extends JsonLogicOp("prove_dhtuple_verify")
+
+  // The recursive CDS Σ-protocol proposition verifier (Phase 2): the SOUND CAND/COR/CTHRESHOLD
+  // composition over the DLog / DHTuple leaves (ring + threshold signatures), with strong
+  // Fiat-Shamir over the whole tree. AUDIT-GATED before it guards real value (docs/sigma-verify.md).
+  case object SigmaVerifyOp extends JsonLogicOp("sigma_verify")
 }

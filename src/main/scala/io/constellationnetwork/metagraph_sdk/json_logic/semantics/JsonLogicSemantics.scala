@@ -189,6 +189,7 @@ object JsonLogicSemantics {
           case MptPrefixVerifyOp    => handleMptPrefixVerifyOp
           case ProveDlogVerifyOp    => handleProveDlogVerifyOp
           case ProveDhTupleVerifyOp => handleProveDhTupleVerifyOp
+          case SigmaVerifyOp        => handleSigmaVerifyOp
         }
 
       private def isFieldMissing(field: JsonLogicValue): F[Option[JsonLogicValue]] = field match {
@@ -1333,6 +1334,14 @@ object JsonLogicSemantics {
       private def handleProveDhTupleVerifyOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>
           CryptoOps.proveDhTupleVerify(values).map(_.pure[Result])
+        }
+
+      // Recursive CDS Σ-protocol tree verifier (ring + threshold). Pure over already-evaluated
+      // proposition/proof MapValue trees + a hex message; gas is pre-charged per-leaf/per-node
+      // from the proposition shape in the gas-aware layer before any curve arithmetic runs.
+      private def handleSigmaVerifyOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
+        args.withMetrics { values =>
+          CryptoOps.sigmaVerify(values).map(_.pure[Result])
         }
 
       // WAVE 3 -- auth-DB verifiers. Unlike the pure CryptoOps above, these run in F (the verifiers

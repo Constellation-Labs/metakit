@@ -198,6 +198,20 @@ case class GasConfig(
   // from the op alone in the gas-aware layer (no input-scaled term), exactly like schnorrVerify.
   proveDlogVerify: GasCost = GasCost(45_000),
   proveDhtupleVerify: GasCost = GasCost(85_000),
+  // sigma_verify -- the recursive CDS ring/threshold tree verifier. Unlike the fixed-arity leaves,
+  // its cost is the SHAPE of the proposition tree, pre-charged from the (already-evaluated) tree in
+  // the gas-aware layer BEFORE any curve arithmetic runs (the DoS bound):
+  //   total = sigmaVerify (base, incl. one root SHA-256 over the serialized tree, whose length is
+  //           bounded by the leaf+node counts already charged)
+  //         + per-DLog-leaf    (sigmaVerifyPerDlogLeaf    ~ proveDlogVerify: 2 muls + 1 add)
+  //         + per-DHTuple-leaf (sigmaVerifyPerDhtupleLeaf ~ proveDhtupleVerify: 4 muls + 2 adds)
+  //         + per-connective node (sigmaVerifyPerNode: AND challenge copy / OR XOR fold /
+  //           THRESHOLD GF(2^8) interpolation; the per-child interpolation term is folded into the
+  //           per-leaf/per-node walk, dominated by the curve work above).
+  sigmaVerify: GasCost = GasCost(45_000),
+  sigmaVerifyPerDlogLeaf: GasCost = GasCost(45_000),
+  sigmaVerifyPerDhtupleLeaf: GasCost = GasCost(85_000),
+  sigmaVerifyPerNode: GasCost = GasCost(2_000),
   const: GasCost = GasCost.Zero,
   varAccess: GasCost = GasCost(2),
   depthPenaltyMultiplier: Long = 5L,
