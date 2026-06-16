@@ -149,10 +149,12 @@ object SigmaVerifySuite extends SimpleIOSuite {
       Array(TagDhTuple) ++ g1Bytes(g) ++ g1Bytes(h) ++ g1Bytes(u) ++ g1Bytes(v) ++ g1Bytes(a1) ++ g1Bytes(a2)
   }
   final case class PreAnd(children: List[PreProof], sat: Boolean) extends PreProof {
-    def serializeWithCommitments: Array[Byte] = Array(TagAnd) ++ uint32(children.length) ++ children.flatMap(_.serializeWithCommitments).toArray
+    def serializeWithCommitments: Array[Byte] =
+      Array(TagAnd) ++ uint32(children.length) ++ children.flatMap(_.serializeWithCommitments).toArray
   }
   final case class PreOr(children: List[PreProof], sat: Boolean) extends PreProof {
-    def serializeWithCommitments: Array[Byte] = Array(TagOr) ++ uint32(children.length) ++ children.flatMap(_.serializeWithCommitments).toArray
+    def serializeWithCommitments: Array[Byte] =
+      Array(TagOr) ++ uint32(children.length) ++ children.flatMap(_.serializeWithCommitments).toArray
   }
   final case class PreThr(k: Int, children: List[PreProof], sat: Boolean) extends PreProof {
     def serializeWithCommitments: Array[Byte] =
@@ -206,8 +208,17 @@ object SigmaVerifySuite extends SimpleIOSuite {
       node.e = e; node.z = z; node
     case DhTuple(_, g, h, u, v) =>
       val z = randScalar()
-      val node = PreDh(g, h, u, v, sat = false, None, BigInt(-1),
-        CryptoOps.dhtupleComputeCommitment(g, u, e, z), CryptoOps.dhtupleComputeCommitment(h, v, e, z))
+      val node = PreDh(
+        g,
+        h,
+        u,
+        v,
+        sat = false,
+        None,
+        BigInt(-1),
+        CryptoOps.dhtupleComputeCommitment(g, u, e, z),
+        CryptoOps.dhtupleComputeCommitment(h, v, e, z)
+      )
       node.e = e; node.z = z; node
     case And(cs) =>
       val node = PreAnd(cs.map(c => simulateForced(c, e)), sat = false); node.e = e; node
@@ -226,14 +237,17 @@ object SigmaVerifySuite extends SimpleIOSuite {
       val children = (0 until n).toList.map { i =>
         if (freeIdxs.contains(i)) freeChildren(i)
         else {
-          val forced = BigInt(1, Array.tabulate(32) { lane =>
-            val ys = (0 :: freeIdxs.toList.sorted).zipWithIndex.map {
-              case (fi, pos) =>
-                if (pos == 0) challengeBytes(e)(lane) & 0xff
-                else challengeBytes(freeChildren(fi).e)(lane) & 0xff
-            }.toArray
-            gfLagrange(xs, ys, i + 1).toByte
-          }) // RAW (NOT mod R): challenge byte-string P(i+1)
+          val forced = BigInt(
+            1,
+            Array.tabulate(32) { lane =>
+              val ys = (0 :: freeIdxs.toList.sorted).zipWithIndex.map {
+                case (fi, pos) =>
+                  if (pos == 0) challengeBytes(e)(lane) & 0xff
+                  else challengeBytes(freeChildren(fi).e)(lane) & 0xff
+              }.toArray
+              gfLagrange(xs, ys, i + 1).toByte
+            }
+          ) // RAW (NOT mod R): challenge byte-string P(i+1)
           simulateForced(cs(i), forced)
         }
       }
@@ -254,10 +268,12 @@ object SigmaVerifySuite extends SimpleIOSuite {
   private def gfInv(a: Int): Int =
     if ((a & 0xff) == 0) 0
     else
-      (0 until 8).foldLeft((1, a & 0xff)) {
-        case ((acc, base), bit) =>
-          (if (((254 >> bit) & 1) != 0) gfMul(acc, base) else acc, gfMul(base, base))
-      }._1 & 0xff
+      (0 until 8)
+        .foldLeft((1, a & 0xff)) {
+          case ((acc, base), bit) =>
+            (if (((254 >> bit) & 1) != 0) gfMul(acc, base) else acc, gfMul(base, base))
+        }
+        ._1 & 0xff
   private def gfLagrange(xs: Array[Int], ys: Array[Int], xEval: Int): Int =
     xs.indices.foldLeft(0) { (acc, i) =>
       val (num, den) = xs.indices.foldLeft((1, 1)) {
@@ -401,12 +417,13 @@ object SigmaVerifySuite extends SimpleIOSuite {
   private def thresholdKnown(k: Int, n: Int, knownCount: Int): Threshold =
     Threshold(k, (0 until n).map(i => if (i < knownCount) dlogKnown(randScalar()) else dlogUnknown()).toList)
 
-  List((2, 3), (3, 5), (1, 4), (4, 4), (2, 5)).foreach { case (k, n) =>
-    test(s"round-trip true: THRESHOLD $k-of-$n (exactly k witnesses known)") {
-      val prop = thresholdKnown(k, n, knownCount = k)
-      val (pj, prf) = prove(prop, msg)
-      evalSigma(pj, prf, msgHex).map(r => expect(r == Right(BoolValue(true))))
-    }
+  List((2, 3), (3, 5), (1, 4), (4, 4), (2, 5)).foreach {
+    case (k, n) =>
+      test(s"round-trip true: THRESHOLD $k-of-$n (exactly k witnesses known)") {
+        val prop = thresholdKnown(k, n, knownCount = k)
+        val (pj, prf) = prove(prop, msg)
+        evalSigma(pj, prf, msgHex).map(r => expect(r == Right(BoolValue(true))))
+      }
   }
 
   test("round-trip true: THRESHOLD 2-of-3 with MORE than k known (still picks exactly k real)") {
@@ -417,28 +434,34 @@ object SigmaVerifySuite extends SimpleIOSuite {
 
   // Nested trees.
   test("round-trip true: nested AND of ORs — (A or B) and (C or D)") {
-    val prop = And(List(
-      Or(List(dlogKnown(randScalar()), dlogUnknown())),
-      Or(List(dlogUnknown(), dlogKnown(randScalar())))
-    ))
+    val prop = And(
+      List(
+        Or(List(dlogKnown(randScalar()), dlogUnknown())),
+        Or(List(dlogUnknown(), dlogKnown(randScalar())))
+      )
+    )
     val (pj, prf) = prove(prop, msg)
     evalSigma(pj, prf, msgHex).map(r => expect(r == Right(BoolValue(true))))
   }
 
   test("round-trip true: nested THRESHOLD 2-of-3 of dlogs inside an AND with a dhtuple") {
-    val prop = And(List(
-      thresholdKnown(2, 3, knownCount = 2),
-      dhKnown(BigInt(13), BigInt(4), BigInt(7))
-    ))
+    val prop = And(
+      List(
+        thresholdKnown(2, 3, knownCount = 2),
+        dhKnown(BigInt(13), BigInt(4), BigInt(7))
+      )
+    )
     val (pj, prf) = prove(prop, msg)
     evalSigma(pj, prf, msgHex).map(r => expect(r == Right(BoolValue(true))))
   }
 
   test("round-trip true: OR of (AND, THRESHOLD) — outer ring hides which composite was used") {
-    val prop = Or(List(
-      And(List(dlogKnown(randScalar()), dlogKnown(randScalar()))), // real composite branch
-      Threshold(2, List(dlogUnknown(), dlogUnknown(), dlogUnknown())) // simulated composite branch
-    ))
+    val prop = Or(
+      List(
+        And(List(dlogKnown(randScalar()), dlogKnown(randScalar()))), // real composite branch
+        Threshold(2, List(dlogUnknown(), dlogUnknown(), dlogUnknown())) // simulated composite branch
+      )
+    )
     val (pj, prf) = prove(prop, msg)
     evalSigma(pj, prf, msgHex).map(r => expect(r == Right(BoolValue(true))))
   }
@@ -485,7 +508,7 @@ object SigmaVerifySuite extends SimpleIOSuite {
     val known = dlogKnown(randScalar())
     val prop = Threshold(2, List(known, dlogUnknown(), dlogUnknown()))
     // Forge attempt: simulate all THREE (treat `known` as unknown too) so the (e_i) are all free.
-    val cs = prop.children.map { _ => commit(dlogUnknown()).asInstanceOf[PreDlog] }
+    val cs = prop.children.map(_ => commit(dlogUnknown()).asInstanceOf[PreDlog])
     // Use the REAL FS root as the node challenge (so step-6's root check would PASS) — this
     // isolates the discriminator to the CDS interpolation: 3 free child challenges generically do
     // NOT lie on one degree-(n-k)=1 polynomial through (0, root), so the threshold relation fails.
@@ -560,20 +583,25 @@ object SigmaVerifySuite extends SimpleIOSuite {
 
   test("error: unknown node type => hard error") {
     val prop = s"""{"type":"xor","children":[{"type":"dlog","pk":"${encG1(g1)}"}]}"""
-    val proof = s"""{"type":"xor","e":"${hex32(BigInt(1))}","children":[{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(BigInt(1))}"}]}"""
+    val proof =
+      s"""{"type":"xor","e":"${hex32(BigInt(1))}","children":[{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(BigInt(1))}"}]}"""
     evalSigma(prop, proof, msgHex).map(r => expect(r.isLeft))
   }
 
   test("error: threshold k > n => hard error") {
     val prop = s"""{"type":"threshold","k":5,"children":[{"type":"dlog","pk":"${encG1(g1)}"},{"type":"dlog","pk":"${encG1(g1)}"}]}"""
     val proof =
-      s"""{"type":"threshold","e":"${hex32(BigInt(1))}","k":5,"children":[{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(BigInt(1))}"},{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(BigInt(1))}"}]}"""
+      s"""{"type":"threshold","e":"${hex32(BigInt(1))}","k":5,"children":[{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(
+          BigInt(1)
+        )}"},{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(BigInt(1))}"}]}"""
     evalSigma(prop, proof, msgHex).map(r => expect(r.isLeft))
   }
 
   test("error: threshold k <= 0 => hard error") {
     val prop = s"""{"type":"threshold","k":0,"children":[{"type":"dlog","pk":"${encG1(g1)}"}]}"""
-    val proof = s"""{"type":"threshold","e":"${hex32(BigInt(1))}","k":0,"children":[{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(BigInt(1))}"}]}"""
+    val proof = s"""{"type":"threshold","e":"${hex32(BigInt(1))}","k":0,"children":[{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(
+        BigInt(1)
+      )}"}]}"""
     evalSigma(prop, proof, msgHex).map(r => expect(r.isLeft))
   }
 
@@ -585,7 +613,8 @@ object SigmaVerifySuite extends SimpleIOSuite {
 
   test("error: proposition / proof child-count mismatch => hard error") {
     val prop = s"""{"type":"and","children":[{"type":"dlog","pk":"${encG1(g1)}"},{"type":"dlog","pk":"${encG1(g1)}"}]}"""
-    val proof = s"""{"type":"and","e":"${hex32(BigInt(1))}","children":[{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(BigInt(1))}"}]}"""
+    val proof =
+      s"""{"type":"and","e":"${hex32(BigInt(1))}","children":[{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(BigInt(1))}"}]}"""
     evalSigma(prop, proof, msgHex).map(r => expect(r.isLeft))
   }
 
@@ -642,7 +671,7 @@ object SigmaVerifySuite extends SimpleIOSuite {
     } yield {
       val expected =
         cfg.sigmaVerify.amount + cfg.depthPenalty(1L).amount +
-          cfg.sigmaVerifyPerDlogLeaf.amount + cfg.sigmaVerifyPerDhtupleLeaf.amount + cfg.sigmaVerifyPerNode.amount
+        cfg.sigmaVerifyPerDlogLeaf.amount + cfg.sigmaVerifyPerDhtupleLeaf.amount + cfg.sigmaVerifyPerNode.amount
       expect(res.value == BoolValue(true)) &&
       expect(res.gasUsed.amount == expected, s"expected $expected got ${res.gasUsed.amount}")
     }
