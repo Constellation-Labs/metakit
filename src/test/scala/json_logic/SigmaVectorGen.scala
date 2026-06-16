@@ -110,7 +110,7 @@ object SigmaVectorGen extends SimpleIOSuite {
 
   private def dhProofBytes(a1: Bn254.G1, a2: Bn254.G1, z: BigInt): String =
     "0x" + HexBytes.encodeBytes(g1Bytes(a1)).substring(2) +
-      HexBytes.encodeBytes(g1Bytes(a2)).substring(2) + hex32(z).substring(2)
+    HexBytes.encodeBytes(g1Bytes(a2)).substring(2) + hex32(z).substring(2)
 
   private def dhTupleProve(
     w: BigInt,
@@ -368,16 +368,15 @@ object SigmaVectorGen extends SimpleIOSuite {
       expr <- IO.fromEither(parser.parse(exprJson).flatMap(_.as[JsonLogicExpression]))
       data <- IO.fromEither(parser.parse("{}").flatMap(_.as[JsonLogicValue]))
       out  <- JsonLogicEvaluator.tailRecursive[IO].evaluate(expr, data, None)
-    } yield out).attempt
-      .map {
-        case Left(raised)        => Left(s"raised: ${raised.getMessage}")
-        case Right(Left(err))    => Left(s"eval-err: ${err.getMessage}")
-        case Right(Right(value)) => Right(showJsonLogicValue.show(value))
-      }
+    } yield out).attempt.map {
+      case Left(raised)        => Left(s"raised: ${raised.getMessage}")
+      case Right(Left(err))    => Left(s"eval-err: ${err.getMessage}")
+      case Right(Right(value)) => Right(showJsonLogicValue.show(value))
+    }
       .unsafeRunSync()
 
   // One emitted vector case.
-  private final case class Case(expr: String, expected: Option[String], error: Boolean, note: String)
+  final private case class Case(expr: String, expected: Option[String], error: Boolean, note: String)
 
   // JSON-escape a raw expr string for embedding as a JSON string value.
   private def jsonStr(s: String): String = {
@@ -416,7 +415,7 @@ object SigmaVectorGen extends SimpleIOSuite {
     evalReal(expr) match {
       case Right(got) if got == want => (Case(expr, Some(got), error = false, note), true, "")
       case Right(got)                => (Case(expr, Some(got), error = false, note), false, s"[$note] wanted $want got $got")
-      case Left(err)                 => (Case(expr, Some(want), error = false, note), false, s"[$note] wanted value $want but ERRORED: $err")
+      case Left(err) => (Case(expr, Some(want), error = false, note), false, s"[$note] wanted value $want but ERRORED: $err")
     }
 
   // Build an ERROR case: run it, assert it actually errors.
@@ -587,7 +586,11 @@ object SigmaVectorGen extends SimpleIOSuite {
       val cb = commit(b).asInstanceOf[PreDlog]
       val orE = ca.e ^ cb.e
       val proofJ = s"""{"type":"or","e":"${hexRaw(orE)}","children":[${proofJson(ca)},${proofJson(cb)}]}"""
-      cases += valueCase(sigmaExpr(propJson(prop), proofJ, msgHex), "false", "soundness: OR forged by simulating ALL branches (XOR ok, != FS root) -> false")
+      cases += valueCase(
+        sigmaExpr(propJson(prop), proofJ, msgHex),
+        "false",
+        "soundness: OR forged by simulating ALL branches (XOR ok, != FS root) -> false"
+      )
     }
     // --- SOUNDNESS: OR matches FS root but breaks XOR -> false ---
     {
@@ -598,7 +601,11 @@ object SigmaVectorGen extends SimpleIOSuite {
       val orNode = PreOr(List(ca, cb), sat = false)
       val root = sha256Big(DomainSep ++ orNode.serializeWithCommitments ++ msg).mod(R)
       val proofJ = s"""{"type":"or","e":"${hex32(root)}","children":[${proofJson(ca)},${proofJson(cb)}]}"""
-      cases += valueCase(sigmaExpr(propJson(prop), proofJ, msgHex), "false", "soundness: OR matches FS root but breaks XOR relation -> false")
+      cases += valueCase(
+        sigmaExpr(propJson(prop), proofJ, msgHex),
+        "false",
+        "soundness: OR matches FS root but breaks XOR relation -> false"
+      )
     }
     // --- SOUNDNESS: THRESHOLD 2-of-3 with only k-1=1 witness -> false ---
     {
@@ -649,13 +656,17 @@ object SigmaVectorGen extends SimpleIOSuite {
     // --- ERROR: unknown node type ---
     {
       val prop = s"""{"type":"xor","children":[{"type":"dlog","pk":"${encG1(g1)}"}]}"""
-      val proof = s"""{"type":"xor","e":"${hex32(BigInt(1))}","children":[{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(BigInt(1))}"}]}"""
+      val proof = s"""{"type":"xor","e":"${hex32(BigInt(1))}","children":[{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(
+          BigInt(1)
+        )}"}]}"""
       cases += errorCase(sigmaExpr(prop, proof, msgHex), "unknown node type -> error")
     }
     // --- ERROR: threshold k > n ---
     {
       val prop = s"""{"type":"threshold","k":5,"children":[{"type":"dlog","pk":"${encG1(g1)}"},{"type":"dlog","pk":"${encG1(g1)}"}]}"""
-      val proof = s"""{"type":"threshold","e":"${hex32(BigInt(1))}","k":5,"children":[{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(BigInt(1))}"},{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(BigInt(1))}"}]}"""
+      val proof = s"""{"type":"threshold","e":"${hex32(BigInt(1))}","k":5,"children":[{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(
+          BigInt(1)
+        )}"},{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(BigInt(1))}"}]}"""
       cases += errorCase(sigmaExpr(prop, proof, msgHex), "threshold k > n -> error")
     }
     // --- ERROR: prop/proof shape mismatch (dlog vs dhtuple) ---
@@ -667,7 +678,9 @@ object SigmaVectorGen extends SimpleIOSuite {
     // --- ERROR: child-count mismatch ---
     {
       val prop = s"""{"type":"and","children":[{"type":"dlog","pk":"${encG1(g1)}"},{"type":"dlog","pk":"${encG1(g1)}"}]}"""
-      val proof = s"""{"type":"and","e":"${hex32(BigInt(1))}","children":[{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(BigInt(1))}"}]}"""
+      val proof = s"""{"type":"and","e":"${hex32(BigInt(1))}","children":[{"type":"dlog","e":"${hex32(BigInt(1))}","z":"${hex32(
+          BigInt(1)
+        )}"}]}"""
       cases += errorCase(sigmaExpr(prop, proof, msgHex), "proposition/proof child-count mismatch -> error")
     }
     // --- ERROR: wrong-width challenge in proof ---
@@ -700,10 +713,10 @@ object SigmaVectorGen extends SimpleIOSuite {
   private def emitKats(): Unit = {
     // Fixed-witness trees so the bytes are reproducible.
     val katProps: List[(String, Prop)] = List(
-      "dlog_leaf" -> dlogKnown(BigInt("12345678901234567890")),
-      "dhtuple_leaf" -> dhKnown(BigInt("999888777666555"), BigInt(3), BigInt(5)),
+      "dlog_leaf"        -> dlogKnown(BigInt("12345678901234567890")),
+      "dhtuple_leaf"     -> dhKnown(BigInt("999888777666555"), BigInt(3), BigInt(5)),
       "and_dlog_dhtuple" -> And(List(dlogKnown(BigInt(7)), dhKnown(BigInt(11), BigInt(2), BigInt(9)))),
-      "threshold_2of3" -> Threshold(2, List(dlogKnown(BigInt(101)), dlogKnown(BigInt(202)), dlogKnown(BigInt(303))))
+      "threshold_2of3"   -> Threshold(2, List(dlogKnown(BigInt(101)), dlogKnown(BigInt(202)), dlogKnown(BigInt(303))))
     )
     val entries = katProps.map {
       case (name, prop) =>
