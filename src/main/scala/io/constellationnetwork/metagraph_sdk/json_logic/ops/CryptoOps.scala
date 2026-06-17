@@ -29,6 +29,17 @@ import io.constellationnetwork.metagraph_sdk.json_logic.core._
  */
 object CryptoOps {
 
+  /**
+   * The single trusted-total Java-crypto call. `"SHA-256"` is MANDATED by the Java
+   * `MessageDigest` specification on every conformant JVM (it is one of the standard algorithms
+   * every implementation must provide), so `getInstance("SHA-256")` cannot throw
+   * `NoSuchAlgorithmException` in practice. Centralizing it here keeps the digest a single audited
+   * site (every opcode hashes through this) and removes the inline `getInstance(...)` calls that
+   * would otherwise be scattered throw-hazards. Pure: same bytes in, same digest out.
+   */
+  private def sha256(bytes: Array[Byte]): Array[Byte] =
+    MessageDigest.getInstance("SHA-256").digest(bytes)
+
   // ---------------------------------------------------------------------------
   // poseidon: variadic field elements -> Fr hash (32B hex).
   // ---------------------------------------------------------------------------
@@ -372,6 +383,11 @@ object CryptoOps {
           s  <- requireCanonicalScalar(BigInt(1, sBytes), "schnorr_verify s")
           pk <- g1OnCurve(pkC, "schnorr_verify pk")
           r  <- g1OnCurve(rC, "schnorr_verify R")
+          // Canonical fixed-width 64-byte pk bytes for the FS transcript. `pkC` already came from a
+          // width-validated parseG1, so this re-parse cannot fail; threading it as an Either binding
+          // (instead of `.toOption.get`) turns the impossible failure into a Left, never a throw. The
+          // resulting transcript bytes are byte-identical to the prior parseBytes(...).toOption.get.
+          pkBytes <- HexBytes.parseBytes(pkHex, Some(HexBytes.G1Bytes), "schnorr_verify pk")
           // SOUNDNESS: reject the identity / point-at-infinity public key.
           // BN254 G1 is prime-order (cofactor 1), so on-curve => in-subgroup
           // EXCEPT for the identity O = (0,0). With pk = O the verification
@@ -385,8 +401,7 @@ object CryptoOps {
           if (pkIsIdentity) BoolValue(false)
           else {
             // c = SHA256(R || pk || msg) mod groupOrder
-            val pkBytes = HexBytes.parseBytes(pkHex, Some(HexBytes.G1Bytes), "schnorr_verify pk").toOption.get
-            val digest = MessageDigest.getInstance("SHA-256").digest(rBytes ++ pkBytes ++ msg)
+            val digest = sha256(rBytes ++ pkBytes ++ msg)
             val c = BigInt(1, digest).mod(BigInt(Bn254.R))
             // accept iff s*G == R + c*pk
             val lhs = SchnorrGenerator.multiply(bigInteger(s.mod(BigInt(Bn254.R))))
@@ -443,7 +458,7 @@ object CryptoOps {
    * correctness choice: see `proveDhTupleVerify` for the strong-FS binding).
    */
   private def fiatShamirChallenge(transcript: Array[Byte]): BigInt =
-    BigInt(1, MessageDigest.getInstance("SHA-256").digest(transcript)).mod(BigInt(Bn254.R))
+    BigInt(1, sha256(transcript)).mod(BigInt(Bn254.R))
 
   /**
    * DLog commitment recovery: from a verified Schnorr / DLog transcript with public key `pk`,
@@ -553,6 +568,14 @@ object CryptoOps {
           v   <- g1OnCurve(vC, "prove_dhtuple_verify v")
           a1  <- g1OnCurve(a1C, "prove_dhtuple_verify a1")
           a2  <- g1OnCurve(a2C, "prove_dhtuple_verify a2")
+          // Canonical fixed-width 64-byte statement-point bytes for the strong-FS transcript. Each
+          // hex came from a width-validated parseG1 above, so these re-parses cannot fail; threading
+          // them as Either bindings (instead of `.toOption.get`) turns the impossible failure into a
+          // Left, never a throw. The transcript bytes are byte-identical to the prior parse(...).get.
+          gB <- HexBytes.parseBytes(gHex, Some(HexBytes.G1Bytes), "prove_dhtuple_verify g")
+          hB <- HexBytes.parseBytes(hHex, Some(HexBytes.G1Bytes), "prove_dhtuple_verify h")
+          uB <- HexBytes.parseBytes(uHex, Some(HexBytes.G1Bytes), "prove_dhtuple_verify u")
+          vB <- HexBytes.parseBytes(vHex, Some(HexBytes.G1Bytes), "prove_dhtuple_verify v")
           // SOUNDNESS: reject the identity / point-at-infinity on ANY of the four statement
           // points. BN254 G1 is prime-order (cofactor 1), so on-curve => in-subgroup EXCEPT for
           // O = (0,0). An identity base (g or h) makes the corresponding equation collapse to
@@ -567,12 +590,10 @@ object CryptoOps {
           if (stmtHasIdentity) BoolValue(false)
           else {
             // STRONG Fiat-Shamir: bind the full statement AND both commitments AND the message.
-            // Re-encode each point to its canonical fixed-width 64-byte form (parseG1 already
-            // validated width, so .get is safe) so the transcript is layout-deterministic.
-            def fixed(role: String, hex: String): Array[Byte] =
-              HexBytes.parseBytes(hex, Some(HexBytes.G1Bytes), role).toOption.get
+            // The statement points are bound as their canonical fixed-width 64-byte form (gB/hB/uB/vB,
+            // parsed above as Either bindings) so the transcript is layout-deterministic.
             val transcript =
-              fixed("g", gHex) ++ fixed("h", hHex) ++ fixed("u", uHex) ++ fixed("v", vHex) ++
+              gB ++ hB ++ uB ++ vB ++
               a1Bytes ++ a2Bytes ++ msg
             val e = fiatShamirChallenge(transcript)
             val zr = bigInteger(z.mod(BigInt(Bn254.R)))
@@ -729,9 +750,12 @@ object CryptoOps {
     final case class ProofThreshold(e: Array[Byte], k: Int, children: List[ProofNode]) extends ProofNode
   }
 
-  /** SHA256 of a byte string (no mod), used for the GF-independent transcript hash convention. */
+  /**
+   * SHA256 of a byte string (no mod), used for the GF-independent transcript hash convention.
+   * Delegates to the single shared [[sha256]] helper (the one trusted-total `getInstance` site).
+   */
   private def sha256Bytes(bytes: Array[Byte]): Array[Byte] =
-    MessageDigest.getInstance("SHA-256").digest(bytes)
+    sha256(bytes)
 
   // ---------------------------------------------------------------------------
   // GF(2^8) Shamir arithmetic for the CTHRESHOLD challenge split (Ergo / AES field).
@@ -1226,9 +1250,14 @@ object CryptoOps {
   private def uint32(v: Int): Array[Byte] =
     Array((v >>> 24).toByte, (v >>> 16).toByte, (v >>> 8).toByte, v.toByte)
 
-  /** XOR a list of equal-width byte arrays into one `width`-byte array (the CDS OR fold). */
+  /**
+   * XOR a list of equal-width byte arrays into one `width`-byte array (the CDS OR fold). Inputs are
+   * width-validated upstream (every challenge is exactly `Sigma.ChallengeBytes`), so for valid input
+   * the result is unchanged; the in-range guard (`if i < a.length`) only makes a short lane total —
+   * an out-of-range lane contributes 0 instead of throwing `ArrayIndexOutOfBounds`.
+   */
   private def xorBytes(arrays: List[Array[Byte]], width: Int): Array[Byte] =
-    Array.tabulate(width)(i => arrays.foldLeft(0)((acc, a) => acc ^ a(i)).toByte)
+    Array.tabulate(width)(i => arrays.foldLeft(0)((acc, a) => acc ^ (if (i < a.length) a(i).toInt else 0)).toByte)
 
   /** Length-checked, data-independent byte equality (no early-exit timing leak across challenges). */
   private def constantTimeEq(a: Array[Byte], b: Array[Byte]): Boolean =
