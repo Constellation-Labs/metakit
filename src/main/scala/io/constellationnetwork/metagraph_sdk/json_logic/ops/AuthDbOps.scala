@@ -71,7 +71,7 @@ object AuthDbOps {
               case Right(verified) =>
                 verified.value match {
                   case SparseMerkleEntry.Present(key, value) =>
-                    smtResult(valid = true, included = true, keyHex(key), valueToJlv(value)).asRight[JsonLogicException]
+                    smtResult(valid = true, included = true, keyHex(key), valueToJlv(value.toBytes)).asRight[JsonLogicException]
                   case SparseMerkleEntry.Absent(key) =>
                     smtResult(valid = true, included = false, keyHex(key), NullValue).asRight[JsonLogicException]
                 }

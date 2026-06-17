@@ -20,14 +20,14 @@ object SparseMerkleEntry {
    * The key is present and `value` cryptographically binds to the committed leaf (`Hash.fromBytes(value)` matched the
    * leaf's value digest during verify).
    */
-  final case class Present(key: Hex, value: Array[Byte]) extends SparseMerkleEntry
+  final case class Present(key: Hex, value: Hex) extends SparseMerkleEntry
 
   /** The key is absent under the trusted root (verified via [[AbsenceWitness]]). */
   final case class Absent(key: Hex) extends SparseMerkleEntry
 
   // Structural Eq (value compared by content). For test assertions, never control flow.
   implicit val eq: Eq[SparseMerkleEntry] = Eq.instance {
-    case (Present(k1, v1), Present(k2, v2)) => k1 === k2 && v1.sameElements(v2)
+    case (Present(k1, v1), Present(k2, v2)) => k1 === k2 && v1 === v2
     case (Absent(k1), Absent(k2))           => k1 === k2
     case _                                  => false
   }

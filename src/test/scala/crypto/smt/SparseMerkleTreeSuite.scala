@@ -133,7 +133,7 @@ object SparseMerkleTreeSuite extends SimpleIOSuite with Checkers {
                     verifier.verify(root, proof).map {
                       case Right(verified) =>
                         verified.value match {
-                          case SparseMerkleEntry.Present(k, v) => expect(k === key) && expect(v.sameElements(value))
+                          case SparseMerkleEntry.Present(k, v) => expect(k === key) && expect(v.toBytes.sameElements(value))
                           case other                           => failure(s"expected Present, got $other")
                         }
                       case Left(err) => failure(s"verify rejected a valid inclusion: $err")
@@ -230,7 +230,8 @@ object SparseMerkleTreeSuite extends SimpleIOSuite with Checkers {
             val (key, _) = entries.pairs.head
             prover.prove(key).flatMap {
               case Right(SparseMerkleProof.Inclusion(k, value, vd, siblings)) =>
-                val tampered = SparseMerkleProof.Inclusion(k, value :+ 0x7f.toByte, vd, siblings) // value no longer hashes to vd
+                val tampered =
+                  SparseMerkleProof.Inclusion(k, Hex.fromBytes(value.toBytes :+ 0x7f.toByte), vd, siblings) // value no longer hashes to vd
                 verifier.verify(root, tampered).map {
                   case Left(SparseMerkleProofError.ValueBindingFailed(bad)) => expect(bad === k)
                   case other                                                => failure(s"expected ValueBindingFailed, got $other")

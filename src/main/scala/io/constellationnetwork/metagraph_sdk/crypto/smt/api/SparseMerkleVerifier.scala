@@ -47,7 +47,7 @@ object SparseMerkleVerifier {
       else
         proof match {
           case SparseMerkleProof.Inclusion(key, value, valueDigest, siblings) =>
-            SparseMerkleHashing.valueDigest[F](value).flatMap { computed =>
+            SparseMerkleHashing.valueDigest[F](value.toBytes).flatMap { computed =>
               if (computed != valueDigest)
                 (SparseMerkleProofError.ValueBindingFailed(key): SparseMerkleProofError).asLeft[Verified[SparseMerkleEntry]].pure[F]
               else

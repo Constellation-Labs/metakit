@@ -141,7 +141,7 @@ object AuthDbOpsWave3Suite extends SimpleIOSuite {
       case (root, incl, _) =>
         // Tamper the proof's value bytes WITHOUT touching valueDigest -> ValueBindingFailed -> valid:false.
         val corrupted = incl match {
-          case i: SparseMerkleProof.Inclusion => i.copy(value = jsonBytes(Json.fromString("mallory")))
+          case i: SparseMerkleProof.Inclusion => i.copy(value = Hex.fromBytes(jsonBytes(Json.fromString("mallory"))))
           case other                          => other
         }
         val expr = opExpr(SmtVerifyOp, StrValue(hex0x(root.value.value)), jsonToJlv(corrupted.asJson))

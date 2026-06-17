@@ -105,7 +105,7 @@ object OrdinalCatalogProofVerifier {
     def requireSubRoot(component: String, entry: SparseMerkleEntry): EitherT[F, CommittedProofError, SparseMerkleRoot] =
       entry match {
         case SparseMerkleEntry.Present(_, value) =>
-          EitherT.rightT[F, CommittedProofError](SparseMerkleRoot(CommitCatalog.rootFromValueBytes(value)))
+          EitherT.rightT[F, CommittedProofError](SparseMerkleRoot(CommitCatalog.rootFromValueBytes(value.toBytes)))
         case SparseMerkleEntry.Absent(_) =>
           EitherT.leftT[F, SparseMerkleRoot](
             CommittedProofError.MalformedOrdinalProof(s"$component must be an inclusion in the top catalog"): CommittedProofError
@@ -123,7 +123,7 @@ object OrdinalCatalogProofVerifier {
       attestation <- hotResult match {
         case SparseMerkleEntry.Present(_, value) =>
           EitherT.rightT[F, CommittedProofError](
-            OrdinalAttestation.CommittedAt(proof.ordinal, CommitCatalog.rootFromValueBytes(value)): OrdinalAttestation
+            OrdinalAttestation.CommittedAt(proof.ordinal, CommitCatalog.rootFromValueBytes(value.toBytes)): OrdinalAttestation
           )
         case SparseMerkleEntry.Absent(_) =>
           checked("level1", level1Root, proof.level1, CommitCatalog.epochKey(epoch)).flatMap {
@@ -133,7 +133,7 @@ object OrdinalCatalogProofVerifier {
                 OrdinalAttestation.NotCommitted(proof.ordinal): OrdinalAttestation
               )
             case SparseMerkleEntry.Present(_, sealedRootBytes) =>
-              val sealedRoot = SparseMerkleRoot(CommitCatalog.rootFromValueBytes(sealedRootBytes))
+              val sealedRoot = SparseMerkleRoot(CommitCatalog.rootFromValueBytes(sealedRootBytes.toBytes))
               proof.sealedEntry match {
                 case None =>
                   EitherT.leftT[F, OrdinalAttestation](
@@ -144,7 +144,7 @@ object OrdinalCatalogProofVerifier {
                 case Some(entryProof) =>
                   checked("sealedEntry", sealedRoot, entryProof, CommitCatalog.ordinalKey(proof.ordinal)).map {
                     case SparseMerkleEntry.Present(_, value) =>
-                      OrdinalAttestation.CommittedAt(proof.ordinal, CommitCatalog.rootFromValueBytes(value)): OrdinalAttestation
+                      OrdinalAttestation.CommittedAt(proof.ordinal, CommitCatalog.rootFromValueBytes(value.toBytes)): OrdinalAttestation
                     case SparseMerkleEntry.Absent(_) =>
                       OrdinalAttestation.NotCommitted(proof.ordinal): OrdinalAttestation
                   }

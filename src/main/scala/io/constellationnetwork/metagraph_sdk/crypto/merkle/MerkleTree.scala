@@ -58,10 +58,23 @@ object MerkleTree {
         .asJson
     )
 
+  // The encoder emits each leafDigestIndex entry as an OBJECT ({"digest":..,"index":..}); circe's
+  // default tuple decoder expects the ARRAY form and would break the encode->decode round-trip.
+  // Decode the object form to match the encoder (encoder/hashed bytes unchanged). Guarded by
+  // MerkleCodecKatSuite.
+  private val leafIndexEntryDecoder: Decoder[(Hash, Int)] = (e: HCursor) =>
+    for {
+      digest <- e.downField("digest").as[Hash]
+      index  <- e.downField("index").as[Int]
+    } yield (digest, index)
+
   implicit def merkleTreeDecoder: Decoder[MerkleTree] = (c: HCursor) =>
     for {
-      rootNode        <- c.downField("rootNode").as[MerkleNode]
-      leafDigestIndex <- c.downField("leafDigestIndex").as[List[(Hash, Int)]].map(_.toMap)
+      rootNode <- c.downField("rootNode").as[MerkleNode]
+      leafDigestIndex <- c
+        .downField("leafDigestIndex")
+        .as[List[(Hash, Int)]](Decoder.decodeList(leafIndexEntryDecoder))
+        .map(_.toMap)
     } yield MerkleTree(rootNode, leafDigestIndex)
 
   def create[F[_]: MonadThrow: JsonBinaryHasher, A: Encoder](data: List[A]): F[MerkleTree] =
