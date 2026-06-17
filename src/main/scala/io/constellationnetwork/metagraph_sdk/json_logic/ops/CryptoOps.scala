@@ -411,9 +411,11 @@ object CryptoOps {
   //
   // The Σ-protocol family is built from two atomic leaves over BN254 G1, both
   // using the SAME conventions as `schnorr_verify` above (generator (1,2), the
-  // SHA256(transcript) mod R Fiat-Shamir hash family, the `0x`-fixed-width hex
+  // per-LEAF `SHA256(transcript) mod R` Fiat-Shamir hash, the `0x`-fixed-width hex
   // codec, and the on-curve / identity rejection + error-vs-false discipline of
-  // `groth16_verify` / `schnorr_verify`):
+  // `groth16_verify` / `schnorr_verify`). NOTE: the recursive `sigma_verify` TREE does
+  // NOT reduce its challenges mod R — its root + per-node challenges use the 31-byte
+  // injective `low31(SHA256(...))` domain (finding #1; see the `Sigma` object below):
   //
   //   - DLog  (`proveDlog`):    knowledge of `x` s.t. `pk = x·G`.  This is the
   //     Schnorr leaf; `prove_dlog_verify` is a first-class ALIAS over
@@ -663,7 +665,7 @@ object CryptoOps {
    *
    * Every challenge — the root AND every per-node / per-leaf challenge in the proof AND every
    * challenge DERIVED in the CDS split (XOR over GF(2)^248, GF(2^8) Shamir over 31 byte-lanes) —
-   * is a 31-byte value. Responses `z` stay full 32-byte mod-R scalars; commitments stay 64-byte
+   * is a 31-byte value. Responses `z` stay canonical 32-byte (< R) scalars; commitments stay 64-byte
    * G1. The serialized transcript (`serializeTree`) is UNCHANGED — challenges are not part of it.
    */
   private object Sigma {
@@ -1064,7 +1066,7 @@ object CryptoOps {
       // --- DLog leaf: reconstruct a = z·G − e·pk, serialize 0x00 ‖ pk ‖ a. ---
       case (Sigma.PropDlog(pk, pkBytes), Sigma.ProofDlog(e, z)) =>
         // SOUNDNESS: reject the identity pk (universal forgery, mirrors schnorr_verify). The
-        // commitment is reconstructed from the challenge reduced mod R (same as the leaf opcode).
+        // commitment is reconstructed via a = z·G − e·pk, with e the 31-byte challenge used directly
         if (pk.isInfinity) (false, Array.emptyByteArray).asRight
         else {
           // The 31-byte challenge IS the Fr scalar, taken directly (no mod R — finding #1).

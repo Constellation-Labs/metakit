@@ -301,7 +301,7 @@ object SigmaVerifySuite extends SimpleIOSuite {
   //   - OR: real child = first satisfiable; its e = node_e XOR (⊕ simulated children's fixed e's).
   //   - THRESHOLD(k,n): real children = first k satisfiable; the (n-k) simulated children hold
   //     FIXED e's; with (0, node_e) those (n-k+1) points define a degree-(n-k) polynomial P; each
-  //     real child's e = P(its index+1), computed byte-wise across the 32 GF(2^8) lanes.
+  //     real child's e = P(its index+1), computed byte-wise across the 31 GF(2^8) lanes.
   private def setChallenge(pp: PreProof, e: BigInt): Unit =
     if (!pp.sat) {
       // A fully-simulated subtree is already internally consistent (built by simulateForced with a
@@ -354,7 +354,7 @@ object SigmaVerifySuite extends SimpleIOSuite {
           }
       }
 
-  // ----- Proof JSON emission. `e` = RAW 32-byte challenge; `z` = mod-R scalar response. -----
+  // ----- Proof JSON emission. `e` = 31-byte challenge; `z` = canonical (< R) scalar response. -----
   private def proofJson(pp: PreProof): String = pp match {
     case d: PreDlog => s"""{"type":"dlog","e":"${hexChallenge(d.e)}","z":"${hex32(d.z)}"}"""
     case d: PreDh   => s"""{"type":"dhtuple","e":"${hexChallenge(d.e)}","z":"${hex32(d.z)}"}"""

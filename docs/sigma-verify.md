@@ -171,7 +171,7 @@ as every other crypto opcode):
   ```jsonc
   // every node carries its propagated challenge (31B — the injective challenge domain, §4a):
   {"e": "0x..(31B)", ...}
-  // a leaf additionally carries its response(s) (z is a full 32B mod-R scalar):
+  // a leaf additionally carries its response(s) (z is a canonical 32B scalar, < R):
   {"type": "dlog",    "e": "0x..(31B)", "z": "0x..(32B)"}
   {"type": "dhtuple", "e": "0x..(31B)", "z": "0x..(32B)"}
   // a connective additionally carries its children's proofs:
@@ -211,7 +211,8 @@ discipline and the existing `mpt-spec` canonical-JSON rule):
   with **no mod-R reduction**, as the Fr scalar in the leaf reconstruction (`z·G − e·pk`). Note:
   challenges are **not** part of the serialized transcript (only the statement points + reconstructed
   commitments are); they live in the proof tree and are checked against the recomputed root.
-- **Responses (`z`):** 32-byte big-endian, reduced mod `R` (they are full curve scalars).
+- **Responses (`z`):** 32-byte big-endian, **canonical** (`< R`) — a response `>= R` is a hard error
+  (the canonical-response rule; `z` and `z+R` are congruent mod R, so this removes proof-byte malleability).
 
 ### 4a. Challenge domain — the injective byte↔scalar map (normative)
 
@@ -235,7 +236,7 @@ The fix makes the challenge↔scalar map a bijection:
   so the alias is gone by construction (a challenge `≥ 2^248` is impossible: it would not fit in 31
   bytes, and `e+R ≥ R > 2^248` can never be a 31-byte challenge).
 - **Encoding deltas:** per-leaf / per-node challenges are now **31 bytes** (were 32). Responses `z`
-  stay full 32-byte mod-R scalars; commitments stay 64-byte G1. The serialized **transcript** (tags,
+  stay canonical 32-byte (`< R`) scalars; commitments stay 64-byte G1. The serialized **transcript** (tags,
   arities, `k`, statement points, reconstructed commitments, message) is **unchanged** — challenges
   were never in it — so the serialization KATs are stable in layout (only the reconstructed
   commitment bytes move, because they depend on the new challenge values).
@@ -329,7 +330,7 @@ function of its arguments:
 ## 8. Gas model
 
 Consistent with the existing crypto-opcode schedule (`GasMetering.scala`), priced as **per-leaf +
-per-node**, pre-charged from the proof **shape** in the gas-aware layer **before** any curve
+per-node**, pre-charged from the **proposition-tree shape** in the gas-aware layer **before** any curve
 arithmetic runs (so out-of-gas is raised before the work):
 
 - **Per-DLog-leaf:** ≈ `proveDlogVerify` (one `dlogComputeCommitment` = 2 muls + 1 add).
@@ -345,7 +346,11 @@ shape, so — exactly like `bn254_pairing`'s per-pair and `bls_aggregate_verify`
 the gas-aware layer derives the per-element counts from the (already-evaluated) argument values and
 pre-charges them in `getInputScaledCost` before dispatching to the verifier. New `GasConfig` fields:
 `sigmaVerify` (base), `sigmaVerifyPerDlogLeaf`, `sigmaVerifyPerDhtupleLeaf`, `sigmaVerifyPerNode`
-(and the estimator `baseCost` mapping). This is the DoS bound for the opcode.
+(and the estimator `baseCost` mapping). This is the DoS bound for the opcode. In addition, the proof
+tree is structurally bounded BEFORE the recursive proof parse (hex decode / curve work): its node
+count and depth must not exceed the proposition's, with hard backstop caps of **4096 nodes / 64
+depth** (`SigmaMaxProofNodes` / `SigmaMaxProofDepth`). A tiny proposition + huge mismatched proof is
+rejected fast by this bound (a hard error), having done only a bounded raw-tree walk.
 
 ---
 
