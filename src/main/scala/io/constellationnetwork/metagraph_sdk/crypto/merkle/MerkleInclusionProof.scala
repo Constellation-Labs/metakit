@@ -80,10 +80,20 @@ object MerkleInclusionProof {
       }.asJson
     )
 
+  // The encoder emits each witness entry as an OBJECT ({"digest":..,"side":..}); circe's default
+  // tuple decoder expects the ARRAY form ([..,..]) and would break the encode->decode round-trip.
+  // Decode the object form to match the encoder (encoder/hashed bytes unchanged). Guarded by
+  // MerkleCodecKatSuite.
+  private val witnessEntryDecoder: Decoder[(Hash, Side)] = (e: HCursor) =>
+    for {
+      digest <- e.downField("digest").as[Hash]
+      side   <- e.downField("side").as[Side]
+    } yield (digest, side)
+
   implicit val proofDecoder: Decoder[MerkleInclusionProof] = (c: HCursor) =>
     for {
       leafDigest <- c.downField("leafDigest").as[Hash]
-      witness    <- c.downField("witness").as[Seq[(Hash, Side)]]
+      witness    <- c.downField("witness").as[List[(Hash, Side)]](Decoder.decodeList(witnessEntryDecoder))
       proof      <- create(leafDigest, witness).toEither.leftMap(err => DecodingFailure(s"Invalid proof: $err", c.history))
     } yield proof
 }
