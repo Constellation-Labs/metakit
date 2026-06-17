@@ -75,6 +75,10 @@ object SigmaVectorGen extends SimpleIOSuite {
   private def encG1(p: Bn254.G1): String = HexBytes.encodeG1(BigInt(p.x), BigInt(p.y)).toOption.get
   private def g1Bytes(p: Bn254.G1): Array[Byte] = HexBytes.parseBytes(encG1(p), Some(64), "g1").toOption.get
   private def hex32(v: BigInt): String = HexBytes.encodeUInt(v.mod(R), 32).toOption.get
+  // A NON-CANONICAL response scalar (audit finding #4): `v + R`, emitted as a RAW 32-byte value (no
+  // mod R). For any canonical response `v < R`, `v + R < 2R < 2^255` still fits in 32 bytes, so the
+  // proof keeps its fixed width but the response is now `>= R` -> requireCanonicalScalar HARD-errors.
+  private def hex32NonCanonical(v: BigInt): String = HexBytes.encodeUInt(v.mod(R) + R, 32).toOption.get
   private def sha256(bytes: Array[Byte]): Array[Byte] = MessageDigest.getInstance("SHA-256").digest(bytes)
   private def sha256Big(bytes: Array[Byte]): BigInt = BigInt(1, sha256(bytes))
 
@@ -470,6 +474,16 @@ object SigmaVectorGen extends SimpleIOSuite {
     val identityPk = "0x" + "0" * 128
     // off-curve pk (1,1)
     val offCurve = HexBytes.encodeG1(BigInt(1), BigInt(1)).toOption.get
+    // NON-CANONICAL response s (finding #4): an otherwise-valid proof whose s is replaced by s + R
+    // (still 32 bytes, but >= R). `s` and `s + R` are congruent mod R and verify identically, so
+    // accepting the raw 32-byte form would make the proof malleable -> requireCanonicalScalar errors.
+    val nonCanonicalProof = {
+      val pkP = g1.multiply(x.bigInteger)
+      val rPoint = g1.multiply(k.bigInteger)
+      val c = sha256Big(g1Bytes(rPoint) ++ g1Bytes(pkP) ++ msg).mod(R)
+      val s = (k + c * x).mod(R)
+      "0x" + HexBytes.encodeBytes(g1Bytes(rPoint)).substring(2) + hex32NonCanonical(s).substring(2)
+    }
 
     List(
       valueCase(dlogExpr(pk, msgHex, proof), "true", "known-answer valid DLog/Schnorr proof -> true"),
@@ -477,6 +491,7 @@ object SigmaVectorGen extends SimpleIOSuite {
       valueCase(dlogExpr(pk, msgHex, tampered), "false", "tampered response s (last byte flipped) -> false"),
       valueCase(dlogExpr(pk, otherMsgHex, proof), "false", "wrong message (FS binds msg) -> false"),
       valueCase(dlogExpr(identityPk, msgHex, forgeProof), "false", "identity pk universal-forgery vector -> false (not error)"),
+      errorCase(dlogExpr(pk, msgHex, nonCanonicalProof), "non-canonical response s = s + R (>= R) -> error (finding #4)"),
       errorCase(dlogExpr(offCurve, msgHex, proof), "off-curve pk (1,1) not on y^2=x^3+3 -> error"),
       errorCase(dlogExpr(pk, msgHex, "0xdead"), "wrong-width proof (2 bytes, not 96) -> error"),
       errorCase(dlogExpr(pk, "0xZZ", proof), "malformed message hex -> error")
@@ -511,6 +526,17 @@ object SigmaVectorGen extends SimpleIOSuite {
     val identity = "0x" + "0" * 128
     // off-curve
     val offCurve = HexBytes.encodeG1(BigInt(1), BigInt(1)).toOption.get
+    // NON-CANONICAL response z (finding #4): the valid proof's a1‖a2 kept, but z replaced by z + R
+    // (still 32 bytes, >= R). Congruent mod R -> verifies identically, so accepting it would make the
+    // proof bytes malleable; requireCanonicalScalar HARD-errors instead.
+    val nonCanonicalProof = {
+      val a1 = g.multiply(r.bigInteger)
+      val a2 = h.multiply(r.bigInteger)
+      val e = dhChallenge(g, h, u, v, a1, a2, msg)
+      val z = (r + e * w).mod(R)
+      "0x" + HexBytes.encodeBytes(g1Bytes(a1)).substring(2) +
+      HexBytes.encodeBytes(g1Bytes(a2)).substring(2) + hex32NonCanonical(z).substring(2)
+    }
 
     List(
       valueCase(dhExpr(gH, hH, uH, vH, msgHex, proof), "true", "known-answer valid DH-tuple proof -> true"),
@@ -520,6 +546,7 @@ object SigmaVectorGen extends SimpleIOSuite {
       valueCase(dhExpr(gH, hH, uH, vH, otherMsgHex, proof), "false", "wrong message (strong-FS binds msg) -> false"),
       valueCase(dhExpr(identity, hH, uH, vH, msgHex, proof), "false", "identity base g=O forgery vector -> false (not error)"),
       valueCase(dhExpr(gH, hH, uH, identity, msgHex, proof), "false", "identity image v=O degenerate-hiding -> false (not error)"),
+      errorCase(dhExpr(gH, hH, uH, vH, msgHex, nonCanonicalProof), "non-canonical response z = z + R (>= R) -> error (finding #4)"),
       errorCase(dhExpr(offCurve, hH, uH, vH, msgHex, proof), "off-curve statement point -> error"),
       errorCase(dhExpr(gH, hH, uH, vH, msgHex, "0xdead"), "wrong-width proof -> error"),
       errorCase(s"""{"prove_dhtuple_verify":["$gH","$hH","$uH"]}""", "wrong arity -> error")
@@ -617,15 +644,50 @@ object SigmaVectorGen extends SimpleIOSuite {
         "soundness: OR matches FS root but breaks XOR relation -> false"
       )
     }
-    // --- SOUNDNESS: THRESHOLD 2-of-3 with only k-1=1 witness -> false ---
+    // --- SOUNDNESS: THRESHOLD 2-of-3 with only k-1=1 witness -> false (finding #2 rebuild) ---
     {
-      val known = dlogKnown(randScalar())
-      val prop = Threshold(2, List(known, dlogUnknown(), dlogUnknown()))
-      val cs = prop.children.map(_ => commit(dlogUnknown()).asInstanceOf[PreDlog])
-      val thrNode = PreThr(2, cs, sat = false)
+      // Mirrors the GOOD direct unit test (SigmaVerifySuite "THRESHOLD 2-of-3 with only k-1 = 1 real
+      // witness"). The EARLIER generator version built the proof children from FRESH unrelated
+      // `dlogUnknown()` statements, so the `false` could have been a statement/commitment MISMATCH
+      // rather than threshold-interpolation unsoundness. Here every child is proven AGAINST THE
+      // PROPOSITION'S ACTUAL pubkeys: the one known child carries a REAL transcript and the other two
+      // are HVZK-simulated on the SAME pks, isolating the discriminator to the CDS interpolation.
+      val k = 2 // n = 3 (2-of-3)
+      val xKnown = randScalar()
+      val knownLeaf = dlogKnown(xKnown) // index 0: the one real witness
+      val sim1 = dlogUnknown(); val sim2 = dlogUnknown() // indices 1,2: pks whose witness is unknown
+      val prop = Threshold(k, List(knownLeaf, sim1, sim2))
+
+      // Child 0: REAL — nonce r0, commit a = r0·G, defer the response.
+      val r0 = randScalar()
+      val c0 = PreDlog(knownLeaf.pk, sat = true, knownLeaf.x, r0, g1.multiply(r0.bigInteger))
+      // Children 1,2: HVZK-SIMULATED on the proposition's REAL pks with FREE challenges.
+      val c1 = simulateForced(sim1, randChallenge()).asInstanceOf[PreDlog]
+      val c2 = simulateForced(sim2, randChallenge()).asInstanceOf[PreDlog]
+
+      // Use the REAL FS root as the threshold node challenge (so step-6's root check would PASS),
+      // isolating the failure to interpolation. degree = n-k = 1, so a line is fixed by (0, root) +
+      // the FIRST simulated point; the SECOND simulated point + the real child generically do NOT
+      // both lie on it, so the per-lane interpolation check rejects.
+      val thrNode = PreThr(k, List(c0, c1, c2), sat = false)
       val root = low31(DomainSep ++ thrNode.serializeWithCommitments ++ msg) // 31-byte root (finding #1)
-      val proofJ = s"""{"type":"threshold","e":"${hexChallenge(root)}","k":2,"children":[${cs.map(proofJson).mkString(",")}]}"""
-      cases += valueCase(sigmaExpr(propJson(prop), proofJ, msgHex), "false", "soundness: THRESHOLD 2-of-3 with only k-1 witnesses -> false")
+      // Derive child 0's challenge as P(1) for the line through (0, root) + sim child 1 (x=2), so c0's
+      // own transcript is self-consistent; the verifier still rejects on the over-determined sim 2.
+      val e0 = {
+        val bytes = Array.tabulate(ChallengeBytes) { lane =>
+          val ys = Array(challengeBytes(root)(lane) & 0xff, challengeBytes(c1.e)(lane) & 0xff)
+          gfLagrange(Array(0, 2), ys, 1).toByte // P(1) for the real child at index 0 (x=1)
+        }
+        BigInt(1, bytes)
+      }
+      c0.e = e0; c0.z = (c0.r + e0 * xKnown).mod(R)
+      val proofJ =
+        s"""{"type":"threshold","e":"${hexChallenge(root)}","k":$k,"children":[${proofJson(c0)},${proofJson(c1)},${proofJson(c2)}]}"""
+      cases += valueCase(
+        sigmaExpr(propJson(prop), proofJ, msgHex),
+        "false",
+        "soundness: THRESHOLD 2-of-3 with only k-1 real witness (rest HVZK-simulated on real pks) -> false"
+      )
     }
     // --- SOUNDNESS: wrong message -> false ---
     {
@@ -656,12 +718,39 @@ object SigmaVectorGen extends SimpleIOSuite {
       cases += valueCase(sigmaExpr(prop, proof, msgHex), "false", "identity dlog pk universal-forgery vector -> false (not error)")
     }
 
+    // --- ERROR: non-canonical leaf response z = z + R (>= R) on an otherwise-valid leaf (finding #4) ---
+    {
+      // Build a genuinely-valid single dlog leaf (real witness, real root-derived challenge), then
+      // swap ONLY the leaf response z for z + R. The challenge stays the valid 31-byte root, so the
+      // ONLY defect is the non-canonical 32-byte response -> requireCanonicalScalar HARD-errors
+      // (it never reaches the FS check). Pins the canonical-response rule for the sigma tree leaf.
+      val prop = dlogKnown(BigInt("12345678901234567890"))
+      val pp = commit(prop)
+      val rootChallenge = low31(DomainSep ++ pp.serializeWithCommitments ++ msg) // 31-byte root (finding #1)
+      setChallenge(pp, rootChallenge)
+      val d = pp.asInstanceOf[PreDlog]
+      val proofJ = s"""{"type":"dlog","e":"${hexChallenge(d.e)}","z":"${hex32NonCanonical(d.z)}"}"""
+      cases += errorCase(sigmaExpr(propJson(prop), proofJ, msgHex), "non-canonical leaf response z = z + R (>= R) -> error (finding #4)")
+    }
+
     // --- ERROR: off-curve statement point ---
     {
       val offCurve = HexBytes.encodeG1(BigInt(1), BigInt(1)).toOption.get
       val prop = s"""{"type":"dlog","pk":"$offCurve"}"""
       val proof = s"""{"type":"dlog","e":"${hexChallenge(BigInt(1))}","z":"${hex32(BigInt(2))}"}"""
       cases += errorCase(sigmaExpr(prop, proof, msgHex), "off-curve statement point -> error")
+    }
+    // --- ERROR: tiny proposition + HUGE mismatched proof -> hard error (finding #2 DoS bound) ---
+    {
+      // Mirrors the direct DoS test (SigmaVerifySuite "a TINY proposition with a HUGE mismatched
+      // proof is rejected fast"). The proposition is ONE dlog leaf; the proof is a wide OR of
+      // thousands of children — far exceeding the proposition's node count. boundProofShape rejects
+      // it (hard error) BEFORE any hex/curve work, having walked only O(maxNodes) of the proof. Pins
+      // the structural DoS bound cross-language (the gas DoS bound is pinned by the gas vectors).
+      val prop = s"""{"type":"dlog","pk":"${encG1(g1)}"}"""
+      val child = s"""{"type":"dlog","e":"${hexChallenge(BigInt(1))}","z":"${hex32(BigInt(1))}"}"""
+      val hugeProof = s"""{"type":"or","e":"${hexChallenge(BigInt(1))}","children":[${List.fill(5000)(child).mkString(",")}]}"""
+      cases += errorCase(sigmaExpr(prop, hugeProof, msgHex), "tiny proposition + huge mismatched proof -> error (DoS bound, finding #2)")
     }
     // --- ERROR: unknown node type ---
     {

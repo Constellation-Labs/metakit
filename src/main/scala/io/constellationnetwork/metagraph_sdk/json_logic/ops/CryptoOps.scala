@@ -345,6 +345,16 @@ object CryptoOps {
   /** The BN254 G1 generator (1, 2), matching Besu's `AltBn128Point.g1()`. */
   private val SchnorrGenerator: Bn254.G1 = Bn254.G1(BigInteger.ONE, BigInteger.valueOf(2))
 
+  /**
+   * Reject a NON-CANONICAL response scalar (`z`/`s` >= R) as a hard error (audit #4). A response is
+   * a curve scalar, so `z` and `z + R` are congruent mod R and verify identically; accepting raw
+   * 32-byte responses therefore makes the proof bytes malleable. Requiring `z < R` makes the
+   * response encoding canonical (one byte-string per scalar). Challenges are already canonical by
+   * construction (31 bytes < 2^248 < R), so only the 32-byte responses need this guard.
+   */
+  private def requireCanonicalScalar(z: BigInt, role: String): Either[JsonLogicException, BigInt] =
+    Either.cond(z < BigInt(Bn254.R), z, JsonLogicException(s"$role: non-canonical response scalar (must be < R)"))
+
   def schnorrVerify(values: List[JsonLogicValue]): Either[JsonLogicException, JsonLogicValue] =
     values match {
       case pkV :: msgV :: proofV :: Nil =>
@@ -359,7 +369,7 @@ object CryptoOps {
           rBytes = proof.slice(0, HexBytes.G1Bytes)
           sBytes = proof.slice(HexBytes.G1Bytes, HexBytes.G1Bytes + HexBytes.ScalarBytes)
           rC <- HexBytes.parseG1(HexBytes.encodeBytes(rBytes), "schnorr_verify R")
-          s = BigInt(1, sBytes)
+          s  <- requireCanonicalScalar(BigInt(1, sBytes), "schnorr_verify s")
           pk <- g1OnCurve(pkC, "schnorr_verify pk")
           r  <- g1OnCurve(rC, "schnorr_verify R")
           // SOUNDNESS: reject the identity / point-at-infinity public key.
@@ -534,13 +544,13 @@ object CryptoOps {
           zBytes = proof.slice(HexBytes.G1Bytes * 2, DhTupleProofBytes)
           a1C <- HexBytes.parseG1(HexBytes.encodeBytes(a1Bytes), "prove_dhtuple_verify a1")
           a2C <- HexBytes.parseG1(HexBytes.encodeBytes(a2Bytes), "prove_dhtuple_verify a2")
-          z = BigInt(1, zBytes)
-          g  <- g1OnCurve(gC, "prove_dhtuple_verify g")
-          h  <- g1OnCurve(hC, "prove_dhtuple_verify h")
-          u  <- g1OnCurve(uC, "prove_dhtuple_verify u")
-          v  <- g1OnCurve(vC, "prove_dhtuple_verify v")
-          a1 <- g1OnCurve(a1C, "prove_dhtuple_verify a1")
-          a2 <- g1OnCurve(a2C, "prove_dhtuple_verify a2")
+          z   <- requireCanonicalScalar(BigInt(1, zBytes), "prove_dhtuple_verify z")
+          g   <- g1OnCurve(gC, "prove_dhtuple_verify g")
+          h   <- g1OnCurve(hC, "prove_dhtuple_verify h")
+          u   <- g1OnCurve(uC, "prove_dhtuple_verify u")
+          v   <- g1OnCurve(vC, "prove_dhtuple_verify v")
+          a1  <- g1OnCurve(a1C, "prove_dhtuple_verify a1")
+          a2  <- g1OnCurve(a2C, "prove_dhtuple_verify a2")
           // SOUNDNESS: reject the identity / point-at-infinity on ANY of the four statement
           // points. BN254 G1 is prime-order (cofactor 1), so on-curve => in-subgroup EXCEPT for
           // O = (0,0). An identity base (g or h) makes the corresponding equation collapse to
@@ -965,7 +975,7 @@ object CryptoOps {
     for {
       v   <- sigmaField(role, m, "z")
       hex <- expectStr(s"$role.z")(v)
-      z   <- HexBytes.parseScalar(hex, s"$role.z")
+      z   <- HexBytes.parseScalar(hex, s"$role.z").flatMap(requireCanonicalScalar(_, s"$role.z"))
     } yield z
 
   private def parseProofNode(v: JsonLogicValue, role: String): Either[JsonLogicException, Sigma.ProofNode] =
@@ -1111,7 +1121,7 @@ object CryptoOps {
             (),
             JsonLogicException(s"$role.or: proposition/proof child count mismatch (${pChildren.length} vs ${prChildren.length})")
           )
-          // CDS OR: ⊕ eᵢ == e_parent over the fixed-width 32-byte challenges. This is the binding
+          // CDS OR: ⊕ eᵢ == e_parent over the fixed-width 31-byte challenges. This is the binding
           // that makes simulating ALL branches impossible — the free challenges cannot be made to
           // XOR to the FS-derived root unless the prover can invert the hash.
           xorOk = constantTimeEq(xorBytes(prChildren.map(_.e), Sigma.ChallengeBytes), e)

@@ -569,6 +569,26 @@ object GasVectorGenerator extends IOApp {
           "{}",
           Abs(55),
           Some("OOG inside a callback run: the third element's `+` pre-charge exhausts the counter")
+        ),
+        CaseSpec(
+          SigmaSingleDlog,
+          "{}",
+          ExactMinus(1),
+          Some(
+            "sigma_verify out-of-gas one short of the requirement: the proposition-shape pre-charge " +
+            "(base 45000 + 1 dlog leaf 45000 + depth 5) is consumed atomically BEFORE any curve work, " +
+            "so a limit of (exact cost - 1) raises OOG before the verifier runs (finding #3 DoS bound)"
+          )
+        ),
+        CaseSpec(
+          SigmaThreshold2of3,
+          "{}",
+          Abs(GasConfig.Default.sigmaVerify.amount - 1L),
+          Some(
+            "sigma_verify out-of-gas under a tight limit BELOW even the base cost: a tiny limit can " +
+            "never afford the proposition-shape pre-charge, so OOG fires before any traversal / scalar " +
+            "mul — the DoS bound holds regardless of proof size (finding #3)"
+          )
         )
       )
     )

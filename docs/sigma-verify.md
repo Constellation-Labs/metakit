@@ -153,8 +153,7 @@ as every other crypto opcode):
 - **`<messageHex>`** — a `0x`-prefixed lowercase hex byte string (the bound message), exactly like
   the `msg` argument of `schnorr_verify` / `prove_dhtuple_verify`.
 
-- **`<proposition>`** — a `MapValue` tree. Proposed schema (one map per node, discriminated by
-  `"type"`):
+- **`<proposition>`** — a `MapValue` tree. Schema (one map per node, discriminated by `"type"`):
 
   ```jsonc
   // leaves
@@ -184,19 +183,18 @@ as every other crypto opcode):
   shrinks the proof and removes a forgery surface (a verifier that trusts a supplied commitment and
   *also* hashes it can be made to accept inconsistent `(a, z)` pairs).
 
-Open question for the implementation phase: whether to keep the proposition and proof as **two**
-parallel trees (clean separation, the proposition is the on-chain commitment and the proof is the
-witness) or a **single** annotated tree. The two-tree form matches Ergo's `SigmaProp` (proposition)
-vs `ProverResult` (proof) split and is the current preference; the message-binding and gas model
-below are written for it.
+The proposition and proof are **two** parallel trees (clean separation: the proposition is the
+on-chain commitment and the proof is the witness), as implemented. This matches Ergo's `SigmaProp`
+(proposition) vs `ProverResult` (proof) split; the message-binding and gas model below are written
+for it.
 
 ---
 
 ## 4. Canonical serialization (normative, frozen at implementation)
 
 Determinism is mandatory (this runs inside consensus; see §7). The tree serialization for step 5
-MUST be byte-exact across every implementation. Rules (to be frozen when the opcode lands, mirroring
-the `HexBytes` fixed-width discipline and the existing `mpt-spec` canonical-JSON rule):
+MUST be byte-exact across every implementation. Rules (frozen, mirroring the `HexBytes` fixed-width
+discipline and the existing `mpt-spec` canonical-JSON rule):
 
 - **Traversal order:** pre-order, children in their **array order** (array order is significant and
   is part of the statement — reordering children changes the proposition).

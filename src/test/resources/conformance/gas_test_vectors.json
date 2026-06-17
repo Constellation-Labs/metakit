@@ -399,6 +399,20 @@
           "gasLimit" : 55,
           "expected" : "OOG",
           "note" : "OOG inside a callback run: the third element's `+` pre-charge exhausts the counter"
+        },
+        {
+          "expr" : "{\"sigma_verify\":[{\"type\":\"dlog\",\"pk\":\"0x14e2946f9ea29efcd6c8d3bc8ebce97aff2267495f19207d83a5a278b3d1b6750d6d60e75a6a4aef02b7c664972665bbdfa16ef85493ca2cc449eea611b9ed31\"},{\"type\":\"dlog\",\"e\":\"0xc96165908da06f904b1a9daac294f7da4130bf3ed75e21a94b6baaf90a6d9e\",\"z\":\"0x00f5311178e486968e899fc065809d9d77c44b1377ec18be8bd25be121546888\"},\"0x617574686f72697a65207369676d61\"]}",
+          "data" : "{}",
+          "gasLimit" : 90004,
+          "expected" : "OOG",
+          "note" : "sigma_verify out-of-gas one short of the requirement: the proposition-shape pre-charge (base 45000 + 1 dlog leaf 45000 + depth 5) is consumed atomically BEFORE any curve work, so a limit of (exact cost - 1) raises OOG before the verifier runs (finding #3 DoS bound)"
+        },
+        {
+          "expr" : "{\"sigma_verify\":[{\"type\":\"threshold\",\"k\":2,\"children\":[{\"type\":\"dlog\",\"pk\":\"0x269cd333254ed3e0b2dacca39efdfc755962c427865b38014f55e8391f0ec6351f5bf4ac17e85a683492b605b8b011c1552f729c2d2f4f2b9905ae1142e47265\"},{\"type\":\"dlog\",\"pk\":\"0x084acbc3764463d9f4610cfd15a20178b89158c51f696f4ea769fb642a96b6d515b6b027269770c9cc12fdef69835ab90c9c8f74ccf5c9b617000afed90b7a46\"},{\"type\":\"dlog\",\"pk\":\"0x1fa0a2202659aa968e9030366a3441014c930582907664eb1673cb5be60f50911ce712b810322fd3034936730544d99f01061e41720728273be8ffac050f3a79\"}]},{\"type\":\"threshold\",\"e\":\"0xd3dd427463a74db79c807fb3728920c98e45a54056e9fc0fd1a9136ec4b49d\",\"k\":2,\"children\":[{\"type\":\"dlog\",\"e\":\"0x35c1e6ab658bc31b7284655784dba65de40d0f68749133d413b2b5ee4c53e3\",\"z\":\"0x11620c90ee41f096679ddfae60d863f8f1524f19c4d55a06579f0ae551514be2\"},{\"type\":\"dlog\",\"e\":\"0x04e511d16fff4af45b884b60852d37fa5ad5ea10121979a24e9f4475cf6161\",\"z\":\"0x114c1ce2231d68bad070e2be7a4b8d9480d5c9972cd2f5a330ee9f7fabefe348\"},{\"type\":\"dlog\",\"e\":\"0xe2f9b50e69d3c458b58c5184737fb16e309d40383061b6798c84e2f547861f\",\"z\":\"0x1972f3449633940d0711c75e3462253b410f17cf6d91465713a9dae8e898e44d\"}]},\"0x617574686f72697a65207369676d61\"]}",
+          "data" : "{}",
+          "gasLimit" : 44999,
+          "expected" : "OOG",
+          "note" : "sigma_verify out-of-gas under a tight limit BELOW even the base cost: a tiny limit can never afford the proposition-shape pre-charge, so OOG fires before any traversal / scalar mul — the DoS bound holds regardless of proof size (finding #3)"
         }
       ]
     }
