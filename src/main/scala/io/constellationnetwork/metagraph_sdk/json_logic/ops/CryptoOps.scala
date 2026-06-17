@@ -553,7 +553,7 @@ object CryptoOps {
           hC       <- HexBytes.parseG1(hHex, "prove_dhtuple_verify h")
           uC       <- HexBytes.parseG1(uHex, "prove_dhtuple_verify u")
           vC       <- HexBytes.parseG1(vHex, "prove_dhtuple_verify v")
-          msg      <- HexBytes.parseBytes(msgHex, None, "prove_dhtuple_verify msg")
+          msg      <- parseSigmaMessage(msgHex, "prove_dhtuple_verify msg")
           // proof = a1(64B) || a2(64B) || z(32B) -> total 160 bytes.
           proof <- HexBytes.parseBytes(proofHex, Some(DhTupleProofBytes), "prove_dhtuple_verify proof")
           a1Bytes = proof.slice(0, HexBytes.G1Bytes)
@@ -818,34 +818,67 @@ object CryptoOps {
   // ---------------------------------------------------------------------------
 
   /**
-   * Absolute backstop on the proof tree size/depth (audit finding #2, the unpaid-traversal DoS
-   * bound). The PRIMARY bound is structural: the proof must mirror the (already gas-charged)
-   * proposition, so its node count and depth may not exceed the proposition's (checked cheaply
-   * BEFORE the expensive recursive `parseProofNode` / curve work). These caps are a hard ceiling
-   * for the degenerate case and are far above any realistic policy tree (255 children per
-   * threshold node is the GF(2^8) cap; a few thousand total nodes covers any sane proposition).
+   * Absolute backstop on a sigma tree's size/depth (the unpaid-traversal DoS bound). Applied to
+   * BOTH the proposition (before its recursive parse — IMPL-1) and the proof. For the proof the
+   * PRIMARY bound is also structural: the proof must mirror the (already gas-charged) proposition,
+   * so its node count and depth may not exceed the proposition's (checked cheaply BEFORE the
+   * expensive recursive `parseProofNode` / curve work). These caps are a hard ceiling for the
+   * degenerate case and are far above any realistic policy tree (255 children per threshold node is
+   * the GF(2^8) cap; a few thousand total nodes covers any sane proposition). Public so the gas
+   * estimator (`GasAwareSemantics`) bounds its proposition-shape walk with the SAME values.
    */
-  private val SigmaMaxProofNodes: Int = 4096
-  private val SigmaMaxProofDepth: Int = 64
+  val SigmaMaxProofNodes: Int = 4096
+  val SigmaMaxProofDepth: Int = 64
+
+  /**
+   * IMPL-3 (DoS): absolute cap on a sigma message length, in bytes. The message is hashed into the
+   * challenge but is NOT part of the gas-priced proposition shape, so without a cap a caller could
+   * force unbounded hex-decode + SHA-256 work outside the Sigma-tree pricing. 4096 bytes is generous
+   * for any domain-separated policy message while keeping the hash work trivially bounded. Shared by
+   * `sigma_verify` and `prove_dhtuple_verify`. (Alternative considered: message-byte-scaled gas; a
+   * hard cap is chosen for determinism + cross-language parity.)
+   */
+  val SigmaMaxMessageBytes: Int = 4096
+
+  /**
+   * IMPL-3 (DoS): parse a sigma message (arbitrary-width hex) and enforce the absolute length cap.
+   * Bounds the hex-decode + SHA-256 work the message contributes to the challenge. Shared by
+   * `sigma_verify` and `prove_dhtuple_verify`.
+   */
+  private def parseSigmaMessage(hex: String, role: String): Either[JsonLogicException, Array[Byte]] =
+    HexBytes.parseBytes(hex, None, role).flatMap { bytes =>
+      Either.cond(
+        bytes.length <= SigmaMaxMessageBytes,
+        bytes,
+        JsonLogicException(
+          s"$role: message too long (${bytes.length} > $SigmaMaxMessageBytes bytes) — DoS bound"
+        )
+      )
+    }
 
   def sigmaVerify(values: List[JsonLogicValue]): Either[JsonLogicException, JsonLogicValue] =
     values match {
       case propV :: proofV :: msgV :: Nil =>
         for {
           msgHex <- expectStr("sigma_verify message")(msgV)
-          msg    <- HexBytes.parseBytes(msgHex, None, "sigma_verify message")
-          prop   <- parsePropNode(propV, "sigma_verify.proposition")
-          // FINDING #2 (DoS): the proposition is parsed + gas-charged from its SHAPE. Before the
-          // expensive recursive proof parse (hex decode, on-curve checks, scalar mul), enforce a
-          // cheap STRUCTURAL bound — the proof's node count and depth must not exceed the
-          // proposition's (the proof must mirror it), with a hard cap as a backstop. A tiny
-          // proposition + huge mismatched proof is rejected here, fast, having done only a bounded
-          // raw-tree walk (no curve arithmetic). The full mirror check (per-node type / child
-          // count) still happens in verifyNode as a hard error.
+          msg    <- parseSigmaMessage(msgHex, "sigma_verify message")
+          // IMPL-1 (DoS): bound the proposition's RAW shape with the absolute caps BEFORE its
+          // recursive parse. Both `parsePropNode` and `sigmaRawShape` descend the attacker-supplied
+          // proposition, so a deeply nested / very wide proposition must be rejected here first, by
+          // a cheap early-aborting walk — no unbounded stack growth, no unpaid traversal.
+          _    <- boundRawShape(propV, SigmaMaxProofNodes, SigmaMaxProofDepth, "sigma_verify.proposition")
+          prop <- parsePropNode(propV, "sigma_verify.proposition")
+          // FINDING #2 (DoS): the proof must MIRROR the proposition; its node count and depth may
+          // not exceed the proposition's (with the absolute cap as backstop). A tiny proposition +
+          // huge mismatched proof is rejected here, fast, BEFORE the expensive recursive proof parse
+          // (hex decode, on-curve checks, scalar mul) — only a bounded raw-tree walk runs. Because
+          // unknown fields are rejected at parse, the proposition's raw shape equals its semantic
+          // shape: no leaf carrying a bogus `children` field can inflate this bound (IMPL-2). The
+          // full mirror check (per-node type / child count) still happens in verifyNode.
           propShape = sigmaRawShape(propV)
           maxNodes = math.min(propShape._1, SigmaMaxProofNodes)
           maxDepth = math.min(propShape._2, SigmaMaxProofDepth)
-          _     <- boundProofShape(proofV, maxNodes, maxDepth)
+          _     <- boundRawShape(proofV, maxNodes, maxDepth, "sigma_verify.proof")
           proof <- parseProofNode(proofV, "sigma_verify.proof")
           // STRUCTURAL shape agreement (prop vs proof) is a hard error (encoding fault), checked
           // as we go below. The cryptographic outcome (true/false) is computed in verifyTree.
@@ -879,16 +912,17 @@ object CryptoOps {
   }
 
   /**
-   * FINDING #2: reject — BEFORE the expensive recursive proof parse — a proof whose raw node count
-   * or depth exceeds the proposition's (`maxNodes` / `maxDepth`). The walk aborts as soon as the
-   * running count/depth crosses the bound, so the work is O(min(proofSize, maxNodes)) — a tiny
-   * proposition can never force an unbounded proof traversal. This is purely structural (no hex /
-   * curve work); the per-node type and child-count mirror check is still enforced in verifyNode.
+   * Reject — BEFORE the expensive recursive parse — a raw sigma tree whose node count or depth
+   * exceeds (`maxNodes` / `maxDepth`). Applied to the proposition with the absolute caps (IMPL-1)
+   * and to the proof with the proposition-derived caps (FINDING #2). The walk aborts as soon as the
+   * running count/depth crosses the bound, so the work is O(min(treeSize, maxNodes)) — a tiny
+   * proposition can never force an unbounded traversal. Purely structural (no hex / curve work); the
+   * per-node type and child-count mirror check is still enforced in verifyNode.
    */
-  private def boundProofShape(v: JsonLogicValue, maxNodes: Int, maxDepth: Int): Either[JsonLogicException, Unit] = {
+  private def boundRawShape(v: JsonLogicValue, maxNodes: Int, maxDepth: Int, role: String): Either[JsonLogicException, Unit] = {
     def tooLargeMsg: JsonLogicException =
       JsonLogicException(
-        s"sigma_verify.proof: proof tree exceeds the proposition's structure " +
+        s"$role: sigma tree exceeds the allowed structure " +
         s"(max $maxNodes nodes, depth $maxDepth) — rejected before traversal (DoS bound)"
       )
     // Returns Right(nodesSoFar) or Left as soon as a bound is crossed; `depth` is the current node depth (1-based).
@@ -917,6 +951,24 @@ object CryptoOps {
 
   private def sigmaField(role: String, m: Map[String, JsonLogicValue], key: String): Either[JsonLogicException, JsonLogicValue] =
     m.get(key).toRight(JsonLogicException(s"$role: missing required field '$key'"))
+
+  /**
+   * IMPL-2 / IMPL-5: reject any field outside the canonical schema for this node kind. This makes
+   * the raw proposition / proof encoding CANONICAL — no ignored field can (a) inflate the DoS
+   * shape bound by attaching a bogus `children` to a leaf (IMPL-2), or (b) leave the raw bytes
+   * ambiguous for logs / caches / external signing layers (IMPL-5). The verifier hashes only the
+   * semantic tree, so this is a strict-encoding control, not a Fiat-Shamir soundness fix.
+   */
+  private def sigmaRejectUnknownFields(
+    role: String,
+    m: Map[String, JsonLogicValue],
+    allowed: Set[String]
+  ): Either[JsonLogicException, Unit] =
+    m.keys.find(k => !allowed.contains(k)) match {
+      case Some(k) =>
+        JsonLogicException(s"$role: unknown field '$k' (allowed: ${allowed.toList.sorted.mkString(", ")})").asLeft
+      case None => ().asRight
+    }
 
   private def sigmaPoint(role: String, m: Map[String, JsonLogicValue], key: String): Either[JsonLogicException, (Bn254.G1, Array[Byte])] =
     for {
@@ -947,9 +999,13 @@ object CryptoOps {
       case MapValue(m) =>
         sigmaField(role, m, "type").flatMap(expectStr(s"$role.type")).flatMap {
           case "dlog" =>
-            sigmaPoint(role, m, "pk").map { case (pk, b) => Sigma.PropDlog(pk, b) }
+            for {
+              _  <- sigmaRejectUnknownFields(role, m, Set("type", "pk"))
+              pk <- sigmaPoint(role, m, "pk")
+            } yield Sigma.PropDlog(pk._1, pk._2)
           case "dhtuple" =>
             for {
+              _  <- sigmaRejectUnknownFields(role, m, Set("type", "g", "h", "u", "v"))
               g  <- sigmaPoint(role, m, "g")
               h  <- sigmaPoint(role, m, "h")
               u  <- sigmaPoint(role, m, "u")
@@ -957,16 +1013,19 @@ object CryptoOps {
             } yield Sigma.PropDhTuple(g._1, h._1, u._1, vv._1, g._2, h._2, u._2, vv._2)
           case "and" =>
             for {
+              _        <- sigmaRejectUnknownFields(role, m, Set("type", "children"))
               cs       <- sigmaChildrenValues(role, m)
               children <- cs.zipWithIndex.traverse { case (c, i) => parsePropNode(c, s"$role.and[$i]") }
             } yield Sigma.PropAnd(children)
           case "or" =>
             for {
+              _        <- sigmaRejectUnknownFields(role, m, Set("type", "children"))
               cs       <- sigmaChildrenValues(role, m)
               children <- cs.zipWithIndex.traverse { case (c, i) => parsePropNode(c, s"$role.or[$i]") }
             } yield Sigma.PropOr(children)
           case "threshold" =>
             for {
+              _        <- sigmaRejectUnknownFields(role, m, Set("type", "k", "children"))
               k        <- sigmaInt(role, m, "k")
               cs       <- sigmaChildrenValues(role, m)
               children <- cs.zipWithIndex.traverse { case (c, i) => parsePropNode(c, s"$role.threshold[$i]") }
@@ -1011,20 +1070,31 @@ object CryptoOps {
           e   <- sigmaChallenge(role, m)
           typ <- sigmaField(role, m, "type").flatMap(expectStr(s"$role.type"))
           node <- typ match {
-            case "dlog"    => sigmaResponse(role, m).map(z => Sigma.ProofDlog(e, z))
-            case "dhtuple" => sigmaResponse(role, m).map(z => Sigma.ProofDhTuple(e, z))
+            case "dlog" =>
+              for {
+                _ <- sigmaRejectUnknownFields(role, m, Set("type", "e", "z"))
+                z <- sigmaResponse(role, m)
+              } yield Sigma.ProofDlog(e, z)
+            case "dhtuple" =>
+              for {
+                _ <- sigmaRejectUnknownFields(role, m, Set("type", "e", "z"))
+                z <- sigmaResponse(role, m)
+              } yield Sigma.ProofDhTuple(e, z)
             case "and" =>
               for {
+                _        <- sigmaRejectUnknownFields(role, m, Set("type", "e", "children"))
                 cs       <- sigmaChildrenValues(role, m)
                 children <- cs.zipWithIndex.traverse { case (c, i) => parseProofNode(c, s"$role.and[$i]") }
               } yield Sigma.ProofAnd(e, children)
             case "or" =>
               for {
+                _        <- sigmaRejectUnknownFields(role, m, Set("type", "e", "children"))
                 cs       <- sigmaChildrenValues(role, m)
                 children <- cs.zipWithIndex.traverse { case (c, i) => parseProofNode(c, s"$role.or[$i]") }
               } yield Sigma.ProofOr(e, children)
             case "threshold" =>
               for {
+                _        <- sigmaRejectUnknownFields(role, m, Set("type", "e", "k", "children"))
                 k        <- sigmaInt(role, m, "k")
                 cs       <- sigmaChildrenValues(role, m)
                 children <- cs.zipWithIndex.traverse { case (c, i) => parseProofNode(c, s"$role.threshold[$i]") }
@@ -1046,8 +1116,8 @@ object CryptoOps {
    *
    * Flow: (1) recursively check the CDS challenge-split relations top-down and reconstruct every
    * leaf commitment bottom-up; (2) serialize the WHOLE tree (statement points + reconstructed
-   * commitments) under the frozen layout; (3) hash (domain-separated, mod R) and accept iff it
-   * equals the ROOT challenge carried in the proof.
+   * commitments) under the frozen layout; (3) hash (domain-separated) and take the low-order 31
+   * bytes (low31, NO mod-R reduction) and accept iff it equals the ROOT challenge in the proof.
    */
   private def verifyTree(prop: Sigma.PropNode, proof: Sigma.ProofNode, msg: Array[Byte]): Either[JsonLogicException, Boolean] =
     for {

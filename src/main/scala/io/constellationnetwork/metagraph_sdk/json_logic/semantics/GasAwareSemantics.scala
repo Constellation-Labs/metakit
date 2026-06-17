@@ -6,6 +6,7 @@ import cats.syntax.all._
 import io.constellationnetwork.metagraph_sdk.json_logic.core.JsonLogicOp._
 import io.constellationnetwork.metagraph_sdk.json_logic.core._
 import io.constellationnetwork.metagraph_sdk.json_logic.gas.{GasConfig, GasCost, GasLimit, JsonLogicGasEstimator}
+import io.constellationnetwork.metagraph_sdk.json_logic.ops.CryptoOps
 import io.constellationnetwork.metagraph_sdk.json_logic.ops.NumericOps.floatToPlainString
 import io.constellationnetwork.metagraph_sdk.json_logic.runtime.ResultContext
 
@@ -323,28 +324,39 @@ object GasAwareSemantics {
        * Count `(dlogLeaves, dhtupleLeaves, connectiveNodes)` in a sigma_verify proposition tree, to
        * pre-charge per-leaf / per-node gas from the shape. Recognises the same node schema the
        * verifier parses (`{"type": dlog|dhtuple|and|or|threshold, ...}`); any unrecognised shape
-       * contributes 0 (the verifier will raise the structural fault). Bounded recursion over the
-       * already-materialised value tree.
+       * contributes 0 (the verifier will raise the structural fault).
+       *
+       * IMPL-1 (gas-side DoS): this walk runs in the pre-charge BEFORE gas is consumed, on the
+       * attacker-supplied proposition. Cap its RECURSION DEPTH with the same absolute bound the
+       * verifier enforces (`CryptoOps.SigmaMaxProofDepth`) so a deeply nested proposition cannot
+       * drive unbounded stack growth here. Width is naturally priced — a very wide tree counts many
+       * leaves → high cost → out-of-gas — and the verifier's `boundRawShape` rejects anything over
+       * `SigmaMaxProofNodes` / `SigmaMaxProofDepth` before any curve work.
        */
-      private def sigmaPropShape(v: JsonLogicValue): (Int, Int, Int) = v match {
-        case MapValue(m) =>
-          m.get("type") match {
-            case Some(StrValue("dlog"))    => (1, 0, 0)
-            case Some(StrValue("dhtuple")) => (0, 1, 0)
-            case Some(StrValue("and")) | Some(StrValue("or")) | Some(StrValue("threshold")) =>
-              val children = m.get("children") match {
-                case Some(ArrayValue(cs)) => cs
-                case _                    => Nil
-              }
-              children.foldLeft((0, 0, 1)) {
-                case ((d, t, n), c) =>
-                  val (cd, ct, cn) = sigmaPropShape(c)
-                  (d + cd, t + ct, n + cn)
+      private def sigmaPropShape(v: JsonLogicValue): (Int, Int, Int) = sigmaPropShape(v, 1)
+
+      private def sigmaPropShape(v: JsonLogicValue, depth: Int): (Int, Int, Int) =
+        if (depth > CryptoOps.SigmaMaxProofDepth) (0, 0, 0)
+        else
+          v match {
+            case MapValue(m) =>
+              m.get("type") match {
+                case Some(StrValue("dlog"))    => (1, 0, 0)
+                case Some(StrValue("dhtuple")) => (0, 1, 0)
+                case Some(StrValue("and")) | Some(StrValue("or")) | Some(StrValue("threshold")) =>
+                  val children = m.get("children") match {
+                    case Some(ArrayValue(cs)) => cs
+                    case _                    => Nil
+                  }
+                  children.foldLeft((0, 0, 1)) {
+                    case ((d, t, n), c) =>
+                      val (cd, ct, cn) = sigmaPropShape(c, depth + 1)
+                      (d + cd, t + ct, n + cn)
+                  }
+                case _ => (0, 0, 0)
               }
             case _ => (0, 0, 0)
           }
-        case _ => (0, 0, 0)
-      }
 
       /**
        * Residual size-scaled cost that is only observable on the PRODUCED value and cannot be

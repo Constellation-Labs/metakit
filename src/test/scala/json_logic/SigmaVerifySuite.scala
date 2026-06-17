@@ -26,8 +26,9 @@ import weaver.SimpleIOSuite
  * disagree, the bug is in one of those two surfaces (never weaken a soundness test to hide it).
  *
  * Round-trip TRUE cases prove completeness; the SOUNDNESS NEGATIVES (forge-by-simulating-all,
- * known-too-few-threshold-witnesses, wrong message, tampered response/commitment, off-by-one
- * threshold degree, duplicate/out-of-range share index) prove the dangerous-bug surface is closed.
+ * known-too-few-threshold-witnesses, wrong message, tampered response/commitment, broken AND/OR
+ * challenge-split relations) prove the dangerous-bug surface is closed. (Threshold share indices are
+ * IMPLICIT child positions — there are no explicit indices to duplicate.)
  */
 object SigmaVerifySuite extends SimpleIOSuite {
 
@@ -536,6 +537,66 @@ object SigmaVerifySuite extends SimpleIOSuite {
       s"""{"type":"and","e":"$e","children":[$inner]}"""
     }
     evalSigma(prop, nested, msgHex).map(r => expect(r.isLeft))
+  }
+
+  // ===========================================================================
+  // HARDENING (audit 2026-06-17): canonical encoding + DoS bounds.
+  //   IMPL-1 proposition bounded BEFORE parse; IMPL-2/5 unknown fields rejected;
+  //   IMPL-3 message length capped. Each pairs a CLEAN baseline (parses -> Right)
+  //   with the malformed variant (-> Left) to isolate the new rejection as the cause.
+  // ===========================================================================
+
+  private val anyProof: String =
+    s"""{"type":"dlog","e":"${hexChallenge(BigInt(1))}","z":"${hex32(BigInt(1))}"}"""
+
+  test("IMPL-2/5: an unknown field on a proposition leaf is rejected (was silently ignored)") {
+    val clean = s"""{"type":"dlog","pk":"${encG1(g1)}"}"""
+    val dirty = s"""{"type":"dlog","pk":"${encG1(g1)}","bogus":"0x01"}"""
+    for {
+      a <- evalSigma(clean, anyProof, msgHex)
+      b <- evalSigma(dirty, anyProof, msgHex)
+    } yield expect(a.isRight).and(expect(b.isLeft))
+  }
+
+  test("IMPL-2/5: an unknown field on a proof node is rejected") {
+    val prop = s"""{"type":"dlog","pk":"${encG1(g1)}"}"""
+    val dirtyProof = s"""{"type":"dlog","e":"${hexChallenge(BigInt(1))}","z":"${hex32(BigInt(1))}","bogus":"0x01"}"""
+    for {
+      a <- evalSigma(prop, anyProof, msgHex)
+      b <- evalSigma(prop, dirtyProof, msgHex)
+    } yield expect(a.isRight).and(expect(b.isLeft))
+  }
+
+  test("IMPL-2: a leaf carrying a bogus 'children' field is rejected (no proof-bound inflation)") {
+    // Previously: `children` on a leaf was IGNORED by the parser but COUNTED by the raw-shape walk,
+    // inflating the allowed proof size without paying Sigma-tree gas. Now an unknown field => reject.
+    val child = s"""{"type":"dlog","pk":"${encG1(g1)}"}"""
+    val dirtyLeaf = s"""{"type":"dlog","pk":"${encG1(g1)}","children":[${List.fill(100)(child).mkString(",")}]}"""
+    evalSigma(dirtyLeaf, anyProof, msgHex).map(r => expect(r.isLeft))
+  }
+
+  test("IMPL-1: a proposition nested beyond the depth cap is rejected before parse") {
+    val leaf = s"""{"type":"dlog","pk":"${encG1(g1)}"}"""
+    val deepProp = (0 until (CryptoOps.SigmaMaxProofDepth + 5)).foldLeft(leaf) { (inner, _) =>
+      s"""{"type":"and","children":[$inner]}"""
+    }
+    evalSigma(deepProp, anyProof, msgHex).map(r => expect(r.isLeft))
+  }
+
+  test("IMPL-1: a proposition exceeding the node cap is rejected before parse") {
+    val child = s"""{"type":"dlog","pk":"${encG1(g1)}"}"""
+    val wideProp = s"""{"type":"and","children":[${List.fill(CryptoOps.SigmaMaxProofNodes + 10)(child).mkString(",")}]}"""
+    evalSigma(wideProp, anyProof, msgHex).map(r => expect(r.isLeft))
+  }
+
+  test("IMPL-3: an over-long sigma message is rejected (DoS bound)") {
+    val prop = s"""{"type":"dlog","pk":"${encG1(g1)}"}"""
+    val okMsg = HexBytes.encodeBytes(Array.fill(CryptoOps.SigmaMaxMessageBytes)(0.toByte))
+    val bigMsg = HexBytes.encodeBytes(Array.fill(CryptoOps.SigmaMaxMessageBytes + 1)(0.toByte))
+    for {
+      a <- evalSigma(prop, anyProof, okMsg)
+      b <- evalSigma(prop, anyProof, bigMsg)
+    } yield expect(a.isRight).and(expect(b.isLeft))
   }
 
   // ===========================================================================
