@@ -49,7 +49,9 @@ object CryptoOpsTotalitySuite extends SimpleIOSuite with Checkers {
   // potential throw happens INSIDE catchNonFatal, not at the call site).
   // ===========================================================================
 
-  private def assertNoThrow(label: String)(thunk: => Either[JsonLogicException, JsonLogicValue])(implicit loc: SourceLocation): Expectations =
+  private def assertNoThrow(
+    label: String
+  )(thunk: => Either[JsonLogicException, JsonLogicValue])(implicit loc: SourceLocation): Expectations =
     Either.catchNonFatal(thunk) match {
       case Right(_) => success // returned Left or Right — TOTAL
       case Left(t)  => failure(s"$label THREW (totality violation): $t")
@@ -78,22 +80,22 @@ object CryptoOpsTotalitySuite extends SimpleIOSuite with Checkers {
   private val hexStringGen: Gen[String] = Gen.oneOf(
     Gen.const("0x"), // empty body
     Gen.const("0x00"),
-    Gen.const("0xabc"),                                                // odd-length nibble
-    Gen.const("0xZZ"),                                                 // non-hex chars
-    Gen.const("not-hex-at-all"),                                       // missing 0x prefix
-    Gen.const("0X00"),                                                 // uppercase prefix
-    Gen.const("0xDEADBEEF"),                                           // uppercase digits
-    Gen.const("0x" + "00" * 32),                                       // 32-byte (Fr / scalar / challenge widths)
-    Gen.const("0x" + "ff" * 32),                                       // 32-byte all-ones (>= R as a scalar)
-    Gen.const("0x" + "00" * 31),                                       // 31-byte (the sigma challenge width)
-    Gen.const("0x" + "00" * 64),                                       // 64-byte (G1 / identity)
-    Gen.const("0x" + "00" * 128),                                      // 128-byte (G2 / identity)
-    Gen.const("0x" + "11" * 64),                                       // 64-byte off-curve-ish pattern
+    Gen.const("0xabc"), // odd-length nibble
+    Gen.const("0xZZ"), // non-hex chars
+    Gen.const("not-hex-at-all"), // missing 0x prefix
+    Gen.const("0X00"), // uppercase prefix
+    Gen.const("0xDEADBEEF"), // uppercase digits
+    Gen.const("0x" + "00" * 32), // 32-byte (Fr / scalar / challenge widths)
+    Gen.const("0x" + "ff" * 32), // 32-byte all-ones (>= R as a scalar)
+    Gen.const("0x" + "00" * 31), // 31-byte (the sigma challenge width)
+    Gen.const("0x" + "00" * 64), // 64-byte (G1 / identity)
+    Gen.const("0x" + "00" * 128), // 128-byte (G2 / identity)
+    Gen.const("0x" + "11" * 64), // 64-byte off-curve-ish pattern
     Gen.const(HexBytes.encodeG1(BigInt(1), BigInt(1)).getOrElse("0x")), // genuine off-curve point (1,1)
-    Gen.const(HexBytes.encodeBytes(Array.fill[Byte](96)(0x01))),       // 96-byte (schnorr proof width)
-    Gen.const(HexBytes.encodeBytes(Array.fill[Byte](160)(0x02))),      // 160-byte (dhtuple proof width)
-    Gen.choose(0, 200).map(n => "0x" + "ab" * n),                      // arbitrary even width
-    Gen.choose(0, 401).map(n => "0x" + ("a" * n))                      // arbitrary (often odd) nibble count
+    Gen.const(HexBytes.encodeBytes(Array.fill[Byte](96)(0x01))), // 96-byte (schnorr proof width)
+    Gen.const(HexBytes.encodeBytes(Array.fill[Byte](160)(0x02))), // 160-byte (dhtuple proof width)
+    Gen.choose(0, 200).map(n => "0x" + "ab" * n), // arbitrary even width
+    Gen.choose(0, 401).map(n => "0x" + ("a" * n)) // arbitrary (often odd) nibble count
   )
 
   // A bounded random JsonLogicValue: primitives, nested arrays/maps, hex strings, sigma-ish keys.
@@ -131,18 +133,19 @@ object CryptoOpsTotalitySuite extends SimpleIOSuite with Checkers {
       pk <- hexStringGen
       e  <- hexStringGen
       z  <- hexStringGen
-    } yield MapValue(
-      Map(
-        "type" -> StrValue(t),
-        "pk"   -> StrValue(pk),
-        "g"    -> StrValue(pk),
-        "h"    -> StrValue(pk),
-        "u"    -> StrValue(pk),
-        "v"    -> StrValue(pk),
-        "e"    -> StrValue(e),
-        "z"    -> StrValue(z)
-      )
-    ): JsonLogicValue
+    } yield
+      MapValue(
+        Map(
+          "type" -> StrValue(t),
+          "pk"   -> StrValue(pk),
+          "g"    -> StrValue(pk),
+          "h"    -> StrValue(pk),
+          "u"    -> StrValue(pk),
+          "v"    -> StrValue(pk),
+          "e"    -> StrValue(e),
+          "z"    -> StrValue(z)
+        )
+      ): JsonLogicValue
     if (depth <= 0) leafFields
     else
       Gen.frequency(
@@ -153,14 +156,15 @@ object CryptoOpsTotalitySuite extends SimpleIOSuite with Checkers {
           e  <- hexStringGen
           n  <- Gen.choose(0, 5)
           cs <- Gen.listOfN(n, sigmaNodeGen(depth - 1))
-        } yield MapValue(
-          Map(
-            "type"     -> StrValue(t),
-            "k"        -> IntValue(BigInt(k)),
-            "e"        -> StrValue(e),
-            "children" -> ArrayValue(cs)
-          )
-        ): JsonLogicValue)
+        } yield
+          MapValue(
+            Map(
+              "type"     -> StrValue(t),
+              "k"        -> IntValue(BigInt(k)),
+              "e"        -> StrValue(e),
+              "children" -> ArrayValue(cs)
+            )
+          ): JsonLogicValue)
       )
   }
 
@@ -232,13 +236,13 @@ object CryptoOpsTotalitySuite extends SimpleIOSuite with Checkers {
     def point(kind: Int): Bn254.G1 = (kind % 4) match {
       case 0 => g1
       case 1 => Bn254.G1(BigInteger.ZERO, BigInteger.ZERO) // identity / point-at-infinity
-      case 2 => Bn254.G1(BigInteger.ONE, BigInteger.ONE)   // off-curve
-      case _ => g1.multiply(BigInteger.valueOf(7L))        // a small multiple
+      case 2 => Bn254.G1(BigInteger.ONE, BigInteger.ONE) // off-curve
+      case _ => g1.multiply(BigInteger.valueOf(7L)) // a small multiple
     }
     def scalar(kind: Int): BigInt = (kind % 5) match {
       case 0 => BigInt(0)
-      case 1 => R         // == R
-      case 2 => R + 1     // > R
+      case 1 => R // == R
+      case 2 => R + 1 // > R
       case 3 => R * 3 + 7 // well over R
       case _ => BigInt(-5) // negative
     }
@@ -445,17 +449,17 @@ object CryptoOpsTotalitySuite extends SimpleIOSuite with Checkers {
         "shape-mismatch"    -> List(dlogProp, node("type" -> s("dhtuple"), "e" -> s(challenge31), "z" -> s("0x" + "00" * 32)), s("0x00")),
         "child-mismatch" -> List(
           node("type" -> s("and"), "children" -> ArrayValue(List(dlogProp, dlogProp))),
-          node("type" -> s("and"), "e" -> s(challenge31), "children" -> ArrayValue(List(dlogProof))),
+          node("type" -> s("and"), "e"        -> s(challenge31), "children" -> ArrayValue(List(dlogProof))),
           s("0x00")
         ),
         "threshold-k>n" -> List(
           node("type" -> s("threshold"), "k" -> i(5), "children" -> ArrayValue(List(dlogProp, dlogProp))),
-          node("type" -> s("threshold"), "k" -> i(5), "e" -> s(challenge31), "children" -> ArrayValue(List(dlogProof, dlogProof))),
+          node("type" -> s("threshold"), "k" -> i(5), "e"        -> s(challenge31), "children" -> ArrayValue(List(dlogProof, dlogProof))),
           s("0x00")
         ),
         "threshold-k<=0" -> List(
           node("type" -> s("threshold"), "k" -> i(0), "children" -> ArrayValue(List(dlogProp))),
-          node("type" -> s("threshold"), "k" -> i(0), "e" -> s(challenge31), "children" -> ArrayValue(List(dlogProof))),
+          node("type" -> s("threshold"), "k" -> i(0), "e"        -> s(challenge31), "children" -> ArrayValue(List(dlogProof))),
           s("0x00")
         ),
         "huge-mismatched-proof" -> List(
@@ -465,7 +469,9 @@ object CryptoOpsTotalitySuite extends SimpleIOSuite with Checkers {
         ),
         "deeply-nested" -> List(
           (0 until 80).foldLeft(dlogProp)((acc, _) => node("type" -> s("and"), "children" -> ArrayValue(List(acc)))),
-          (0 until 80).foldLeft(dlogProof)((acc, _) => node("type" -> s("and"), "e" -> s(challenge31), "children" -> ArrayValue(List(acc)))),
+          (0 until 80).foldLeft(dlogProof)((acc, _) =>
+            node("type" -> s("and"), "e" -> s(challenge31), "children" -> ArrayValue(List(acc)))
+          ),
           s("0x00")
         ),
         "bad-msg-hex" -> List(dlogProp, dlogProof, s("0xZZ"))
