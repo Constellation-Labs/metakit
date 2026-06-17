@@ -22,8 +22,9 @@
 ## §0. Status & maturity — live, not yet externally audited
 
 The three Σ-protocol opcodes (`prove_dlog_verify`, `prove_dhtuple_verify`, `sigma_verify`) are
-**implemented and registered live** on the default JLVM dispatch in both implementations (metakit
-Scala reference + metakit-sdk Rust). There is **no feature flag and no opt-in**: a call dispatches
+**implemented and registered live** on the default JLVM dispatch in all three implementations
+(metakit Scala reference + metakit-sdk Rust + metakit-sdk TypeScript). There is **no feature flag
+and no opt-in**: a call dispatches
 straight to the verifier in production, in tests, and in the conformance / differential harness
 alike. Malformed input is a hard error and a cryptographically-invalid proof returns `false` (the
 error-vs-`false` discipline of §5) — the opcodes never silently pass.
@@ -97,8 +98,8 @@ then runs the non-interactive CDS verifier. The algorithm is the Ergo `SigSerial
 `verifySignature` flow, restated for BN254 G1:
 
 1. **Parse** the proposition tree (connectives + leaves) and the proof tree (the per-node challenges
-   and per-leaf `(commitment, response)` pairs). Reject structurally malformed input as a **hard
-   error** (see §5, error-vs-false).
+   and per-leaf responses; commitments are **not** carried in the proof — they are reconstructed in
+   step 4). Reject structurally malformed input as a **hard error** (see §5, error-vs-false).
 2. **Compute the root challenge** that the *whole* proof must be consistent with. In the
    non-interactive setting this is **not** read from the proof — it is **recomputed** at the end
    (step 6) and compared. During top-down propagation we use the challenges carried in the proof.
@@ -243,8 +244,11 @@ The fix makes the challenge↔scalar map a bijection:
 
 This serialization is the part most likely to diverge silently between the metakit verifier and the
 metakit-sdk prover, so it gets its own conformance vectors (cf. `docs/mpt-spec`, `docs/sig-spec`):
-a fixed set of `(proposition, proof, message) → bool` vectors checked into a shared
-`sigma_opcode_test_vectors.json`, plus a serialization-only vector set (`tree → canonicalBytes`).
+the `sigma_dlog` / `sigma_dhtuple` / `sigma` categories of the shared `zk_opcode_test_vectors.json`
+(checked into metakit `src/test/resources/conformance/` and mirrored into metakit-sdk `shared/`) — a
+fixed set of `(proposition, proof, message) → bool` cases plus `error` cases. The `sigma` category
+**is** the frozen serialization byte-contract: the Rust and TypeScript ports must reproduce every
+expected value, and reject every `error` case, identically.
 
 ---
 
@@ -346,11 +350,24 @@ shape, so — exactly like `bn254_pairing`'s per-pair and `bls_aggregate_verify`
 the gas-aware layer derives the per-element counts from the (already-evaluated) argument values and
 pre-charges them in `getInputScaledCost` before dispatching to the verifier. New `GasConfig` fields:
 `sigmaVerify` (base), `sigmaVerifyPerDlogLeaf`, `sigmaVerifyPerDhtupleLeaf`, `sigmaVerifyPerNode`
-(and the estimator `baseCost` mapping). This is the DoS bound for the opcode. In addition, the proof
-tree is structurally bounded BEFORE the recursive proof parse (hex decode / curve work): its node
-count and depth must not exceed the proposition's, with hard backstop caps of **4096 nodes / 64
-depth** (`SigmaMaxProofNodes` / `SigmaMaxProofDepth`). A tiny proposition + huge mismatched proof is
-rejected fast by this bound (a hard error), having done only a bounded raw-tree walk.
+(and the estimator `baseCost` mapping). This is the DoS bound for the opcode. In addition:
+
+- **Proposition bound (before parse).** The proposition's raw node count and depth are bounded by a
+  cheap early-aborting walk with the hard caps **4096 nodes / 64 depth** (`SigmaMaxProofNodes` /
+  `SigmaMaxProofDepth`) BEFORE the recursive `parsePropNode` runs, and the gas estimator's
+  proposition-shape walk is depth-capped by the same value — so a deeply nested / very wide
+  proposition cannot drive unbounded stack/CPU work in either the parser or the pre-charge.
+- **Proof bound (before parse).** The proof tree is structurally bounded BEFORE the recursive proof
+  parse (hex decode / curve work): its node count and depth must not exceed the proposition's, with
+  the same hard backstop caps. A tiny proposition + huge mismatched proof is rejected fast (a hard
+  error), having done only a bounded raw-tree walk.
+- **Message cap.** The message is capped at **4096 bytes** (`SigmaMaxMessageBytes`, shared by
+  `sigma_verify` and `prove_dhtuple_verify`) so it cannot force unbounded hex-decode / SHA-256 work
+  outside the Sigma-tree pricing.
+- **Canonical node encoding.** Every proposition / proof node rejects fields outside its schema
+  (`type`, plus `pk` | `g,h,u,v` | `children` | `k` | `e,z` as applicable). This keeps the raw
+  encoding canonical (no ignored bytes for logs / caches / external signing layers) and removes the
+  bound-inflation surface (a leaf can no longer carry an ignored `children` field).
 
 ---
 
