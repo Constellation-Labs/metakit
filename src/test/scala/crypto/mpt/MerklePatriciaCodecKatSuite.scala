@@ -43,9 +43,9 @@ object MerklePatriciaCodecKatSuite extends SimpleIOSuite {
 
   pureTest("MPT commitment ADT = {type, contents}, type discriminates, round-trips") {
     val cases: List[(MerklePatriciaCommitment, String)] = List(
-      MerklePatriciaCommitment.Leaf(Seq(nA), h1)            -> "Leaf",
-      MerklePatriciaCommitment.Branch(Map(nA -> h1))        -> "Branch",
-      MerklePatriciaCommitment.Extension(Seq(n1), h1)       -> "Extension"
+      MerklePatriciaCommitment.Leaf(Seq(nA), h1)      -> "Leaf",
+      MerklePatriciaCommitment.Branch(Map(nA -> h1))  -> "Branch",
+      MerklePatriciaCommitment.Extension(Seq(n1), h1) -> "Extension"
     )
     cases.foldLeft(success) {
       case (acc, (c, tag)) =>
@@ -77,12 +77,12 @@ object MerklePatriciaCodecKatSuite extends SimpleIOSuite {
       branch <- MerklePatriciaNode.Branch[IO](Map(nA -> leaf))
       ext    <- MerklePatriciaNode.Extension[IO](Seq(n1), branch)
     } yield {
-      val leafBare   = (leaf: MerklePatriciaNode.Leaf).asJson
+      val leafBare = (leaf: MerklePatriciaNode.Leaf).asJson
       val branchBare = (branch: MerklePatriciaNode.Branch).asJson
-      val extBare    = (ext: MerklePatriciaNode.Extension).asJson
-      val leafAdt    = (leaf: MerklePatriciaNode).asJson
-      val branchAdt  = (branch: MerklePatriciaNode).asJson
-      val extAdt     = (ext: MerklePatriciaNode).asJson
+      val extBare = (ext: MerklePatriciaNode.Extension).asJson
+      val leafAdt = (leaf: MerklePatriciaNode).asJson
+      val branchAdt = (branch: MerklePatriciaNode).asJson
+      val extAdt = (ext: MerklePatriciaNode).asJson
       expect(keys(leafBare) == List("remaining", "data", "digest"))
         .and(expect(keys(branchBare) == List("paths", "digest")))
         .and(expect(keys(extBare) == List("shared", "child", "digest")))
@@ -101,7 +101,7 @@ object MerklePatriciaCodecKatSuite extends SimpleIOSuite {
       leaf <- MerklePatriciaNode.Leaf[IO](Seq(nA), Json.fromString("payload"))
     } yield {
       val trie = MerklePatriciaTrie(leaf)
-      val j    = trie.asJson
+      val j = trie.asJson
       expect(keys(j) == List("rootNode"))
         .and(expect(decode[MerklePatriciaTrie](j.noSpaces) == Right(trie)))
     }

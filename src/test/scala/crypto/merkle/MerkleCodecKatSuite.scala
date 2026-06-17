@@ -68,10 +68,10 @@ object MerkleCodecKatSuite extends SimpleIOSuite {
       leaf     <- MerkleNode.Leaf[IO](Json.fromString("payload"))
       internal <- MerkleNode.Internal[IO](leaf, None)
     } yield {
-      val leafBare     = (leaf: MerkleNode.Leaf).asJson
+      val leafBare = (leaf: MerkleNode.Leaf).asJson
       val internalBare = (internal: MerkleNode.Internal).asJson
-      val leafAdt      = (leaf: MerkleNode).asJson
-      val internalAdt  = (internal: MerkleNode).asJson
+      val leafAdt = (leaf: MerkleNode).asJson
+      val internalAdt = (internal: MerkleNode).asJson
       expect(keys(leafBare) == List("data", "digest"))
         .and(expect(keys(internalBare) == List("left", "right", "digest")))
         .and(expect(keys(leafAdt) == List("type", "contents")))
@@ -86,7 +86,7 @@ object MerkleCodecKatSuite extends SimpleIOSuite {
     for {
       tree <- MerkleTree.create[IO, String](List("a", "b", "c"))
     } yield {
-      val j    = tree.asJson
+      val j = tree.asJson
       val idx0 = j.hcursor.downField("leafDigestIndex").downN(0).focus.getOrElse(Json.Null)
       expect(keys(j) == List("rootNode", "leafDigestIndex"))
         .and(expect(keys(idx0) == List("digest", "index")))
