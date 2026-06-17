@@ -99,7 +99,7 @@ object SparseMerkleNodeOps {
 
         case leaf: SparseMerkleNode.Leaf =>
           if (leaf.position == position)
-            Right(SparseMerkleProof.Inclusion(key, leaf.value, leaf.valueDigest, acc.reverse))
+            Right(SparseMerkleProof.Inclusion(key, Hex.fromBytes(leaf.value), leaf.valueDigest, acc.reverse))
           else
             Right(
               SparseMerkleProof.Absence(

@@ -86,7 +86,7 @@ object LevelDbSparseMerkleTreeSuite extends SimpleIOSuite {
                 verifier.verify(rootAfter, incl).map {
                   case Right(v) =>
                     v.value match {
-                      case SparseMerkleEntry.Present(k, value) => expect(k === probeKey) && expect(value.sameElements(probeValue))
+                      case SparseMerkleEntry.Present(k, value) => expect(k === probeKey) && expect(value.toBytes.sameElements(probeValue))
                       case other                               => failure(s"expected Present, got $other")
                     }
                   case Left(err) => failure(s"verify rejected a valid inclusion after reload: $err")

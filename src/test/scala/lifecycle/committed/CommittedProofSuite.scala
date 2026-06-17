@@ -96,7 +96,7 @@ object CommittedProofSuite extends SimpleIOSuite {
     } yield
       expect.all(
         current.value match {
-          case SparseMerkleEntry.Present(_, value) => value.sameElements(CommitCatalog.rootValueBytes(c2.roots.mptRoot))
+          case SparseMerkleEntry.Present(_, value) => value.toBytes.sameElements(CommitCatalog.rootValueBytes(c2.roots.mptRoot))
           case _                                   => false
         },
         absentProof.isInstanceOf[SparseMerkleProof.Absence],

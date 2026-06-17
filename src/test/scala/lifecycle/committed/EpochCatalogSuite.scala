@@ -4,6 +4,7 @@ import cats.effect.IO
 import cats.syntax.all._
 
 import io.constellationnetwork.schema.SnapshotOrdinal
+import io.constellationnetwork.security.hex.Hex
 
 import weaver.SimpleIOSuite
 
@@ -110,7 +111,7 @@ object EpochCatalogSuite extends SimpleIOSuite {
       proof <- c.proveOrdinal(ord(2)).flatMap(IO.fromEither(_))
       tampered = proof.hot match {
         case i: io.constellationnetwork.metagraph_sdk.crypto.smt.SparseMerkleProof.Inclusion =>
-          proof.copy(hot = i.copy(value = i.value.map(b => (b ^ 0x01).toByte)))
+          proof.copy(hot = i.copy(value = Hex.fromBytes(i.value.toBytes.map(b => (b ^ 0x01).toByte))))
         case other => proof.copy(hot = other)
       }
       result <- OrdinalCatalogProofVerifier.verify[IO](c.roots.catalogRoot, tampered, config.epochSize)

@@ -102,16 +102,14 @@ sealed trait SparseMerkleProof extends Product with Serializable {
 
 object SparseMerkleProof {
 
-  final case class Inclusion(key: Hex, value: Array[Byte], valueDigest: Hash, siblings: List[SparseMerkleSibling]) extends SparseMerkleProof
+  final case class Inclusion(key: Hex, value: Hex, valueDigest: Hash, siblings: List[SparseMerkleSibling]) extends SparseMerkleProof
   final case class Absence(key: Hex, witness: AbsenceWitness, siblings: List[SparseMerkleSibling]) extends SparseMerkleProof
 
-  // Array[Byte] has no circe instances; encode value as a hex string, decode back byte-exactly.
-  private val valueEncoder: Encoder[Array[Byte]] = Encoder.instance(bytes => Hex.fromBytes(bytes).asJson)
-  private val valueDecoder: Decoder[Array[Byte]] = Decoder[Hex].map(_.toBytes)
-
-  // Structural Eq (value compared by content). For test assertions / dedup, never control flow.
+  // `value` is a `Hex` (tessellation) on the wire and in memory — NOT a raw `Array[Byte]`: Hex has a
+  // circe codec, structural equality, and is immutable, so the proof needs no custom value codec and
+  // no `sameElements` Eq. (The byte-exact value still binds via `Hash.fromBytes(value.toBytes)`.)
   implicit val eq: Eq[SparseMerkleProof] = Eq.instance {
-    case (Inclusion(k1, v1, d1, s1), Inclusion(k2, v2, d2, s2)) => k1 === k2 && v1.sameElements(v2) && d1 === d2 && s1 === s2
+    case (Inclusion(k1, v1, d1, s1), Inclusion(k2, v2, d2, s2)) => k1 === k2 && v1 === v2 && d1 === d2 && s1 === s2
     case (Absence(k1, w1, s1), Absence(k2, w2, s2))             => k1 === k2 && w1 === w2 && s1 === s2
     case _                                                      => false
   }
@@ -121,7 +119,7 @@ object SparseMerkleProof {
       Json.obj(
         "type"        -> Json.fromString("Inclusion"),
         "key"         -> key.asJson,
-        "value"       -> valueEncoder(value),
+        "value"       -> value.asJson,
         "valueDigest" -> valueDigest.asJson,
         "siblings"    -> siblings.asJson
       )
@@ -139,7 +137,7 @@ object SparseMerkleProof {
       case "Inclusion" =>
         for {
           key         <- c.downField("key").as[Hex]
-          value       <- c.downField("value").as[Array[Byte]](valueDecoder)
+          value       <- c.downField("value").as[Hex]
           valueDigest <- c.downField("valueDigest").as[Hash]
           siblings    <- c.downField("siblings").as[List[SparseMerkleSibling]]
         } yield Inclusion(key, value, valueDigest, siblings)
