@@ -286,6 +286,68 @@
       ]
     },
     {
+      "category" : "sigma",
+      "note" : "Σ-protocol opcodes (valid proofs from the ZK opcode vectors). The two fixed-arity leaves are flat: prove_dlog_verify = 45000, prove_dhtuple_verify = 85000 (plus depthPenalty(1) = 5). sigma_verify is the recursive CDS tree verifier: its cost is PRE-CHARGED from the proposition-tree SHAPE (arg 0) alone BEFORE any curve arithmetic — the DoS bound — as sigmaVerify base (45000) + sigmaVerifyPerDlogLeaf (45000) * #DLog-leaves + sigmaVerifyPerDhtupleLeaf (85000) * #DHTuple-leaves + sigmaVerifyPerNode (2000) * #connective-nodes (a connective counts as one node INCLUDING the root), plus depthPenalty(1) = 5.",
+      "cases" : [
+        {
+          "expr" : "{\"prove_dlog_verify\":[\"0x234403317325635150f68fd4b3403ae81e7513abee02b83478fb37c7ae1b47db0bf44b96107a81ab3b5192e1f2f920eb4fe6a382d6df663e8af2ae97cf8e3ae5\",\"0x617574686f72697a65207369676d61\",\"0x18186954bd891097c44985153dfbbee526e9bfa9798037c42e0e23ca023d5c942a9cb437b23ce7ff0d0a1dccabd0ec7619d7d045b3134a98f7d7eb34b3fd9a470948e25b19635a71ec3ab59cbcada6cdcab12b0976cc2845a7698bea3ee4373e\"]}",
+          "data" : "{}",
+          "gasLimit" : 1000000,
+          "expected" : 45005,
+          "note" : "prove_dlog_verify: flat 45000 + depth 5"
+        },
+        {
+          "expr" : "{\"prove_dhtuple_verify\":[\"0x0769bf9ac56bea3ff40232bcb1b6bd159315d84715b8e679f2d355961915abf02ab799bee0489429554fdb7c8d086475319e63b40b9c5b57cdf1ff3dd9fe2261\",\"0x17c139df0efee0f766bc0204762b774362e4ded88953a39ce849a8a7fa163fa901e0559bacb160664764a357af8a9fe70baa9258e0b959273ffc5718c6d4cc7c\",\"0x0e1c874e45561967a2255d53d8c6444a0d2f859fbfcc586b27dd7dc337c2e10f11f1d07e4d5bc331552d5f59b999550538f781e8a8df3228b9d53db15d8a693d\",\"0x1717922852aa5a8d41e3c07b1ce90113870477c783f9bae370c746025f65ba812b1bb9988842b379971a902c34b7aee5dda67bd19f4b41b44710a4fe88caf9b7\",\"0x617574686f72697a65207369676d61\",\"0x0722a7de245ee113dddc175f0bf85ead53dd5a43f37645627119583ddf8144200591c67a93b6586889248690c06e241da4babfea7d3c41760c4aa882d5f1587e1b18396c26fde54b88bb2a48f24949ea08ba52784050e5528020ca2a41226c0b18a2738401209982d27d737ea00ff07284abed2bd89d71a72332e7f83f6a4e6e085c3a8870fe4557b7ab0b6105d3677b9e19c56fa7fa4d0f52bd25032256477c\"]}",
+          "data" : "{}",
+          "gasLimit" : 1000000,
+          "expected" : 85005,
+          "note" : "prove_dhtuple_verify: flat 85000 + depth 5"
+        },
+        {
+          "expr" : "{\"sigma_verify\":[{\"type\":\"dlog\",\"pk\":\"0x14e2946f9ea29efcd6c8d3bc8ebce97aff2267495f19207d83a5a278b3d1b6750d6d60e75a6a4aef02b7c664972665bbdfa16ef85493ca2cc449eea611b9ed31\"},{\"type\":\"dlog\",\"e\":\"0xc96165908da06f904b1a9daac294f7da4130bf3ed75e21a94b6baaf90a6d9e\",\"z\":\"0x00f5311178e486968e899fc065809d9d77c44b1377ec18be8bd25be121546888\"},\"0x617574686f72697a65207369676d61\"]}",
+          "data" : "{}",
+          "gasLimit" : 1000000,
+          "expected" : 90005,
+          "note" : "sigma_verify single DLog leaf: base 45000 + 1*45000 (dlog leaf) + depth 5"
+        },
+        {
+          "expr" : "{\"sigma_verify\":[{\"type\":\"dhtuple\",\"g\":\"0x0769bf9ac56bea3ff40232bcb1b6bd159315d84715b8e679f2d355961915abf02ab799bee0489429554fdb7c8d086475319e63b40b9c5b57cdf1ff3dd9fe2261\",\"h\":\"0x17c139df0efee0f766bc0204762b774362e4ded88953a39ce849a8a7fa163fa901e0559bacb160664764a357af8a9fe70baa9258e0b959273ffc5718c6d4cc7c\",\"u\":\"0x2eba7a08251112136606485e9ef2e55c89618b022ba2026780f015eb009781e320142996aa0765cc8c5ecbc54fe1d745894e84e61a65a8be30e940299d267428\",\"v\":\"0x1bc98a3a15f93ae006e031b63507c00fd6f754a3d6f3412f8aada736ee976c0218fc62bcab6e3d356c9dd7946c656177f41c17ef2cd02a3955df2c75ab227d70\"},{\"type\":\"dhtuple\",\"e\":\"0x3fe0d0b1df6a0bf4002ee511d375e9061b7d624dcae191541fbbf063e42416\",\"z\":\"0x0bfa271d61751a25e3bb37de9a120cb1651c2d90b6c8e15855c86cadd49f223c\"},\"0x617574686f72697a65207369676d61\"]}",
+          "data" : "{}",
+          "gasLimit" : 1000000,
+          "expected" : 130005,
+          "note" : "sigma_verify single DHTuple leaf: base 45000 + 1*85000 (dhtuple leaf) + depth 5"
+        },
+        {
+          "expr" : "{\"sigma_verify\":[{\"type\":\"and\",\"children\":[{\"type\":\"dlog\",\"pk\":\"0x17072b2ed3bb8d759a5325f477629386cb6fc6ecb801bd76983a6b86abffe078168ada6cd130dd52017bb54bfa19377aadfe3bf05d18f41b77809f7f60d4af9e\"},{\"type\":\"dhtuple\",\"g\":\"0x030644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd315ed738c0e0a7c92e7845f96b2ae9c0a68a6a449e3538fc7ff3ebf7a5a18a2c4\",\"h\":\"0x039730ea8dff1254c0fee9c0ea777d29a9c710b7e616683f194f18c43b43b869073a5ffcc6fc7a28c30723d6e58ce577356982d65b833a5a5c15bf9024b43d98\",\"u\":\"0x22c54997b1e4f7710df6e925b259327d9bb23b29af52a8ab9d271c846c1f20752a537682cb57be952ce98746dc33229fbcd6bf0d113e45ffd2df20cadcc748e9\",\"v\":\"0x236ecf67512dd8b3157d61220f369e1ed51043a80aeb449252b4d617386d792716105ce337dce18aa0a9894c354e9365c14d312625d14e3334128af51a477c1f\"}]},{\"type\":\"and\",\"e\":\"0x0d321e2a6f24e6d29c92120c67dc8c5d4c243d2da8f8054a0f5f47da44dce0\",\"children\":[{\"type\":\"dlog\",\"e\":\"0x0d321e2a6f24e6d29c92120c67dc8c5d4c243d2da8f8054a0f5f47da44dce0\",\"z\":\"0x212dc99017005026b6ccea441db9004cd93aacd7ac668c076589895da3132f4b\"},{\"type\":\"dhtuple\",\"e\":\"0x0d321e2a6f24e6d29c92120c67dc8c5d4c243d2da8f8054a0f5f47da44dce0\",\"z\":\"0x14fbd1dfff1089a6135cad96171f05c53d01e2e9dc2e6d1014b2785100ed4990\"}]},\"0x617574686f72697a65207369676d61\"]}",
+          "data" : "{}",
+          "gasLimit" : 1000000,
+          "expected" : 177005,
+          "note" : "sigma_verify AND(dlog,dhtuple): base 45000 + 45000 + 85000 + 1 node*2000 + depth 5"
+        },
+        {
+          "expr" : "{\"sigma_verify\":[{\"type\":\"or\",\"children\":[{\"type\":\"dlog\",\"pk\":\"0x292af08c4f630333a68695f4c4b8458d96aed97f75e83138653bc796c34300061f62f7af7a31b2b7099ab362e818dc432358e1e052e7a104d6902718c011a51a\"},{\"type\":\"dlog\",\"pk\":\"0x1a3cd490c4840232584229e835bf2cd50981733d4bf0ebf86373e245c658d87e2d25b3a1d99ad67cefaa51625e0bfe25d907ff300b3cab0b6078b96495b59547\"},{\"type\":\"dlog\",\"pk\":\"0x1d711fbe902224492aa7c1cd356426135f7fb394dbf0218332a019e1c501de4e26cd793f8b044d27650d9e9fdc16cc69ab3b65225bdffde714f772cd98d6bcea\"}]},{\"type\":\"or\",\"e\":\"0x75ab2367e185b8fb53043c2fbef3b827771495efd5c324849f85a240f0d3d7\",\"children\":[{\"type\":\"dlog\",\"e\":\"0xf963172ec07619f64d382863be9f69be98dac9051ce305afa038751ea3fb40\",\"z\":\"0x0c103b129a7c16050f99045c3cd7de5c9dad18db83f8f5aa116b7a41a7e0b8a9\"},{\"type\":\"dlog\",\"e\":\"0xc1b84b56cf2686e80adde23e17b35ebcc0a74bfb39cd336195ad03b206dfa5\",\"z\":\"0x17892e54bbff92e81cf95791be282cf08b12b52cb06c9ba74269c305ab701150\"},{\"type\":\"dlog\",\"e\":\"0x4d707f1feed527e514e1f67217df8f252f691711f0ed124aaa10d4ec55f732\",\"z\":\"0x1eecbe680e60015712823d2ff0a61924ed8f6443d3cf58b98984ff3357a57e91\"}]},\"0x617574686f72697a65207369676d61\"]}",
+          "data" : "{}",
+          "gasLimit" : 1000000,
+          "expected" : 182005,
+          "note" : "sigma_verify OR ring n=3: base 45000 + 3*45000 (dlog leaves) + 1 node*2000 + depth 5"
+        },
+        {
+          "expr" : "{\"sigma_verify\":[{\"type\":\"threshold\",\"k\":2,\"children\":[{\"type\":\"dlog\",\"pk\":\"0x269cd333254ed3e0b2dacca39efdfc755962c427865b38014f55e8391f0ec6351f5bf4ac17e85a683492b605b8b011c1552f729c2d2f4f2b9905ae1142e47265\"},{\"type\":\"dlog\",\"pk\":\"0x084acbc3764463d9f4610cfd15a20178b89158c51f696f4ea769fb642a96b6d515b6b027269770c9cc12fdef69835ab90c9c8f74ccf5c9b617000afed90b7a46\"},{\"type\":\"dlog\",\"pk\":\"0x1fa0a2202659aa968e9030366a3441014c930582907664eb1673cb5be60f50911ce712b810322fd3034936730544d99f01061e41720728273be8ffac050f3a79\"}]},{\"type\":\"threshold\",\"e\":\"0xd3dd427463a74db79c807fb3728920c98e45a54056e9fc0fd1a9136ec4b49d\",\"k\":2,\"children\":[{\"type\":\"dlog\",\"e\":\"0x35c1e6ab658bc31b7284655784dba65de40d0f68749133d413b2b5ee4c53e3\",\"z\":\"0x11620c90ee41f096679ddfae60d863f8f1524f19c4d55a06579f0ae551514be2\"},{\"type\":\"dlog\",\"e\":\"0x04e511d16fff4af45b884b60852d37fa5ad5ea10121979a24e9f4475cf6161\",\"z\":\"0x114c1ce2231d68bad070e2be7a4b8d9480d5c9972cd2f5a330ee9f7fabefe348\"},{\"type\":\"dlog\",\"e\":\"0xe2f9b50e69d3c458b58c5184737fb16e309d40383061b6798c84e2f547861f\",\"z\":\"0x1972f3449633940d0711c75e3462253b410f17cf6d91465713a9dae8e898e44d\"}]},\"0x617574686f72697a65207369676d61\"]}",
+          "data" : "{}",
+          "gasLimit" : 1000000,
+          "expected" : 182005,
+          "note" : "sigma_verify THRESHOLD 2-of-3: base 45000 + 3*45000 (dlog leaves) + 1 node*2000 + depth 5"
+        },
+        {
+          "expr" : "{\"sigma_verify\":[{\"type\":\"and\",\"children\":[{\"type\":\"or\",\"children\":[{\"type\":\"dlog\",\"pk\":\"0x007b90c50b19c09fdd6ca207604f68e9c4e016881db8e0f4bc2caf4a58704f821e8400d853825ebae3f5d5b01cd7ea7401f96aac60427e1e9bb27dee18c04f3f\"},{\"type\":\"dlog\",\"pk\":\"0x2427b8484059bbb0d4db376228ce7e9b1ebe15d6d3ad81db88fdaff733369ef722723b8bc9474d376bec27af913cc772fa603a7ad097a754693bc62ef77c178d\"}]},{\"type\":\"or\",\"children\":[{\"type\":\"dlog\",\"pk\":\"0x05f85497d73ca5cbe388c73493dc82d81493b2b58e51cff020a445c1c4f42e04230e47a3038b48378568f6bc5695adc14c691304039bf08f4cfc8a6572b311aa\"},{\"type\":\"dlog\",\"pk\":\"0x16875abeb246377296934c8acbf3627a94c4ed4c8f07e57df73e1bc73990aada2af7738f69f6b8468cad61bd18fc6faf21a90f0757c06a6b42c581d300f8dc02\"}]}]},{\"type\":\"and\",\"e\":\"0xb43d7d4b0e2a845617a71a5d7aabebcd9c363d4d83e2e06dd5ebd2ff248545\",\"children\":[{\"type\":\"or\",\"e\":\"0xb43d7d4b0e2a845617a71a5d7aabebcd9c363d4d83e2e06dd5ebd2ff248545\",\"children\":[{\"type\":\"dlog\",\"e\":\"0xeda8ce0e0fa0a56ada7a7425fb58b4b091fcfc67ca9ba0dabe2c42815f501c\",\"z\":\"0x06ccdb46832e253a63415043290f5af6d16fd0a6235f756e59dd1d52568f809e\"},{\"type\":\"dlog\",\"e\":\"0x5995b345018a213ccddd6e7881f35f7d0dcac12a497940b76bc7907e7bd559\",\"z\":\"0x016649796342618f26ca690fac5ecd56f416551b3100f7f7e53ffc78a9b21d93\"}]},{\"type\":\"or\",\"e\":\"0xb43d7d4b0e2a845617a71a5d7aabebcd9c363d4d83e2e06dd5ebd2ff248545\",\"children\":[{\"type\":\"dlog\",\"e\":\"0xf27213f15b9d924ff2ad33e7338f8c8da76d4bc6184b0f0f467ac3fcb613fd\",\"z\":\"0x1780b5d991dc8c8fe66b049af8bf9a84f198f37f1cdaf7d1e1ea7e00a845cc1d\"},{\"type\":\"dlog\",\"e\":\"0x464f6eba55b71619e50a29ba492467403b5b768b9ba9ef62939111039296b8\",\"z\":\"0x28a4bf16c53aa9d44238a5f8559c7197602ff7fa3f3ac75f7e72cc2c905d8564\"}]}]},\"0x617574686f72697a65207369676d61\"]}",
+          "data" : "{}",
+          "gasLimit" : 1000000,
+          "expected" : 231005,
+          "note" : "sigma_verify nested (A or B) and (C or D): base 45000 + 4*45000 + 3 nodes*2000 + depth 5"
+        }
+      ]
+    },
+    {
       "category" : "oog",
       "note" : "Out-of-gas behavior. expected = \"OOG\" asserts the meter fails with the distinct gas-exhaustion error; an integer asserts success with that exact gasUsed. NOTE the gas-starved var case: the runtime swallows a failed lookup into default/null, so a var lookup that cannot afford its charge yields null and consumes 0.",
       "cases" : [
@@ -337,6 +399,20 @@
           "gasLimit" : 55,
           "expected" : "OOG",
           "note" : "OOG inside a callback run: the third element's `+` pre-charge exhausts the counter"
+        },
+        {
+          "expr" : "{\"sigma_verify\":[{\"type\":\"dlog\",\"pk\":\"0x14e2946f9ea29efcd6c8d3bc8ebce97aff2267495f19207d83a5a278b3d1b6750d6d60e75a6a4aef02b7c664972665bbdfa16ef85493ca2cc449eea611b9ed31\"},{\"type\":\"dlog\",\"e\":\"0xc96165908da06f904b1a9daac294f7da4130bf3ed75e21a94b6baaf90a6d9e\",\"z\":\"0x00f5311178e486968e899fc065809d9d77c44b1377ec18be8bd25be121546888\"},\"0x617574686f72697a65207369676d61\"]}",
+          "data" : "{}",
+          "gasLimit" : 90004,
+          "expected" : "OOG",
+          "note" : "sigma_verify out-of-gas one short of the requirement: the proposition-shape pre-charge (base 45000 + 1 dlog leaf 45000 + depth 5) is consumed atomically BEFORE any curve work, so a limit of (exact cost - 1) raises OOG before the verifier runs (finding #3 DoS bound)"
+        },
+        {
+          "expr" : "{\"sigma_verify\":[{\"type\":\"threshold\",\"k\":2,\"children\":[{\"type\":\"dlog\",\"pk\":\"0x269cd333254ed3e0b2dacca39efdfc755962c427865b38014f55e8391f0ec6351f5bf4ac17e85a683492b605b8b011c1552f729c2d2f4f2b9905ae1142e47265\"},{\"type\":\"dlog\",\"pk\":\"0x084acbc3764463d9f4610cfd15a20178b89158c51f696f4ea769fb642a96b6d515b6b027269770c9cc12fdef69835ab90c9c8f74ccf5c9b617000afed90b7a46\"},{\"type\":\"dlog\",\"pk\":\"0x1fa0a2202659aa968e9030366a3441014c930582907664eb1673cb5be60f50911ce712b810322fd3034936730544d99f01061e41720728273be8ffac050f3a79\"}]},{\"type\":\"threshold\",\"e\":\"0xd3dd427463a74db79c807fb3728920c98e45a54056e9fc0fd1a9136ec4b49d\",\"k\":2,\"children\":[{\"type\":\"dlog\",\"e\":\"0x35c1e6ab658bc31b7284655784dba65de40d0f68749133d413b2b5ee4c53e3\",\"z\":\"0x11620c90ee41f096679ddfae60d863f8f1524f19c4d55a06579f0ae551514be2\"},{\"type\":\"dlog\",\"e\":\"0x04e511d16fff4af45b884b60852d37fa5ad5ea10121979a24e9f4475cf6161\",\"z\":\"0x114c1ce2231d68bad070e2be7a4b8d9480d5c9972cd2f5a330ee9f7fabefe348\"},{\"type\":\"dlog\",\"e\":\"0xe2f9b50e69d3c458b58c5184737fb16e309d40383061b6798c84e2f547861f\",\"z\":\"0x1972f3449633940d0711c75e3462253b410f17cf6d91465713a9dae8e898e44d\"}]},\"0x617574686f72697a65207369676d61\"]}",
+          "data" : "{}",
+          "gasLimit" : 44999,
+          "expected" : "OOG",
+          "note" : "sigma_verify out-of-gas under a tight limit BELOW even the base cost: a tiny limit can never afford the proposition-shape pre-charge, so OOG fires before any traversal / scalar mul — the DoS bound holds regardless of proof size (finding #3)"
         }
       ]
     }

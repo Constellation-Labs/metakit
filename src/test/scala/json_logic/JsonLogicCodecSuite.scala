@@ -5,7 +5,7 @@ import cats.effect.IO
 import io.constellationnetwork.metagraph_sdk.json_logic.core._
 
 import io.circe.syntax._
-import io.circe.{Decoder, Encoder}
+import io.circe.{Decoder, Encoder, parser}
 import weaver.SimpleIOSuite
 
 object JsonLogicCodecSuite extends SimpleIOSuite {
@@ -441,6 +441,35 @@ object JsonLogicCodecSuite extends SimpleIOSuite {
       }
 
       trans1Check.and(trans2Check)
+    }
+  }
+
+  // DUPLICATE-KEY DETERMINISM (audit finding #1). A JSON object with a repeated key MUST resolve
+  // LAST-WINS when decoded to a JsonLogicValue. This pins cross-runtime determinism with the Rust
+  // port: serde_json (Rust) and circe/jawn (Scala) both keep the LAST occurrence of a duplicate
+  // object key, so any implementation that diverged (e.g. first-wins, or an error) would produce a
+  // different value tree for the same bytes — a consensus split. The sigma_verify node schema is
+  // discriminated by "type", so the {"type":"dlog","type":"dhtuple"} case is the consensus-relevant
+  // shape (a hand-crafted/adversarial proposition must resolve its discriminator identically
+  // everywhere); the {"a":1,"a":2} case pins the rule at the primitive level.
+  test("duplicate object keys decode LAST-WINS (cross-runtime determinism with the Rust port)") {
+    for {
+      dup   <- IO.fromEither(parser.parse("""{"a":1,"a":2}""").flatMap(_.as[JsonLogicValue]))
+      discr <- IO.fromEither(parser.parse("""{"type":"dlog","type":"dhtuple"}""").flatMap(_.as[JsonLogicValue]))
+    } yield {
+      val dupCheck = dup match {
+        case MapValue(m) => expect(m.get("a").contains(IntValue(2)), s"""{"a":1,"a":2} must resolve a -> 2 (last-wins), got $m""")
+        case other       => failure(s"expected MapValue, got $other")
+      }
+      val discrCheck = discr match {
+        case MapValue(m) =>
+          expect(
+            m.get("type").contains(StrValue("dhtuple")),
+            s"""{"type":"dlog","type":"dhtuple"} must resolve type -> "dhtuple" (last-wins), got $m"""
+          )
+        case other => failure(s"expected MapValue, got $other")
+      }
+      dupCheck.and(discrCheck)
     }
   }
 }

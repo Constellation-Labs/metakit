@@ -29,6 +29,17 @@ import io.constellationnetwork.metagraph_sdk.json_logic.core._
  */
 object CryptoOps {
 
+  /**
+   * The single trusted-total Java-crypto call. `"SHA-256"` is MANDATED by the Java
+   * `MessageDigest` specification on every conformant JVM (it is one of the standard algorithms
+   * every implementation must provide), so `getInstance("SHA-256")` cannot throw
+   * `NoSuchAlgorithmException` in practice. Centralizing it here keeps the digest a single audited
+   * site (every opcode hashes through this) and removes the inline `getInstance(...)` calls that
+   * would otherwise be scattered throw-hazards. Pure: same bytes in, same digest out.
+   */
+  private def sha256(bytes: Array[Byte]): Array[Byte] =
+    MessageDigest.getInstance("SHA-256").digest(bytes)
+
   // ---------------------------------------------------------------------------
   // poseidon: variadic field elements -> Fr hash (32B hex).
   // ---------------------------------------------------------------------------
@@ -345,6 +356,16 @@ object CryptoOps {
   /** The BN254 G1 generator (1, 2), matching Besu's `AltBn128Point.g1()`. */
   private val SchnorrGenerator: Bn254.G1 = Bn254.G1(BigInteger.ONE, BigInteger.valueOf(2))
 
+  /**
+   * Reject a NON-CANONICAL response scalar (`z`/`s` >= R) as a hard error (audit #4). A response is
+   * a curve scalar, so `z` and `z + R` are congruent mod R and verify identically; accepting raw
+   * 32-byte responses therefore makes the proof bytes malleable. Requiring `z < R` makes the
+   * response encoding canonical (one byte-string per scalar). Challenges are already canonical by
+   * construction (31 bytes < 2^248 < R), so only the 32-byte responses need this guard.
+   */
+  private def requireCanonicalScalar(z: BigInt, role: String): Either[JsonLogicException, BigInt] =
+    Either.cond(z < BigInt(Bn254.R), z, JsonLogicException(s"$role: non-canonical response scalar (must be < R)"))
+
   def schnorrVerify(values: List[JsonLogicValue]): Either[JsonLogicException, JsonLogicValue] =
     values match {
       case pkV :: msgV :: proofV :: Nil =>
@@ -359,9 +380,14 @@ object CryptoOps {
           rBytes = proof.slice(0, HexBytes.G1Bytes)
           sBytes = proof.slice(HexBytes.G1Bytes, HexBytes.G1Bytes + HexBytes.ScalarBytes)
           rC <- HexBytes.parseG1(HexBytes.encodeBytes(rBytes), "schnorr_verify R")
-          s = BigInt(1, sBytes)
+          s  <- requireCanonicalScalar(BigInt(1, sBytes), "schnorr_verify s")
           pk <- g1OnCurve(pkC, "schnorr_verify pk")
           r  <- g1OnCurve(rC, "schnorr_verify R")
+          // Canonical fixed-width 64-byte pk bytes for the FS transcript. `pkC` already came from a
+          // width-validated parseG1, so this re-parse cannot fail; threading it as an Either binding
+          // (instead of `.toOption.get`) turns the impossible failure into a Left, never a throw. The
+          // resulting transcript bytes are byte-identical to the prior parseBytes(...).toOption.get.
+          pkBytes <- HexBytes.parseBytes(pkHex, Some(HexBytes.G1Bytes), "schnorr_verify pk")
           // SOUNDNESS: reject the identity / point-at-infinity public key.
           // BN254 G1 is prime-order (cofactor 1), so on-curve => in-subgroup
           // EXCEPT for the identity O = (0,0). With pk = O the verification
@@ -375,8 +401,7 @@ object CryptoOps {
           if (pkIsIdentity) BoolValue(false)
           else {
             // c = SHA256(R || pk || msg) mod groupOrder
-            val pkBytes = HexBytes.parseBytes(pkHex, Some(HexBytes.G1Bytes), "schnorr_verify pk").toOption.get
-            val digest = MessageDigest.getInstance("SHA-256").digest(rBytes ++ pkBytes ++ msg)
+            val digest = sha256(rBytes ++ pkBytes ++ msg)
             val c = BigInt(1, digest).mod(BigInt(Bn254.R))
             // accept iff s*G == R + c*pk
             val lhs = SchnorrGenerator.multiply(bigInteger(s.mod(BigInt(Bn254.R))))
@@ -386,6 +411,857 @@ object CryptoOps {
       case _ =>
         JsonLogicException(s"schnorr_verify: expected [pkHex(64B), msgHex, proofHex(96B)], got $values").asLeft
     }
+
+  // ===========================================================================
+  // SIGMA-FAMILY MATURITY (status). The Σ-protocol opcodes (prove_dlog_verify,
+  // prove_dhtuple_verify, sigma_verify) are REGISTERED AND LIVE on the default JLVM
+  // dispatch — no feature flag, no opt-in. They are NOT yet covered by an external
+  // cryptographic audit of the strong-FS + CDS surface; integrators putting them on a
+  // real spend path (mint policies / asset morphisms) should track that audit. The
+  // cross-language conformance vectors are a necessary-but-not-sufficient check
+  // (see docs/sigma-verify.md).
+
+  // ===========================================================================
+  // SIGMA PROTOCOLS (classical, no-trusted-setup, Ergo / EIP-11 family).
+  //
+  // The Σ-protocol family is built from two atomic leaves over BN254 G1, both
+  // using the SAME conventions as `schnorr_verify` above (generator (1,2), the
+  // per-LEAF `SHA256(transcript) mod R` Fiat-Shamir hash, the `0x`-fixed-width hex
+  // codec, and the on-curve / identity rejection + error-vs-false discipline of
+  // `groth16_verify` / `schnorr_verify`). NOTE: the recursive `sigma_verify` TREE does
+  // NOT reduce its challenges mod R — its root + per-node challenges use the 31-byte
+  // injective `low31(SHA256(...))` domain (finding #1; see the `Sigma` object below):
+  //
+  //   - DLog  (`proveDlog`):    knowledge of `x` s.t. `pk = x·G`.  This is the
+  //     Schnorr leaf; `prove_dlog_verify` is a first-class ALIAS over
+  //     `schnorrVerify` so the sigma-leaf naming is available standalone.
+  //   - DHTuple (`proveDHTuple`): knowledge of `w` s.t. `u = g^w ∧ v = h^w`
+  //     (a Diffie–Hellman / DDH tuple).  `prove_dhtuple_verify` is a NEW
+  //     standalone leaf.
+  //
+  // STANDALONE vs DEFERRED-TREE. `prove_dlog_verify` / `prove_dhtuple_verify`
+  // are the standalone SINGLE-leaf Σ-guards (one statement, one proof, accept
+  // iff the leaf verifies). Composing several of them with the JLVM `or` /
+  // `some` is CRYPTOGRAPHICALLY UNSOUND for OR / threshold: each standalone
+  // proof carries its own independently-derived Fiat-Shamir challenge, so there
+  // is no challenge-splitting and therefore no hiding of which leaf the prover
+  // actually knows. The sound CAND / COR / CTHRESHOLD composition is the
+  // DEFERRED recursive `sigma_verify` tree (see docs/sigma-verify.md), which
+  // reuses the two commitment-recovery helpers below. The helpers are extracted
+  // here, NOT inside the standalone verifiers (which recompute inline, exactly
+  // like `schnorrVerify`), so the future tree can share one audited copy.
+  // ===========================================================================
+
+  /**
+   * SHA256(bytes) reduced mod the BN254 group order R — the Fiat-Shamir hash family shared with
+   * `schnorr_verify`. The caller is responsible for the transcript byte layout (the LOAD-BEARING
+   * correctness choice: see `proveDhTupleVerify` for the strong-FS binding).
+   */
+  private def fiatShamirChallenge(transcript: Array[Byte]): BigInt =
+    BigInt(1, sha256(transcript)).mod(BigInt(Bn254.R))
+
+  /**
+   * DLog commitment recovery: from a verified Schnorr / DLog transcript with public key `pk`,
+   * challenge `e` and response `z`, recover the prover's commitment
+   * {{{ a = z·G − e·pk }}}
+   * For an honest transcript (`z = r + e·x`, `pk = x·G`) this equals the original `a = r·G = R`,
+   * since `z·G − e·pk = (r + e·x)·G − e·(x·G) = r·G`.
+   *
+   * This is NOT used by the standalone `schnorr_verify` / `prove_dlog_verify` (which check the
+   * algebraic equation `s·G == R + c·pk` directly); it is the bottom-up reconstruction primitive
+   * the deferred `sigma_verify` tree needs (the tree is GIVEN the per-leaf `(e, z)` after top-down
+   * challenge propagation and must rebuild the leaf commitment to fold it into the root transcript).
+   *
+   * Subtraction on the curve is `a + (−e)·pk`, i.e. point-negate `pk` (negate the y-coordinate mod
+   * P) and add. `G` is the BN254 generator (1,2). The scalars are reduced mod R by `multiply`.
+   *
+   * Visibility: public (not `private[ops]`) so the deferred-tree unit tests can pin the
+   * `z·G − e·pk == R` round-trip directly; it is harmless pure curve arithmetic with no
+   * argument-shape / hex handling (unlike the opcode entry points).
+   */
+  def dlogComputeCommitment(pk: Bn254.G1, e: BigInt, z: BigInt): Bn254.G1 = {
+    val zG = SchnorrGenerator.multiply(bigInteger(z))
+    val ePk = pk.multiply(bigInteger(e))
+    // −ePk: negate the affine y-coordinate modulo P (the all-zero identity negates to itself).
+    val negEPk =
+      if (ePk.isInfinity) ePk
+      else Bn254.G1(ePk.x, Bn254.P.subtract(ePk.y))
+    zG.add(negEPk)
+  }
+
+  /**
+   * DHTuple commitment recovery for one base `base` (either `g` or `h`) of a DDH tuple, given the
+   * corresponding image `image` (`u` for `g`, `v` for `h`), challenge `e` and response `z`:
+   * {{{ a = z·base − e·image }}}
+   * For an honest transcript (`z = r + e·w`, `image = base^w`) this equals the original commitment
+   * `a = r·base`. As with [[dlogComputeCommitment]] this is the bottom-up reconstruction primitive
+   * for the deferred `sigma_verify` tree, NOT used by the standalone `prove_dhtuple_verify` (which
+   * checks `z·g == a1 + e·u ∧ z·h == a2 + e·v` directly). Public for the same test-seam reason as
+   * [[dlogComputeCommitment]].
+   */
+  def dhtupleComputeCommitment(base: Bn254.G1, image: Bn254.G1, e: BigInt, z: BigInt): Bn254.G1 = {
+    val zBase = base.multiply(bigInteger(z))
+    val eImg = image.multiply(bigInteger(e))
+    val negEImg =
+      if (eImg.isInfinity) eImg
+      else Bn254.G1(eImg.x, Bn254.P.subtract(eImg.y))
+    zBase.add(negEImg)
+  }
+
+  // ---------------------------------------------------------------------------
+  // prove_dlog_verify: [pkHex(64B G1), msgHex, proofHex(96B)] -> bool.
+  //   First-class sigma-leaf ALIAS for `schnorr_verify` (identical inputs and
+  //   semantics: the DLog Σ-leaf, proof of knowledge of `x` with `pk = x·G`).
+  //   Standalone single-key guard; see the SIGMA PROTOCOLS note above for why
+  //   it must NOT be composed by JLVM `or` for an OR/threshold policy.
+  // ---------------------------------------------------------------------------
+
+  def proveDlogVerify(values: List[JsonLogicValue]): Either[JsonLogicException, JsonLogicValue] =
+    schnorrVerify(values).leftMap(e => JsonLogicException(e.getMessage.replace("schnorr_verify", "prove_dlog_verify")))
+
+  // ---------------------------------------------------------------------------
+  // prove_dhtuple_verify: [gHex(64B), hHex(64B), uHex(64B), vHex(64B), msgHex, proofHex(160B)] -> bool.
+  //   DDH / Diffie–Hellman-tuple Σ-leaf on BN254 G1. Statement (g,h,u,v) ∈ G1⁴,
+  //   claim ∃w. u = g^w ∧ v = h^w. Convention:
+  //     proof    = a1(64B) || a2(64B) || z(32B)   (total 160 bytes)
+  //     a1 = g^r, a2 = h^r, z = r + e·w
+  //     STRONG Fiat-Shamir: e = SHA256(g‖h‖u‖v‖a1‖a2‖msg) mod R
+  //     accept iff  z·g == a1 + e·u  AND  z·h == a2 + e·v
+  //
+  //   STRONG-FS IS THE LOAD-BEARING CORRECTNESS POINT. The challenge MUST bind
+  //   the FULL statement (g,h,u,v) AND BOTH commitments (a1,a2) AND the message.
+  //   A weak transcript that omits any of these is forgeable (the prover could
+  //   adaptively choose a commitment after seeing the challenge, or rebind the
+  //   statement / message); see docs/sigma-verify.md and the cited weak-FS
+  //   attack class (SPL ZK-ElGamal, Trail of Bits "Weak Fiat-Shamir Attacks").
+  // ---------------------------------------------------------------------------
+
+  /** Total proof width: a1(64B) || a2(64B) || z(32B). */
+  private val DhTupleProofBytes: Int = HexBytes.G1Bytes + HexBytes.G1Bytes + HexBytes.ScalarBytes
+
+  def proveDhTupleVerify(values: List[JsonLogicValue]): Either[JsonLogicException, JsonLogicValue] =
+    values match {
+      case gV :: hV :: uV :: vV :: msgV :: proofV :: Nil =>
+        for {
+          gHex     <- expectStr("prove_dhtuple_verify g")(gV)
+          hHex     <- expectStr("prove_dhtuple_verify h")(hV)
+          uHex     <- expectStr("prove_dhtuple_verify u")(uV)
+          vHex     <- expectStr("prove_dhtuple_verify v")(vV)
+          msgHex   <- expectStr("prove_dhtuple_verify msg")(msgV)
+          proofHex <- expectStr("prove_dhtuple_verify proof")(proofV)
+          gC       <- HexBytes.parseG1(gHex, "prove_dhtuple_verify g")
+          hC       <- HexBytes.parseG1(hHex, "prove_dhtuple_verify h")
+          uC       <- HexBytes.parseG1(uHex, "prove_dhtuple_verify u")
+          vC       <- HexBytes.parseG1(vHex, "prove_dhtuple_verify v")
+          msg      <- HexBytes.parseBytes(msgHex, None, "prove_dhtuple_verify msg")
+          // proof = a1(64B) || a2(64B) || z(32B) -> total 160 bytes.
+          proof <- HexBytes.parseBytes(proofHex, Some(DhTupleProofBytes), "prove_dhtuple_verify proof")
+          a1Bytes = proof.slice(0, HexBytes.G1Bytes)
+          a2Bytes = proof.slice(HexBytes.G1Bytes, HexBytes.G1Bytes * 2)
+          zBytes = proof.slice(HexBytes.G1Bytes * 2, DhTupleProofBytes)
+          a1C <- HexBytes.parseG1(HexBytes.encodeBytes(a1Bytes), "prove_dhtuple_verify a1")
+          a2C <- HexBytes.parseG1(HexBytes.encodeBytes(a2Bytes), "prove_dhtuple_verify a2")
+          z   <- requireCanonicalScalar(BigInt(1, zBytes), "prove_dhtuple_verify z")
+          g   <- g1OnCurve(gC, "prove_dhtuple_verify g")
+          h   <- g1OnCurve(hC, "prove_dhtuple_verify h")
+          u   <- g1OnCurve(uC, "prove_dhtuple_verify u")
+          v   <- g1OnCurve(vC, "prove_dhtuple_verify v")
+          a1  <- g1OnCurve(a1C, "prove_dhtuple_verify a1")
+          a2  <- g1OnCurve(a2C, "prove_dhtuple_verify a2")
+          // Canonical fixed-width 64-byte statement-point bytes for the strong-FS transcript. Each
+          // hex came from a width-validated parseG1 above, so these re-parses cannot fail; threading
+          // them as Either bindings (instead of `.toOption.get`) turns the impossible failure into a
+          // Left, never a throw. The transcript bytes are byte-identical to the prior parse(...).get.
+          gB <- HexBytes.parseBytes(gHex, Some(HexBytes.G1Bytes), "prove_dhtuple_verify g")
+          hB <- HexBytes.parseBytes(hHex, Some(HexBytes.G1Bytes), "prove_dhtuple_verify h")
+          uB <- HexBytes.parseBytes(uHex, Some(HexBytes.G1Bytes), "prove_dhtuple_verify u")
+          vB <- HexBytes.parseBytes(vHex, Some(HexBytes.G1Bytes), "prove_dhtuple_verify v")
+          // SOUNDNESS: reject the identity / point-at-infinity on ANY of the four statement
+          // points. BN254 G1 is prime-order (cofactor 1), so on-curve => in-subgroup EXCEPT for
+          // O = (0,0). An identity base (g or h) makes the corresponding equation collapse to
+          // `z·O == a + e·image`, i.e. `O == a + e·image`, which an attacker satisfies by
+          // choosing the matching commitment a freely (a universal forgery for that coordinate);
+          // an identity image (u or v) similarly degenerates the hiding of w. These are
+          // correct-WIDTH but cryptographically invalid, so `false`, NOT an error (malformed-width
+          // inputs still error above). a1 / a2 may legitimately be the identity (r ≡ 0), so they
+          // are NOT rejected here — they are still bound into the transcript below.
+          stmtHasIdentity = g.isInfinity || h.isInfinity || u.isInfinity || v.isInfinity
+        } yield
+          if (stmtHasIdentity) BoolValue(false)
+          else {
+            // STRONG Fiat-Shamir: bind the full statement AND both commitments AND the message.
+            // The statement points are bound as their canonical fixed-width 64-byte form (gB/hB/uB/vB,
+            // parsed above as Either bindings) so the transcript is layout-deterministic.
+            val transcript =
+              gB ++ hB ++ uB ++ vB ++
+              a1Bytes ++ a2Bytes ++ msg
+            val e = fiatShamirChallenge(transcript)
+            val zr = bigInteger(z.mod(BigInt(Bn254.R)))
+            // accept iff z·g == a1 + e·u  AND  z·h == a2 + e·v
+            val lhs1 = g.multiply(zr)
+            val rhs1 = a1.add(u.multiply(bigInteger(e)))
+            val lhs2 = h.multiply(zr)
+            val rhs2 = a2.add(v.multiply(bigInteger(e)))
+            val ok = lhs1.x == rhs1.x && lhs1.y == rhs1.y && lhs2.x == rhs2.x && lhs2.y == rhs2.y
+            BoolValue(ok)
+          }
+      case _ =>
+        JsonLogicException(
+          s"prove_dhtuple_verify: expected [gHex(64B), hHex(64B), uHex(64B), vHex(64B), msgHex, proofHex(160B)], got $values"
+        ).asLeft
+    }
+
+  // ===========================================================================
+  // sigma_verify: the RECURSIVE CDS Σ-protocol proposition verifier (Phase 2).
+  //
+  //   {"sigma_verify": [ <proposition>, <proof>, <messageHex> ]} -> bool
+  //
+  // This is the sound CAND / COR / CTHRESHOLD composition of the DLog / DHTuple
+  // leaves above (the Ergo `SigSerializer` / `verifySignature` "Verifier Steps
+  // 1-6" restated for BN254 G1). It reuses `dlogComputeCommitment` /
+  // `dhtupleComputeCommitment` for the bottom-up commitment reconstruction. See
+  // docs/sigma-verify.md for the full rationale.
+  //
+  // CROWN-JEWEL CORRECTNESS TARGETS (audit these first):
+  //   1. STRONG Fiat-Shamir. The root challenge binds the WHOLE statement (every
+  //      leaf's points, the tree shape, threshold params), EVERY reconstructed
+  //      commitment, AND the message, under a FROZEN canonical byte layout (see
+  //      `serializeTree`). A transcript that omits any statement/commitment is
+  //      forgeable (the SPL ZK-ElGamal / Trail-of-Bits weak-FS class). Nothing
+  //      the prover controls is left out of the hash.
+  //   2. CDS challenge-splitting. OR = XOR over fixed-width 31-byte challenges
+  //      (GF(2)^248); THRESHOLD(k,n) = GF(2^8) Shamir, degree (n-k), constant term
+  //      = parent challenge, evaluated byte-wise across the 31 lanes (exactly Ergo,
+  //      narrowed to the injective challenge width). The verifier RECOMPUTES the
+  //      relations and rejects any inconsistency.
+  //   2a. INJECTIVE CHALLENGE DOMAIN (finding #1). Challenges are 31 bytes (248-bit):
+  //      `2^248 < R`, so the byte↔Fr-scalar map is a BIJECTION (no `e` vs `e+R`
+  //      alias). The same 31-byte value is the GF/XOR object AND, unchanged (no mod
+  //      R), the Fr scalar in `z·G − e·pk`. Root challenge = low31(SHA256(...)).
+  //   3. Commitments are RECONSTRUCTED, never trusted from the proof, so a forged
+  //      response necessarily changes the hashed commitment and breaks step 6.
+  //
+  // ERROR-VS-FALSE (lockstep with the leaves): malformed (bad hex/width, off-curve
+  // point, structurally invalid tree, k<=0 or k>n, prop/proof shape mismatch,
+  // duplicate/out-of-range threshold index, wrong polynomial degree) => hard
+  // JsonLogicException. Well-formed-but-cryptographically-wrong (root hash !=
+  // root challenge, OR challenges do not XOR, threshold does not interpolate,
+  // identity statement point) => `false`.
+  // ===========================================================================
+
+  /**
+   * FROZEN canonical serialization for the strong-FS transcript (docs/sigma-verify.md §4).
+   *
+   * NORMATIVE BYTE LAYOUT (pre-order, children in array order — array order is part of the
+   * statement; reordering children changes the proposition):
+   *
+   *   - Node tag: ONE fixed byte per kind — dlog=0x00, dhtuple=0x01, and=0x02, or=0x03,
+   *     threshold=0x04.
+   *   - Threshold k AND every child-count: fixed-width 4-byte big-endian (`encodeUInt(_, 4)`),
+   *     so the structure (arity, k) is itself bound — an attacker cannot re-bracket the tree.
+   *   - Points (pk, g, h, u, v, and the RECONSTRUCTED commitments a / a1 / a2): the canonical
+   *     64-byte big-endian `x‖y` form (`HexBytes.encodeG1`), the SAME fixed-width encoding the
+   *     leaf opcodes already use. No compression, no variable width.
+   *
+   *   dlog      := 0x00 ‖ pk(64) ‖ a(64)
+   *   dhtuple   := 0x01 ‖ g(64) ‖ h(64) ‖ u(64) ‖ v(64) ‖ a1(64) ‖ a2(64)
+   *   and       := 0x02 ‖ nChildren(4) ‖ child_0 ‖ … ‖ child_{n-1}
+   *   or        := 0x03 ‖ nChildren(4) ‖ child_0 ‖ … ‖ child_{n-1}
+   *   threshold := 0x04 ‖ k(4) ‖ nChildren(4) ‖ child_0 ‖ … ‖ child_{n-1}
+   *
+   * Root challenge := low31( SHA256( DomainSep ‖ serializeTree(root) ‖ message ) ), with
+   * DomainSep = ascii("sigma_verify:v1") (separates this hash family from the per-leaf
+   * `schnorr_verify` / `prove_dhtuple_verify` transcripts so a leaf proof can never be
+   * replayed as a 1-node tree proof and vice-versa).
+   *
+   * CHALLENGE DOMAIN — INJECTIVE BYTE↔SCALAR MAP (audit finding #1, the CDS soundness fix).
+   * Challenges are 31-byte (248-bit) values, NOT 32-byte. The byte width is chosen so the
+   * challenge domain is INJECTIVE into the BN254 scalar field Fr: every 31-byte value is
+   * `< 2^248 < R` (BN254 `R ≈ 2^253.6`), so the byte↔scalar map `e ↦ BigInt(1, e)` is a
+   * bijection onto `[0, 2^248)` and there is NO raw-vs-mod-R duality. Previously challenges were
+   * 32 bytes, used RAW for the OR-XOR / GF(2^8) split BUT reduced mod R for the leaf scalar
+   * arithmetic — so two distinct raw challenges `e` and `e + R` (both `< 2^256`) collapsed to the
+   * SAME scalar, a malleability / CDS-soundness weakness. With 31 bytes the same value is used
+   * both as the GF(2)^248 / XOR object AND, unchanged (no mod-R reduction), as the Fr scalar.
+   *
+   * Every challenge — the root AND every per-node / per-leaf challenge in the proof AND every
+   * challenge DERIVED in the CDS split (XOR over GF(2)^248, GF(2^8) Shamir over 31 byte-lanes) —
+   * is a 31-byte value. Responses `z` stay canonical 32-byte (< R) scalars; commitments stay 64-byte
+   * G1. The serialized transcript (`serializeTree`) is UNCHANGED — challenges are not part of it.
+   */
+  private object Sigma {
+
+    // One fixed tag byte per node kind (part of the bound transcript).
+    val TagDlog: Byte = 0x00
+    val TagDhTuple: Byte = 0x01
+    val TagAnd: Byte = 0x02
+    val TagOr: Byte = 0x03
+    val TagThreshold: Byte = 0x04
+
+    /** Domain separator for the sigma_verify root hash (distinct from the leaf transcripts). */
+    val DomainSep: Array[Byte] = "sigma_verify:v1".getBytes("US-ASCII")
+
+    /**
+     * Fixed challenge width in bytes — 31 (248-bit), the INJECTIVE-into-Fr domain (finding #1).
+     * `2^248 < R`, so a 31-byte challenge is always a canonical Fr element and the byte↔scalar
+     * map is a bijection (no `e` vs `e+R` alias). The CDS XOR / GF(2^8) split operates on these
+     * 31 bytes (closed in GF(2)^248), and the SAME bytes are the Fr scalar for `z·G − e·pk`.
+     */
+    val ChallengeBytes: Int = 31
+
+    /**
+     * Canonical challenge derivation: the LOW-ORDER 31 bytes of a 32-byte SHA-256 digest, i.e.
+     * the least-significant 31 bytes (`digest.takeRight(31)`). This single rule fixes both the
+     * root challenge and is the only SHA-256→challenge map in the verifier. Result is in
+     * `[0, 2^248)`, hence a canonical Fr element.
+     */
+    def low31(digest32: Array[Byte]): Array[Byte] = digest32.takeRight(ChallengeBytes)
+
+    /**
+     * The 31-byte challenge as its Fr SCALAR, taken DIRECTLY from the bytes (no mod-R reduction).
+     * Safe and injective because `BigInt(1, e) < 2^248 < R` for any 31-byte `e` — this is the
+     * whole point of the 31-byte domain (finding #1).
+     */
+    def challengeScalar(e: Array[Byte]): BigInt = BigInt(1, e)
+
+    // --- Parsed PROPOSITION tree (statement only; no challenges/responses). ---
+    sealed trait PropNode
+    final case class PropDlog(pk: Bn254.G1, pkBytes: Array[Byte]) extends PropNode
+    final case class PropDhTuple(
+      g: Bn254.G1,
+      h: Bn254.G1,
+      u: Bn254.G1,
+      v: Bn254.G1,
+      gBytes: Array[Byte],
+      hBytes: Array[Byte],
+      uBytes: Array[Byte],
+      vBytes: Array[Byte]
+    ) extends PropNode
+    final case class PropAnd(children: List[PropNode]) extends PropNode
+    final case class PropOr(children: List[PropNode]) extends PropNode
+    final case class PropThreshold(k: Int, children: List[PropNode]) extends PropNode
+
+    // --- Parsed PROOF tree (per-node challenge `e`; per-leaf response `z`). ---
+    sealed trait ProofNode { def e: Array[Byte] }
+    final case class ProofDlog(e: Array[Byte], z: BigInt) extends ProofNode
+    final case class ProofDhTuple(e: Array[Byte], z: BigInt) extends ProofNode
+    final case class ProofAnd(e: Array[Byte], children: List[ProofNode]) extends ProofNode
+    final case class ProofOr(e: Array[Byte], children: List[ProofNode]) extends ProofNode
+    final case class ProofThreshold(e: Array[Byte], k: Int, children: List[ProofNode]) extends ProofNode
+  }
+
+  /**
+   * SHA256 of a byte string (no mod), used for the GF-independent transcript hash convention.
+   * Delegates to the single shared [[sha256]] helper (the one trusted-total `getInstance` site).
+   */
+  private def sha256Bytes(bytes: Array[Byte]): Array[Byte] =
+    sha256(bytes)
+
+  // ---------------------------------------------------------------------------
+  // GF(2^8) Shamir arithmetic for the CTHRESHOLD challenge split (Ergo / AES field).
+  //
+  // The challenge is a 31-byte array (the injective-into-Fr domain, finding #1); threshold
+  // interpolation is performed BYTE-WISE (31 independent GF(2^8) lanes), exactly as Ergo's
+  // `GF2_192_Poly` reduced to the byte field. Field = GF(2^8) with the AES reduction polynomial x^8+x^4+x^3+x+1
+  // (0x11b). Indices are the child positions 1..n (0 is reserved for the parent
+  // challenge = the polynomial's value at 0).
+  // ---------------------------------------------------------------------------
+
+  /** GF(2^8) multiply (Russian-peasant, AES reduction poly 0x11b). Pure, fixed 8-round fold. */
+  private def gfMul(a0: Int, b0: Int): Int = {
+    // Fold over the 8 bits of b; (acc product, shifting a). Subtraction/addition in GF(2^m) is XOR.
+    val (p, _, _) = (0 until 8).foldLeft((0, a0 & 0xff, b0 & 0xff)) {
+      case ((prod, a, b), _) =>
+        val nextProd = if ((b & 1) != 0) prod ^ a else prod
+        val shifted = (a << 1) & 0xff
+        val nextA = if ((a & 0x80) != 0) shifted ^ 0x1b else shifted // reduce by 0x11b's low byte
+        (nextProd, nextA, b >> 1)
+    }
+    p & 0xff
+  }
+
+  /** GF(2^8) multiplicative inverse via Fermat (a^254 = a^-1 for a != 0). gfInv(0) = 0. */
+  private def gfInv(a: Int): Int =
+    if ((a & 0xff) == 0) 0
+    else {
+      // a^254: square-and-multiply over the 8 bits of the exponent 254 = 0b11111110.
+      val (result, _) = (0 until 8).foldLeft((1, a & 0xff)) {
+        case ((acc, base), bit) =>
+          val nextAcc = if (((254 >> bit) & 1) != 0) gfMul(acc, base) else acc
+          (nextAcc, gfMul(base, base))
+      }
+      result & 0xff
+    }
+
+  /**
+   * Lagrange evaluation in GF(2^8): given sample points `(xs(i), ys(i))` (all `xs` DISTINCT),
+   * return the interpolating polynomial evaluated at `xEval`. Used to (a) reconstruct the
+   * degree-`(n-k)` threshold polynomial from `(0, parentChallenge)` + the first `n-k` child
+   * points, and (b) check the remaining `k` child points lie on it. Pure GF(2^8) arithmetic.
+   *
+   * Caller guarantees `xs` are pairwise distinct (duplicate/out-of-range indices are rejected
+   * upstream as a hard error), so every `(x_i - x_j)` is non-zero and invertible.
+   */
+  private def gfLagrangeEval(xs: Array[Int], ys: Array[Int], xEval: Int): Int =
+    xs.indices.foldLeft(0) { (acc, i) =>
+      // basis_i(xEval) = ∏_{j!=i} (xEval - xs_j) / (xs_i - xs_j); subtraction == XOR in GF(2^m).
+      val (num, den) = xs.indices.foldLeft((1, 1)) {
+        case ((nm, dn), j) =>
+          if (j == i) (nm, dn)
+          else (gfMul(nm, xEval ^ xs(j)), gfMul(dn, xs(i) ^ xs(j)))
+      }
+      acc ^ gfMul(ys(i), gfMul(num, gfInv(den)))
+    } & 0xff
+
+  // ---------------------------------------------------------------------------
+  // sigma_verify entry point + recursive verifier.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Absolute backstop on the proof tree size/depth (audit finding #2, the unpaid-traversal DoS
+   * bound). The PRIMARY bound is structural: the proof must mirror the (already gas-charged)
+   * proposition, so its node count and depth may not exceed the proposition's (checked cheaply
+   * BEFORE the expensive recursive `parseProofNode` / curve work). These caps are a hard ceiling
+   * for the degenerate case and are far above any realistic policy tree (255 children per
+   * threshold node is the GF(2^8) cap; a few thousand total nodes covers any sane proposition).
+   */
+  private val SigmaMaxProofNodes: Int = 4096
+  private val SigmaMaxProofDepth: Int = 64
+
+  def sigmaVerify(values: List[JsonLogicValue]): Either[JsonLogicException, JsonLogicValue] =
+    values match {
+      case propV :: proofV :: msgV :: Nil =>
+        for {
+          msgHex <- expectStr("sigma_verify message")(msgV)
+          msg    <- HexBytes.parseBytes(msgHex, None, "sigma_verify message")
+          prop   <- parsePropNode(propV, "sigma_verify.proposition")
+          // FINDING #2 (DoS): the proposition is parsed + gas-charged from its SHAPE. Before the
+          // expensive recursive proof parse (hex decode, on-curve checks, scalar mul), enforce a
+          // cheap STRUCTURAL bound — the proof's node count and depth must not exceed the
+          // proposition's (the proof must mirror it), with a hard cap as a backstop. A tiny
+          // proposition + huge mismatched proof is rejected here, fast, having done only a bounded
+          // raw-tree walk (no curve arithmetic). The full mirror check (per-node type / child
+          // count) still happens in verifyNode as a hard error.
+          propShape = sigmaRawShape(propV)
+          maxNodes = math.min(propShape._1, SigmaMaxProofNodes)
+          maxDepth = math.min(propShape._2, SigmaMaxProofDepth)
+          _     <- boundProofShape(proofV, maxNodes, maxDepth)
+          proof <- parseProofNode(proofV, "sigma_verify.proof")
+          // STRUCTURAL shape agreement (prop vs proof) is a hard error (encoding fault), checked
+          // as we go below. The cryptographic outcome (true/false) is computed in verifyTree.
+          result <- verifyTree(prop, proof, msg)
+        } yield BoolValue(result)
+      case _ =>
+        JsonLogicException(
+          s"sigma_verify: expected [proposition, proof, messageHex], got $values"
+        ).asLeft
+    }
+
+  /**
+   * Cheap node-count + depth of a RAW sigma tree value (proposition or proof), counting one node
+   * per map and recursing into a `children` array. Used to derive the proposition's structural
+   * bound for finding #2; bounded by the value tree already materialised by the evaluator. A
+   * non-map / unrecognised shape counts as a single node (the real parser raises the fault).
+   */
+  private def sigmaRawShape(v: JsonLogicValue): (Int, Int) = v match {
+    case MapValue(m) =>
+      m.get("children") match {
+        case Some(ArrayValue(cs)) =>
+          val (n, d) = cs.foldLeft((0, 0)) {
+            case ((accN, accD), c) =>
+              val (cn, cd) = sigmaRawShape(c)
+              (accN + cn, math.max(accD, cd))
+          }
+          (n + 1, d + 1)
+        case _ => (1, 1)
+      }
+    case _ => (1, 1)
+  }
+
+  /**
+   * FINDING #2: reject — BEFORE the expensive recursive proof parse — a proof whose raw node count
+   * or depth exceeds the proposition's (`maxNodes` / `maxDepth`). The walk aborts as soon as the
+   * running count/depth crosses the bound, so the work is O(min(proofSize, maxNodes)) — a tiny
+   * proposition can never force an unbounded proof traversal. This is purely structural (no hex /
+   * curve work); the per-node type and child-count mirror check is still enforced in verifyNode.
+   */
+  private def boundProofShape(v: JsonLogicValue, maxNodes: Int, maxDepth: Int): Either[JsonLogicException, Unit] = {
+    def tooLargeMsg: JsonLogicException =
+      JsonLogicException(
+        s"sigma_verify.proof: proof tree exceeds the proposition's structure " +
+        s"(max $maxNodes nodes, depth $maxDepth) — rejected before traversal (DoS bound)"
+      )
+    // Returns Right(nodesSoFar) or Left as soon as a bound is crossed; `depth` is the current node depth (1-based).
+    def go(node: JsonLogicValue, depth: Int, nodesSoFar: Int): Either[JsonLogicException, Int] =
+      if (depth > maxDepth) tooLargeMsg.asLeft
+      else {
+        val n = nodesSoFar + 1
+        if (n > maxNodes) tooLargeMsg.asLeft
+        else
+          node match {
+            case MapValue(m) =>
+              m.get("children") match {
+                case Some(ArrayValue(cs)) =>
+                  cs.foldLeft(n.asRight[JsonLogicException]) {
+                    case (acc, c) => acc.flatMap(running => go(c, depth + 1, running))
+                  }
+                case _ => n.asRight
+              }
+            case _ => n.asRight
+          }
+      }
+    go(v, 1, 0).map(_ => ())
+  }
+
+  // --- Proposition parsing (statement only). Malformed => hard error. ---
+
+  private def sigmaField(role: String, m: Map[String, JsonLogicValue], key: String): Either[JsonLogicException, JsonLogicValue] =
+    m.get(key).toRight(JsonLogicException(s"$role: missing required field '$key'"))
+
+  private def sigmaPoint(role: String, m: Map[String, JsonLogicValue], key: String): Either[JsonLogicException, (Bn254.G1, Array[Byte])] =
+    for {
+      v   <- sigmaField(role, m, key)
+      hex <- expectStr(s"$role.$key")(v)
+      c   <- HexBytes.parseG1(hex, s"$role.$key")
+      p   <- g1OnCurve(c, s"$role.$key")
+      // Canonical fixed-width 64-byte re-encoding for the transcript (parseG1 validated width).
+      bytes <- HexBytes.parseBytes(hex, Some(HexBytes.G1Bytes), s"$role.$key")
+    } yield (p, bytes)
+
+  private def sigmaChildrenValues(role: String, m: Map[String, JsonLogicValue]): Either[JsonLogicException, List[JsonLogicValue]] =
+    sigmaField(role, m, "children").flatMap {
+      case ArrayValue(arr) if arr.nonEmpty => arr.asRight
+      case ArrayValue(_)                   => JsonLogicException(s"$role: 'children' must be a non-empty array").asLeft
+      case other                           => JsonLogicException(s"$role: 'children' must be an array, got ${other.tag}").asLeft
+    }
+
+  private def sigmaInt(role: String, m: Map[String, JsonLogicValue], key: String): Either[JsonLogicException, Int] =
+    sigmaField(role, m, key).flatMap {
+      case IntValue(i) if i >= 0 && i <= Int.MaxValue => i.toInt.asRight
+      case IntValue(i)                                => JsonLogicException(s"$role.$key: out of range: $i").asLeft
+      case other                                      => JsonLogicException(s"$role.$key: expected an integer, got ${other.tag}").asLeft
+    }
+
+  private def parsePropNode(v: JsonLogicValue, role: String): Either[JsonLogicException, Sigma.PropNode] =
+    v match {
+      case MapValue(m) =>
+        sigmaField(role, m, "type").flatMap(expectStr(s"$role.type")).flatMap {
+          case "dlog" =>
+            sigmaPoint(role, m, "pk").map { case (pk, b) => Sigma.PropDlog(pk, b) }
+          case "dhtuple" =>
+            for {
+              g  <- sigmaPoint(role, m, "g")
+              h  <- sigmaPoint(role, m, "h")
+              u  <- sigmaPoint(role, m, "u")
+              vv <- sigmaPoint(role, m, "v")
+            } yield Sigma.PropDhTuple(g._1, h._1, u._1, vv._1, g._2, h._2, u._2, vv._2)
+          case "and" =>
+            for {
+              cs       <- sigmaChildrenValues(role, m)
+              children <- cs.zipWithIndex.traverse { case (c, i) => parsePropNode(c, s"$role.and[$i]") }
+            } yield Sigma.PropAnd(children)
+          case "or" =>
+            for {
+              cs       <- sigmaChildrenValues(role, m)
+              children <- cs.zipWithIndex.traverse { case (c, i) => parsePropNode(c, s"$role.or[$i]") }
+            } yield Sigma.PropOr(children)
+          case "threshold" =>
+            for {
+              k        <- sigmaInt(role, m, "k")
+              cs       <- sigmaChildrenValues(role, m)
+              children <- cs.zipWithIndex.traverse { case (c, i) => parsePropNode(c, s"$role.threshold[$i]") }
+              n = children.length
+              // Structural validity: 1 <= k <= n. A degree-(n-k) polynomial must exist, and the
+              // n child indices 1..n must be valid GF(2^8) field elements (n <= 255).
+              _ <- Either.cond(k >= 1, (), JsonLogicException(s"$role.threshold: k must be >= 1, got $k"))
+              _ <- Either.cond(k <= n, (), JsonLogicException(s"$role.threshold: k ($k) > number of children ($n)"))
+              _ <- Either.cond(n <= 255, (), JsonLogicException(s"$role.threshold: at most 255 children (GF(2^8) indices), got $n"))
+            } yield Sigma.PropThreshold(k, children)
+          case other =>
+            JsonLogicException(s"$role: unknown node type '$other'").asLeft
+        }
+      case other =>
+        JsonLogicException(s"$role: expected a proposition node object, got ${other.tag}").asLeft
+    }
+
+  // --- Proof parsing (per-node challenge + per-leaf response). Malformed => hard error. ---
+
+  private def sigmaChallenge(role: String, m: Map[String, JsonLogicValue]): Either[JsonLogicException, Array[Byte]] =
+    for {
+      v   <- sigmaField(role, m, "e")
+      hex <- expectStr(s"$role.e")(v)
+      // Challenge is a fixed 31-byte (248-bit) big-endian value — the injective-into-Fr domain
+      // (finding #1). It is the SAME object the CDS XOR / GF(2^8) split runs over AND, taken
+      // directly (no mod R), the Fr scalar for the leaf reconstruction. The verifier compares it
+      // byte-for-byte against the recomputed 31-byte challenge.
+      bytes <- HexBytes.parseBytes(hex, Some(Sigma.ChallengeBytes), s"$role.e")
+    } yield bytes
+
+  private def sigmaResponse(role: String, m: Map[String, JsonLogicValue]): Either[JsonLogicException, BigInt] =
+    for {
+      v   <- sigmaField(role, m, "z")
+      hex <- expectStr(s"$role.z")(v)
+      z   <- HexBytes.parseScalar(hex, s"$role.z").flatMap(requireCanonicalScalar(_, s"$role.z"))
+    } yield z
+
+  private def parseProofNode(v: JsonLogicValue, role: String): Either[JsonLogicException, Sigma.ProofNode] =
+    v match {
+      case MapValue(m) =>
+        for {
+          e   <- sigmaChallenge(role, m)
+          typ <- sigmaField(role, m, "type").flatMap(expectStr(s"$role.type"))
+          node <- typ match {
+            case "dlog"    => sigmaResponse(role, m).map(z => Sigma.ProofDlog(e, z))
+            case "dhtuple" => sigmaResponse(role, m).map(z => Sigma.ProofDhTuple(e, z))
+            case "and" =>
+              for {
+                cs       <- sigmaChildrenValues(role, m)
+                children <- cs.zipWithIndex.traverse { case (c, i) => parseProofNode(c, s"$role.and[$i]") }
+              } yield Sigma.ProofAnd(e, children)
+            case "or" =>
+              for {
+                cs       <- sigmaChildrenValues(role, m)
+                children <- cs.zipWithIndex.traverse { case (c, i) => parseProofNode(c, s"$role.or[$i]") }
+              } yield Sigma.ProofOr(e, children)
+            case "threshold" =>
+              for {
+                k        <- sigmaInt(role, m, "k")
+                cs       <- sigmaChildrenValues(role, m)
+                children <- cs.zipWithIndex.traverse { case (c, i) => parseProofNode(c, s"$role.threshold[$i]") }
+              } yield Sigma.ProofThreshold(e, k, children)
+            case other =>
+              JsonLogicException(s"$role: unknown node type '$other'").asLeft
+          }
+        } yield node
+      case other =>
+        JsonLogicException(s"$role: expected a proof node object, got ${other.tag}").asLeft
+    }
+
+  /**
+   * The recursive verifier (Ergo Verifier Steps 1-6). Returns:
+   *   Left(JsonLogicException) -> MALFORMED (prop/proof shape mismatch, off-curve, identity
+   *                               base, bad threshold degree/index) — a hard encoding fault;
+   *   Right(false)             -> well-formed but cryptographically INVALID;
+   *   Right(true)              -> accept.
+   *
+   * Flow: (1) recursively check the CDS challenge-split relations top-down and reconstruct every
+   * leaf commitment bottom-up; (2) serialize the WHOLE tree (statement points + reconstructed
+   * commitments) under the frozen layout; (3) hash (domain-separated, mod R) and accept iff it
+   * equals the ROOT challenge carried in the proof.
+   */
+  private def verifyTree(prop: Sigma.PropNode, proof: Sigma.ProofNode, msg: Array[Byte]): Either[JsonLogicException, Boolean] =
+    for {
+      // Step 3 (CDS split) + Step 4 (commitment reconstruction), folded into one recursive walk.
+      // Returns (structurallyOk?, serializedBytes). The boolean carries the WELL-FORMED-but-wrong
+      // verdict (identity base, OR XOR mismatch, threshold non-interpolation); a structural fault
+      // short-circuits as Left.
+      walk <- verifyNode(prop, proof, "sigma_verify")
+      (cryptoOk, serialized) = walk
+    } yield
+      if (!cryptoOk) false
+      else {
+        // Steps 5-6: STRONG Fiat-Shamir over (DomainSep ‖ canonical tree ‖ message). The root
+        // challenge is the LOW-ORDER 31 bytes of the digest (the injective challenge domain,
+        // finding #1) — compared BYTE-FOR-BYTE against the proof's 31-byte root challenge. No
+        // mod-R reduction on EITHER side: both are 31-byte (< 2^248 < R) values, so byte equality
+        // is exactly Fr equality with no `e` vs `e+R` alias.
+        val recomputedRoot = Sigma.low31(sha256Bytes(Sigma.DomainSep ++ serialized ++ msg))
+        constantTimeEq(recomputedRoot, proof.e)
+      }
+
+  /**
+   * One recursive node visit. The PARENT challenge `proof.e` is the node's own propagated
+   * challenge (set by the parent's split, or the root challenge at the top). This call:
+   *   - reconstructs the leaf commitment(s) from `(e, z)` (Step 4) and serializes the subtree
+   *     (Step 5) under the frozen layout; and
+   *   - for connectives, CHECKS the child challenges satisfy the CDS relation (Step 3) and
+   *     recurses into each child with the child's own carried challenge.
+   * Returns `(cryptoOk, serializedBytes)`: `cryptoOk = false` is a well-formed-but-wrong verdict
+   * that propagates up (so the whole proof is `false`); `Left` is a structural/encoding fault.
+   *
+   * Prop/proof SHAPE MISMATCH (different `type`, different child counts) is a hard error.
+   */
+  private def verifyNode(
+    prop: Sigma.PropNode,
+    proof: Sigma.ProofNode,
+    role: String
+  ): Either[JsonLogicException, (Boolean, Array[Byte])] =
+    (prop, proof) match {
+      // --- DLog leaf: reconstruct a = z·G − e·pk, serialize 0x00 ‖ pk ‖ a. ---
+      case (Sigma.PropDlog(pk, pkBytes), Sigma.ProofDlog(e, z)) =>
+        // SOUNDNESS: reject the identity pk (universal forgery, mirrors schnorr_verify). The
+        // commitment is reconstructed via a = z·G − e·pk, with e the 31-byte challenge used directly
+        if (pk.isInfinity) (false, Array.emptyByteArray).asRight
+        else {
+          // The 31-byte challenge IS the Fr scalar, taken directly (no mod R — finding #1).
+          val eScalar = Sigma.challengeScalar(e)
+          val a = dlogComputeCommitment(pk, eScalar, z.mod(BigInt(Bn254.R)))
+          for {
+            aBytes <- encodeG1Bytes(a, s"$role.dlog.a")
+          } yield (true, Array(Sigma.TagDlog) ++ pkBytes ++ aBytes)
+        }
+
+      // --- DHTuple leaf: reconstruct a1 = z·g − e·u, a2 = z·h − e·v; serialize 0x01 ‖ g‖h‖u‖v‖a1‖a2. ---
+      case (
+            Sigma.PropDhTuple(g, h, u, vv, gB, hB, uB, vB),
+            Sigma.ProofDhTuple(e, z)
+          ) =>
+        // SOUNDNESS: reject identity on any statement point (g/h base => collapse; u/v image =>
+        // degenerate hiding), identical to prove_dhtuple_verify. The single shared response z is
+        // used for BOTH coordinate reconstructions (the DDH leaf has one witness, one response).
+        if (g.isInfinity || h.isInfinity || u.isInfinity || vv.isInfinity) (false, Array.emptyByteArray).asRight
+        else {
+          // The 31-byte challenge IS the Fr scalar, taken directly (no mod R — finding #1).
+          val eScalar = Sigma.challengeScalar(e)
+          val zr = z.mod(BigInt(Bn254.R))
+          val a1 = dhtupleComputeCommitment(g, u, eScalar, zr)
+          val a2 = dhtupleComputeCommitment(h, vv, eScalar, zr)
+          for {
+            a1Bytes <- encodeG1Bytes(a1, s"$role.dhtuple.a1")
+            a2Bytes <- encodeG1Bytes(a2, s"$role.dhtuple.a2")
+          } yield (true, Array(Sigma.TagDhTuple) ++ gB ++ hB ++ uB ++ vB ++ a1Bytes ++ a2Bytes)
+        }
+
+      // --- CAND: every child challenge MUST equal the node challenge (Step 3, AND rule). ---
+      case (Sigma.PropAnd(pChildren), Sigma.ProofAnd(e, prChildren)) =>
+        for {
+          _ <- Either.cond(
+            pChildren.length == prChildren.length,
+            (),
+            JsonLogicException(s"$role.and: proposition/proof child count mismatch (${pChildren.length} vs ${prChildren.length})")
+          )
+          // AND copies the parent challenge to each child; the proof must reflect that exactly.
+          childChallengesOk = prChildren.forall(c => constantTimeEq(c.e, e))
+          walked <- pChildren.zip(prChildren).zipWithIndex.traverse {
+            case ((pc, prc), i) => verifyNode(pc, prc, s"$role.and[$i]")
+          }
+          allOk = childChallengesOk && walked.forall(_._1)
+          body = walked.foldLeft(Array.emptyByteArray)((acc, w) => acc ++ w._2)
+        } yield (allOk, Array(Sigma.TagAnd) ++ uint32(pChildren.length) ++ body)
+
+      // --- COR: child challenges MUST XOR to the node challenge (Step 3, OR rule = CDS XOR). ---
+      case (Sigma.PropOr(pChildren), Sigma.ProofOr(e, prChildren)) =>
+        for {
+          _ <- Either.cond(
+            pChildren.length == prChildren.length,
+            (),
+            JsonLogicException(s"$role.or: proposition/proof child count mismatch (${pChildren.length} vs ${prChildren.length})")
+          )
+          // CDS OR: ⊕ eᵢ == e_parent over the fixed-width 31-byte challenges. This is the binding
+          // that makes simulating ALL branches impossible — the free challenges cannot be made to
+          // XOR to the FS-derived root unless the prover can invert the hash.
+          xorOk = constantTimeEq(xorBytes(prChildren.map(_.e), Sigma.ChallengeBytes), e)
+          walked <- pChildren.zip(prChildren).zipWithIndex.traverse {
+            case ((pc, prc), i) => verifyNode(pc, prc, s"$role.or[$i]")
+          }
+          allOk = xorOk && walked.forall(_._1)
+          body = walked.foldLeft(Array.emptyByteArray)((acc, w) => acc ++ w._2)
+        } yield (allOk, Array(Sigma.TagOr) ++ uint32(pChildren.length) ++ body)
+
+      // --- CTHRESHOLD(k,n): child challenges are P(1..n) for a degree-(n-k) GF(2^8) poly P,
+      //     P(0) = node challenge. Verify byte-wise interpolation (Step 3, threshold rule). ---
+      case (Sigma.PropThreshold(pk_, pChildren), Sigma.ProofThreshold(e, prk, prChildren)) =>
+        for {
+          _ <- Either.cond(
+            pk_ == prk,
+            (),
+            JsonLogicException(s"$role.threshold: proposition/proof k mismatch ($pk_ vs $prk)")
+          )
+          _ <- Either.cond(
+            pChildren.length == prChildren.length,
+            (),
+            JsonLogicException(s"$role.threshold: proposition/proof child count mismatch (${pChildren.length} vs ${prChildren.length})")
+          )
+          n = pChildren.length
+          // child index i (1..n) is the GF(2^8) evaluation point; 0 is the parent challenge.
+          interpOk = thresholdInterpolates(e, prChildren.map(_.e), pk_, n)
+          walked <- pChildren.zip(prChildren).zipWithIndex.traverse {
+            case ((pc, prc), i) => verifyNode(pc, prc, s"$role.threshold[$i]")
+          }
+          allOk = interpOk && walked.forall(_._1)
+          body = walked.foldLeft(Array.emptyByteArray)((acc, w) => acc ++ w._2)
+        } yield (allOk, Array(Sigma.TagThreshold) ++ uint32(pk_) ++ uint32(n) ++ body)
+
+      // --- Any other (prop, proof) pairing is a structural shape mismatch: hard error. ---
+      case (p, pr) =>
+        JsonLogicException(s"$role: proposition/proof node-type mismatch (${nodeKind(p)} vs ${nodeKind(pr)})").asLeft
+    }
+
+  /**
+   * CTHRESHOLD interpolation check (Step 3, byte-wise GF(2^8)). The `n` child challenges must be
+   * the evaluations `P(1), …, P(n)` of a polynomial `P` of degree `(n-k)` over GF(2^8) with
+   * `P(0) = parentChallenge`, computed independently in each of the 31 byte-lanes (exactly Ergo,
+   * which treats the challenge as a coefficient vector and interpolates per lane).
+   *
+   * Method: the polynomial has degree `(n-k)` => it is fully determined by `(n-k+1)` points. Use
+   * `(0, parentChallenge)` plus the FIRST `(n-k)` child points as the defining set, then verify
+   * the remaining `k` child points lie on the interpolant. (Equivalently: any `(n-k+1)`-subset
+   * determines `P`; the other points must be consistent. Choosing `0` + the first `(n-k)` matches
+   * the prover, which fixes `P(0)` and the `(n-k)` simulated child challenges and DERIVES the `k`
+   * real ones as `P(i)`.) When `k == n` the polynomial is the constant `parentChallenge`, so
+   * EVERY child challenge must equal the parent — the CAND-like degenerate case.
+   *
+   * `false` (not error) on mismatch: a well-formed proof whose shares simply do not interpolate.
+   */
+  private def thresholdInterpolates(parentE: Array[Byte], childEs: List[Array[Byte]], k: Int, n: Int): Boolean = {
+    val degree = n - k // polynomial degree; (degree + 1) points define it
+    val childArr = childEs.toArray
+    // Defining points: x = 0 (parent), then child indices 1..(n-k). Indices are DISTINCT by
+    // construction (0,1,2,…), so the Lagrange denominators are all invertible.
+    val knownCount = degree + 1
+    val xs = Array.tabulate(knownCount)(i => i) // 0,1,...,degree  (child j sits at x=j+1)
+    // Each of the 31 byte-lanes must independently interpolate. Per lane: build the (degree+1)
+    // defining y-values [P(0)=parent, child_0, …, child_{degree-1}] and verify the remaining
+    // children (x = degree+1 .. n) lie on the interpolant. `forall` short-circuits like the loop.
+    (0 until Sigma.ChallengeBytes).forall { lane =>
+      val ys = Array.tabulate(knownCount) { j =>
+        if (j == 0) parentE(lane) & 0xff // P(0) = parent challenge
+        else childArr(j - 1)(lane) & 0xff // child (j-1) sits at x = j
+      }
+      // Remaining (unconstrained) children: indices degree .. n-1, i.e. x = degree+1 .. n.
+      (degree until n).forall { c =>
+        (childArr(c)(lane) & 0xff) == gfLagrangeEval(xs, ys, c + 1)
+      }
+    }
+  }
+
+  /** Node-kind label for shape-mismatch error messages. */
+  private def nodeKind(n: Sigma.PropNode): String = n match {
+    case _: Sigma.PropDlog      => "dlog"
+    case _: Sigma.PropDhTuple   => "dhtuple"
+    case _: Sigma.PropAnd       => "and"
+    case _: Sigma.PropOr        => "or"
+    case _: Sigma.PropThreshold => "threshold"
+  }
+
+  private def nodeKind(n: Sigma.ProofNode): String = n match {
+    case _: Sigma.ProofDlog      => "dlog"
+    case _: Sigma.ProofDhTuple   => "dhtuple"
+    case _: Sigma.ProofAnd       => "and"
+    case _: Sigma.ProofOr        => "or"
+    case _: Sigma.ProofThreshold => "threshold"
+  }
+
+  /** Re-encode a reconstructed G1 commitment to its canonical 64-byte big-endian bytes. */
+  private def encodeG1Bytes(p: Bn254.G1, role: String): Either[JsonLogicException, Array[Byte]] =
+    encodeG1(p).flatMap(hex => HexBytes.parseBytes(hex, Some(HexBytes.G1Bytes), role))
+
+  /** Fixed 4-byte big-endian encoding of a non-negative count / threshold k (bounds the structure). */
+  private def uint32(v: Int): Array[Byte] =
+    Array((v >>> 24).toByte, (v >>> 16).toByte, (v >>> 8).toByte, v.toByte)
+
+  /**
+   * XOR a list of equal-width byte arrays into one `width`-byte array (the CDS OR fold). Inputs are
+   * width-validated upstream (every challenge is exactly `Sigma.ChallengeBytes`), so for valid input
+   * the result is unchanged; the in-range guard (`if i < a.length`) only makes a short lane total —
+   * an out-of-range lane contributes 0 instead of throwing `ArrayIndexOutOfBounds`.
+   */
+  private def xorBytes(arrays: List[Array[Byte]], width: Int): Array[Byte] =
+    Array.tabulate(width)(i => arrays.foldLeft(0)((acc, a) => acc ^ (if (i < a.length) a(i).toInt else 0)).toByte)
+
+  /** Length-checked, data-independent byte equality (no early-exit timing leak across challenges). */
+  private def constantTimeEq(a: Array[Byte], b: Array[Byte]): Boolean =
+    a.length == b.length && a.indices.foldLeft(0)((diff, i) => diff | (a(i) ^ b(i))) == 0
 
   // ---------------------------------------------------------------------------
   // Shared argument helpers.

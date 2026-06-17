@@ -111,6 +111,9 @@ object JsonLogicGasEstimator {
     case SmtVerifyOp          => config.smtVerify
     case MptVerifyOp          => config.mptVerify
     case MptPrefixVerifyOp    => config.mptPrefixVerify
+    case ProveDlogVerifyOp    => config.proveDlogVerify
+    case ProveDhTupleVerifyOp => config.proveDhtupleVerify
+    case SigmaVerifyOp        => config.sigmaVerify
   }
 
   /**

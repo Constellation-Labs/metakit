@@ -188,6 +188,30 @@ case class GasConfig(
   mptPerNode: GasCost = GasCost(400),
   mptPrefixVerify: GasCost = GasCost(1_000),
   mptPrefixPerEntry: GasCost = GasCost(800),
+  // ZK / crypto opcodes -- sigma protocols (classical no-trusted-setup Ergo/EIP-11 family). Both
+  // are standalone single-leaf Σ-guards on BN254 G1 and follow the wave-2 scale:
+  //   - proveDlogVerify is the DLog leaf, priced IDENTICALLY to schnorrVerify (it is a thin alias:
+  //     two BN254 scalar muls + a point add + a SHA-256),
+  //   - proveDhTupleVerify is the DDH / Diffie-Hellman-tuple leaf, ~2x schnorr: it does FOUR BN254
+  //     scalar muls (z·g, z·h, e·u, e·v) + two point adds + one SHA-256 over the bound transcript.
+  // Both carry a fixed arity (no variadic per-element scaling), so the base cost is pre-charged
+  // from the op alone in the gas-aware layer (no input-scaled term), exactly like schnorrVerify.
+  proveDlogVerify: GasCost = GasCost(45_000),
+  proveDhtupleVerify: GasCost = GasCost(85_000),
+  // sigma_verify -- the recursive CDS ring/threshold tree verifier. Unlike the fixed-arity leaves,
+  // its cost is the SHAPE of the proposition tree, pre-charged from the (already-evaluated) tree in
+  // the gas-aware layer BEFORE any curve arithmetic runs (the DoS bound):
+  //   total = sigmaVerify (base, incl. one root SHA-256 over the serialized tree, whose length is
+  //           bounded by the leaf+node counts already charged)
+  //         + per-DLog-leaf    (sigmaVerifyPerDlogLeaf    ~ proveDlogVerify: 2 muls + 1 add)
+  //         + per-DHTuple-leaf (sigmaVerifyPerDhtupleLeaf ~ proveDhtupleVerify: 4 muls + 2 adds)
+  //         + per-connective node (sigmaVerifyPerNode: AND challenge copy / OR XOR fold /
+  //           THRESHOLD GF(2^8) interpolation; the per-child interpolation term is folded into the
+  //           per-leaf/per-node walk, dominated by the curve work above).
+  sigmaVerify: GasCost = GasCost(45_000),
+  sigmaVerifyPerDlogLeaf: GasCost = GasCost(45_000),
+  sigmaVerifyPerDhtupleLeaf: GasCost = GasCost(85_000),
+  sigmaVerifyPerNode: GasCost = GasCost(2_000),
   const: GasCost = GasCost.Zero,
   varAccess: GasCost = GasCost(2),
   depthPenaltyMultiplier: Long = 5L,

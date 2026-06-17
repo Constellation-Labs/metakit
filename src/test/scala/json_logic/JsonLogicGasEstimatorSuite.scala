@@ -35,6 +35,8 @@ object JsonLogicGasEstimatorSuite extends SimpleIOSuite {
         JsonLogicGasEstimator.baseCost(MapOp)(cfg) == cfg.map,
         JsonLogicGasEstimator.baseCost(ReduceOp)(cfg) == cfg.reduce,
         JsonLogicGasEstimator.baseCost(Groth16VerifyOp)(cfg) == cfg.groth16Verify,
+        JsonLogicGasEstimator.baseCost(ProveDlogVerifyOp)(cfg) == cfg.proveDlogVerify,
+        JsonLogicGasEstimator.baseCost(ProveDhTupleVerifyOp)(cfg) == cfg.proveDhtupleVerify,
         JsonLogicGasEstimator.baseCost(IfElseOp)(cfg) == cfg.ifElse
       )
     )

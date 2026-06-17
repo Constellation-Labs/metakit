@@ -187,6 +187,9 @@ object JsonLogicSemantics {
           case SmtVerifyOp          => handleSmtVerifyOp
           case MptVerifyOp          => handleMptVerifyOp
           case MptPrefixVerifyOp    => handleMptPrefixVerifyOp
+          case ProveDlogVerifyOp    => handleProveDlogVerifyOp
+          case ProveDhTupleVerifyOp => handleProveDhTupleVerifyOp
+          case SigmaVerifyOp        => handleSigmaVerifyOp
         }
 
       private def isFieldMissing(field: JsonLogicValue): F[Option[JsonLogicValue]] = field match {
@@ -1271,54 +1274,88 @@ object JsonLogicSemantics {
           }
         }
 
+      /**
+       * Defensive boundary for the pure crypto opcodes. Every `CryptoOps.*` op is TOTAL by contract
+       * (returns `Either[JsonLogicException, JsonLogicValue]`, never throws); this guard is the
+       * belt-and-suspenders that GUARANTEES a residual or future throw in the pure layer can never
+       * escape INTO `F[_]` (where it would surface as a raised error in the consensus combiner —
+       * block-poisoning / node-crash risk). It catches any non-fatal `Throwable` and turns it into a
+       * deterministic `Left`, tagged with the opcode. On the happy path it is a no-op (the op already
+       * returned a `Left`/`Right`), so it does NOT change any behavior or conformance vector.
+       */
+      private def guardOp(op: String)(
+        e: => Either[JsonLogicException, JsonLogicValue]
+      ): Either[JsonLogicException, JsonLogicValue] =
+        Either.catchNonFatal(e).fold(t => JsonLogicException(s"$op: unexpected internal error: ${t.getMessage}").asLeft, identity)
+
       private def handlePoseidonOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>
-          CryptoOps.poseidon(values).map(_.pure[Result])
+          guardOp("poseidon")(CryptoOps.poseidon(values)).map(_.pure[Result])
         }
 
       private def handlePmtVerifyOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>
-          CryptoOps.pmtVerify(values).map(_.pure[Result])
+          guardOp("pmt_verify")(CryptoOps.pmtVerify(values)).map(_.pure[Result])
         }
 
       private def handleGroth16VerifyOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>
-          CryptoOps.groth16Verify(values).map(_.pure[Result])
+          guardOp("groth16_verify")(CryptoOps.groth16Verify(values)).map(_.pure[Result])
         }
 
       private def handleEcVrfVerifyOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>
-          CryptoOps.ecVrfVerify(values).map(_.pure[Result])
+          guardOp("ecvrf_verify")(CryptoOps.ecVrfVerify(values)).map(_.pure[Result])
         }
 
       private def handleBn254AddOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>
-          CryptoOps.bn254Add(values).map(_.pure[Result])
+          guardOp("bn254_add")(CryptoOps.bn254Add(values)).map(_.pure[Result])
         }
 
       private def handleBn254MulOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>
-          CryptoOps.bn254Mul(values).map(_.pure[Result])
+          guardOp("bn254_mul")(CryptoOps.bn254Mul(values)).map(_.pure[Result])
         }
 
       private def handleBn254PairingOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>
-          CryptoOps.bn254Pairing(values).map(_.pure[Result])
+          guardOp("bn254_pairing")(CryptoOps.bn254Pairing(values)).map(_.pure[Result])
         }
 
       private def handleBlsVerifyOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>
-          CryptoOps.blsVerify(values).map(_.pure[Result])
+          guardOp("bls_verify")(CryptoOps.blsVerify(values)).map(_.pure[Result])
         }
 
       private def handleBlsAggregateVerifyOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>
-          CryptoOps.blsAggregateVerify(values).map(_.pure[Result])
+          guardOp("bls_aggregate_verify")(CryptoOps.blsAggregateVerify(values)).map(_.pure[Result])
         }
 
       private def handleSchnorrVerifyOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>
-          CryptoOps.schnorrVerify(values).map(_.pure[Result])
+          guardOp("schnorr_verify")(CryptoOps.schnorrVerify(values)).map(_.pure[Result])
+        }
+
+      // Sigma-protocol leaves. prove_dlog_verify is a first-class alias for schnorr_verify (the
+      // DLog leaf); prove_dhtuple_verify is the standalone DDH / Diffie-Hellman-tuple leaf.
+      private def handleProveDlogVerifyOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
+        args.withMetrics { values =>
+          guardOp("prove_dlog_verify")(CryptoOps.proveDlogVerify(values)).map(_.pure[Result])
+        }
+
+      private def handleProveDhTupleVerifyOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
+        args.withMetrics { values =>
+          guardOp("prove_dhtuple_verify")(CryptoOps.proveDhTupleVerify(values)).map(_.pure[Result])
+        }
+
+      // Recursive CDS Σ-protocol tree verifier (ring + threshold). Pure over already-evaluated
+      // proposition/proof MapValue trees + a hex message; gas is pre-charged per-leaf/per-node
+      // from the proposition shape in the gas-aware layer before any curve arithmetic runs.
+      private def handleSigmaVerifyOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
+        args.withMetrics { values =>
+          guardOp("sigma_verify")(CryptoOps.sigmaVerify(values)).map(_.pure[Result])
         }
 
       // WAVE 3 -- auth-DB verifiers. Unlike the pure CryptoOps above, these run in F (the verifiers
