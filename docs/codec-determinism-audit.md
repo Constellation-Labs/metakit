@@ -78,3 +78,25 @@ No determinism fork risk from `Map`/`Set` ordering. The codec-hardening pass (wi
 decoder-align round-trip fixes + derive-where-byte-identical) is safe to resume; it is orthogonal to
 the hash canonicalization (the KATs pin the `.asJson` field-name/discriminator contract; the hash is
 independently canonicalized).
+
+## Appendix: `Array[Byte]` value-type audit
+
+Reviewed every `Array[Byte]` used as a CASE-CLASS FIELD (not a method param / local) across metakit
+`crypto`, `lifecycle/committed`, and `json_logic`, asking: does it back a SERIALIZED (circe) type and
+thus create a bespoke wire format for a mutable JVM array with no structural equality?
+
+- **Fixed** (had a wire format): `SparseMerkleProof.Inclusion.value` (a circe-coded proof → custom
+  `valueEncoder`/`valueDecoder`) and `SparseMerkleEntry.Present.value` (custom `sameElements` Eq) →
+  now `Hex`, which has a codec + structural equality + immutability. Wire/hash-compatible; consumers
+  convert at the boundary with `.toBytes` / `Hex.fromBytes`. (See the `refactor(smt)` commit.)
+- **Left as-is** (appropriate — NO circe codec, never serialized, raw bytes are the natural form):
+  - `SparseMerkleNode.Leaf.value` — the in-memory SMT node (hashed via its `SparseMerkleCommitment`,
+    not serialized directly).
+  - sigma `PropNode`/`ProofNode` byte fields (`pkBytes`, challenge `e`) in `CryptoOps` — the internal
+    parsed AST of `sigma_verify` (its wire form is the JsonLogicValue / hex strings); raw bytes for the
+    XOR / GF(2^8) / curve operations.
+- **ottochain:** no `Array[Byte]` case-class fields.
+
+Rule going forward: `Array[Byte]` is fine for INTERNAL/raw byte buffers, but a SERIALIZED case-class
+field should be `Hex` (tessellation) — codec + structural equality + immutability, no bespoke array
+wire format.
