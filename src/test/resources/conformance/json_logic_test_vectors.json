@@ -1,6 +1,6 @@
 {
   "description": "JSON Logic VM test vectors for cross-language compatibility",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "tests": [
     {
       "category": "constants",
@@ -329,6 +329,36 @@
         { "expr": "{\"hex_to_int\": [\"0xfff\"]}", "data": "{}", "error": true, "note": "odd-length hex body rejected by the shared codec" },
         { "expr": "{\"hex_to_int\": [\"0xzz\"]}", "data": "{}", "error": true, "note": "non-hex characters rejected" },
         { "expr": "{\"hex_to_int\": [5]}", "data": "{}", "error": true, "note": "non-string argument rejected" }
+      ]
+    },
+    {
+      "category": "set",
+      "note": "set [map, key, value]: return a NEW map with key->value; an existing key is REPLACED in place (last-wins, position-preserving), a new key is appended. Immutable (input cloned, never mutated). 1st arg MUST be a map, 2nd MUST be a string. expected is canonical sorted-key JSON (maps canonicalize by sorted keys per RFC 8785, so output order is irrelevant for consensus). Errors: non-map 1st arg, non-string key, wrong arity.",
+      "cases": [
+        { "expr": "{\"set\": [{}, \"a\", 1]}", "data": "{}", "expected": "{\"a\": 1}" },
+        { "expr": "{\"set\": [{\"a\": 1}, \"b\", 2]}", "data": "{}", "expected": "{\"a\": 1, \"b\": 2}" },
+        { "expr": "{\"set\": [{\"a\": 1, \"b\": 2}, \"a\", 9]}", "data": "{}", "expected": "{\"a\": 9, \"b\": 2}", "note": "replace existing key (last-wins)" },
+        { "expr": "{\"set\": [{}, {\"var\": \"k\"}, {\"var\": \"v\"}]}", "data": "{\"k\": \"x\", \"v\": 5}", "expected": "{\"x\": 5}", "note": "computed key and value from data" },
+        { "expr": "{\"set\": [{\"a\": 1}, \"b\", [1, 2]]}", "data": "{}", "expected": "{\"a\": 1, \"b\": [1, 2]}", "note": "array value" },
+        { "expr": "{\"set\": [{\"a\": 1}, \"b\", {\"c\": 3}]}", "data": "{}", "expected": "{\"a\": 1, \"b\": {\"c\": 3}}", "note": "object value" },
+        { "expr": "{\"set\": [{\"var\": \"voters\"}, {\"var\": \"agent\"}, true]}", "data": "{\"voters\": {\"0xaaa\": true}, \"agent\": \"0xbbb\"}", "expected": "{\"0xaaa\": true, \"0xbbb\": true}", "note": "integration: register an agent as a voter" },
+        { "expr": "{\"set\": [5, \"a\", 1]}", "data": "{}", "error": true, "note": "non-map 1st arg rejected" },
+        { "expr": "{\"set\": [{}, 5, 1]}", "data": "{}", "error": true, "note": "non-string key rejected" },
+        { "expr": "{\"set\": [{}, \"a\"]}", "data": "{}", "error": true, "note": "wrong arity (missing value)" },
+        { "expr": "{\"set\": [{}]}", "data": "{}", "error": true, "note": "wrong arity (map only)" }
+      ]
+    },
+    {
+      "category": "unset",
+      "note": "unset [map, key]: return a NEW map WITHOUT key; an absent key is a no-op (map returned unchanged, NOT an error). Immutable (input cloned, never mutated). 1st arg MUST be a map, 2nd MUST be a string. expected is canonical sorted-key JSON. Errors: non-map 1st arg, non-string key, wrong arity.",
+      "cases": [
+        { "expr": "{\"unset\": [{\"a\": 1, \"b\": 2}, \"a\"]}", "data": "{}", "expected": "{\"b\": 2}" },
+        { "expr": "{\"unset\": [{\"a\": 1}, \"z\"]}", "data": "{}", "expected": "{\"a\": 1}", "note": "absent key -> unchanged (no-op)" },
+        { "expr": "{\"unset\": [{\"a\": 1}, \"a\"]}", "data": "{}", "expected": "{}" },
+        { "expr": "{\"unset\": [{\"a\": 1, \"b\": 2}, {\"var\": \"k\"}]}", "data": "{\"k\": \"a\"}", "expected": "{\"b\": 2}", "note": "computed key from data" },
+        { "expr": "{\"unset\": [5, \"a\"]}", "data": "{}", "error": true, "note": "non-map 1st arg rejected" },
+        { "expr": "{\"unset\": [{}, 5]}", "data": "{}", "error": true, "note": "non-string key rejected" },
+        { "expr": "{\"unset\": [{}]}", "data": "{}", "error": true, "note": "wrong arity (map only)" }
       ]
     },
     {

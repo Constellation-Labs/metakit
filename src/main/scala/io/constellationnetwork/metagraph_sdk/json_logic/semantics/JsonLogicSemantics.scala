@@ -173,6 +173,8 @@ object JsonLogicSemantics {
           case PowOp                => handlePowOp
           case HexToIntOp           => handleHexToIntOp
           case HasOp                => handleHasOp
+          case SetOp                => handleSetOp
+          case UnsetOp              => handleUnsetOp
           case EntriesOp            => handleEntriesOp
           case TypeOfOp             => handleTypeOfOp
           case PoseidonOp           => handlePoseidonOp
@@ -1262,6 +1264,35 @@ object JsonLogicSemantics {
             case MapValue(m) :: StrValue(key) :: Nil =>
               ((BoolValue(m.contains(key)): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight[JsonLogicException]
             case _ => JsonLogicException(s"Unexpected input to ${HasOp.tag}, got $values").asLeft[Result[JsonLogicValue]]
+          }
+        }
+
+      // set [map, key, value] -> a NEW map = input with `key` -> `value`. If `key` is already present
+      // its value is REPLACED (last-wins, same spirit as merge); otherwise the entry is ADDED. The
+      // input map is never mutated: `m + (k -> v)` returns a fresh immutable Map (replace-in-place for
+      // an existing key, append for a new one). Map equality is order-independent (keySet + per-key),
+      // and maps canonicalize by sorted keys for hashing, so the result matches the Rust/TS evaluators
+      // regardless of insertion order. Structured exactly like handleGetOp: pure Either body wrapped by
+      // withMetrics. Non-map 1st arg / non-string key / wrong arity -> JsonLogicException.
+      private def handleSetOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
+        args.withMetrics { values =>
+          values match {
+            case MapValue(m) :: StrValue(k) :: value :: Nil =>
+              ((MapValue(m + (k -> value)): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight[JsonLogicException]
+            case _ => JsonLogicException(s"Unexpected input to ${SetOp.tag}, got $values").asLeft[Result[JsonLogicValue]]
+          }
+        }
+
+      // unset [map, key] -> a NEW map = input WITHOUT `key`. If `key` is absent the map is returned
+      // UNCHANGED (no-op, NOT an error). The input map is never mutated: `m - k` returns a fresh
+      // immutable Map (or an equal one when the key is absent). Symmetric with get/has; structured
+      // like handleGetOp. Non-map 1st arg / non-string key / wrong arity -> JsonLogicException.
+      private def handleUnsetOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
+        args.withMetrics { values =>
+          values match {
+            case MapValue(m) :: StrValue(k) :: Nil =>
+              ((MapValue(m - k): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight[JsonLogicException]
+            case _ => JsonLogicException(s"Unexpected input to ${UnsetOp.tag}, got $values").asLeft[Result[JsonLogicValue]]
           }
         }
 

@@ -78,6 +78,8 @@ object JsonLogicOp extends Enum[JsonLogicOp] with CirceEnum[JsonLogicOp] {
   case object MapKeysOp extends JsonLogicOp("keys")
   case object GetOp extends JsonLogicOp("get")
   case object HasOp extends JsonLogicOp("has")
+  case object SetOp extends JsonLogicOp("set")
+  case object UnsetOp extends JsonLogicOp("unset")
   case object EntriesOp extends JsonLogicOp("entries")
 
   // Utility Operations
