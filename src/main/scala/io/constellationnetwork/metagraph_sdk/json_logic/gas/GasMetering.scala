@@ -120,6 +120,10 @@ case class GasConfig(
   mapKeys: GasCost = GasCost(5),
   get: GasCost = GasCost(3),
   has: GasCost = GasCost(3),
+  // set/unset: build a NEW map = input with one key added/replaced/removed. Priced identically to
+  // `merge` (GasCost(5)) — the sibling map-combining op — as a single bounded structural transform.
+  set: GasCost = GasCost(5),
+  unset: GasCost = GasCost(5),
   entries: GasCost = GasCost(10),
   length: GasCost = GasCost(1),
   exists: GasCost = GasCost(5),
