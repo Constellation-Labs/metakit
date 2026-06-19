@@ -89,6 +89,9 @@ case class GasConfig(
   floor: GasCost = GasCost(3),
   ceil: GasCost = GasCost(3),
   pow: GasCost = GasCost(20),
+  // hex_to_int: parse a hex string -> unsigned big-endian BigInt. Priced identically to `modulo`
+  // (a single bounded numeric transform; no per-element scaling, so no input-scaled term).
+  hexToInt: GasCost = GasCost(10),
   map: GasCost = GasCost(10),
   filter: GasCost = GasCost(10),
   reduce: GasCost = GasCost(15),

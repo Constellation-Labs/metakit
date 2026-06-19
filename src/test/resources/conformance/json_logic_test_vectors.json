@@ -1,6 +1,6 @@
 {
   "description": "JSON Logic VM test vectors for cross-language compatibility",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "tests": [
     {
       "category": "constants",
@@ -311,6 +311,24 @@
         { "expr": "{\"typeof\": [{\"*\": [4611686018427387904, 4]}]}", "data": "{}", "expected": "\"int\"" },
         { "expr": "{\">\": [18446744073709551616, 9223372036854775807]}", "data": "{}", "expected": "true", "note": "comparison beyond 2^63 is exact (2^64 > i64::MAX)" },
         { "expr": "{\"+\": [\"1e-2000000000\"]}", "data": "{}", "error": true, "note": "string->number coercion bounds the effective decimal scale at 10000 (Rust Ratio::MAX_DECIMAL_SCALE): a huge exponent must error in every impl, never materialize 10^|scale|" }
+      ]
+    },
+    {
+      "category": "hex_to_int",
+      "note": "hex_to_int: parse a 0x-prefixed lowercase big-endian hex string into raw bytes (the shared crypto hex codec) and interpret them as an UNSIGNED big-endian integer; result is always non-negative; empty body (0x) is 0; expected encoded as a decimal string so arbitrary-precision values (beyond 2^53/i64) are exact",
+      "cases": [
+        { "expr": "{\"hex_to_int\": [\"0x\"]}", "data": "{}", "expected": "0", "note": "empty body -> 0" },
+        { "expr": "{\"hex_to_int\": [\"0x00\"]}", "data": "{}", "expected": "0" },
+        { "expr": "{\"hex_to_int\": [\"0xff\"]}", "data": "{}", "expected": "255" },
+        { "expr": "{\"hex_to_int\": [\"0x0100\"]}", "data": "{}", "expected": "256", "note": "big-endian: 0x0100 = 256" },
+        { "expr": "{\"hex_to_int\": [\"0x00ff\"]}", "data": "{}", "expected": "255", "note": "leading zero byte is ignored" },
+        { "expr": "{\"hex_to_int\": [\"0xdeadbeef\"]}", "data": "{}", "expected": "3735928559" },
+        { "expr": "{\"hex_to_int\": [\"0xffffffffffffffff\"]}", "data": "{}", "expected": "18446744073709551615", "note": "2^64-1: exceeds i64/f64 exact range, so expected is a decimal string" },
+        { "expr": "{\"hex_to_int\": [\"0x010000000000000000\"]}", "data": "{}", "expected": "18446744073709551616", "note": "2^64" },
+        { "expr": "{\"hex_to_int\": [\"0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\"]}", "data": "{}", "expected": "13407807929942597099574024998205846127479365820592393377723561443721764030073546976801874298166903427690031858186486050853753882811946569946433649006084095", "note": "64-byte all-ones -> 2^512 - 1 (arbitrary precision)" },
+        { "expr": "{\"hex_to_int\": [\"0xfff\"]}", "data": "{}", "error": true, "note": "odd-length hex body rejected by the shared codec" },
+        { "expr": "{\"hex_to_int\": [\"0xzz\"]}", "data": "{}", "error": true, "note": "non-hex characters rejected" },
+        { "expr": "{\"hex_to_int\": [5]}", "data": "{}", "error": true, "note": "non-string argument rejected" }
       ]
     },
     {
