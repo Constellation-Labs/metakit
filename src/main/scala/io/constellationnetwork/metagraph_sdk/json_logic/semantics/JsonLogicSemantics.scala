@@ -7,7 +7,7 @@ import io.constellationnetwork.metagraph_sdk.json_logic.core.JsonLogicOp._
 import io.constellationnetwork.metagraph_sdk.json_logic.core._
 import io.constellationnetwork.metagraph_sdk.json_logic.ops.CoercionOps._
 import io.constellationnetwork.metagraph_sdk.json_logic.ops.NumericOps._
-import io.constellationnetwork.metagraph_sdk.json_logic.ops.{AuthDbOps, CryptoOps}
+import io.constellationnetwork.metagraph_sdk.json_logic.ops.{AuthDbOps, CryptoOps, HexOps}
 import io.constellationnetwork.metagraph_sdk.json_logic.runtime.ResultContext._
 import io.constellationnetwork.metagraph_sdk.json_logic.runtime.{JsonLogicRuntime, ResultContext}
 import io.constellationnetwork.metagraph_sdk.numerics.Ratio
@@ -171,6 +171,7 @@ object JsonLogicSemantics {
           case FloorOp              => handleFloorOp
           case CeilOp               => handleCeilOp
           case PowOp                => handlePowOp
+          case HexToIntOp           => handleHexToIntOp
           case HasOp                => handleHasOp
           case EntriesOp            => handleEntriesOp
           case TypeOfOp             => handleTypeOfOp
@@ -1245,6 +1246,15 @@ object JsonLogicSemantics {
           }
         }
       }
+
+      // hex_to_int parses a single arbitrary-length hex string (via the shared HexBytes codec) and
+      // returns it as an UNSIGNED big-endian IntValue (BigInt, arbitrary precision). Pure over the
+      // already-evaluated argument; structured exactly like handleModuloOp (pure Either body wrapped
+      // by withMetrics). Wrong arity / non-string / malformed hex -> JsonLogicException.
+      private def handleHexToIntOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
+        args.withMetrics { values =>
+          HexOps.hexToInt(values).map(_.pure[Result])
+        }
 
       private def handleHasOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>

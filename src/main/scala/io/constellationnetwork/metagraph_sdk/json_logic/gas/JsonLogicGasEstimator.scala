@@ -95,6 +95,7 @@ object JsonLogicGasEstimator {
     case FloorOp              => config.floor
     case CeilOp               => config.ceil
     case PowOp                => config.pow
+    case HexToIntOp           => config.hexToInt
     case HasOp                => config.has
     case EntriesOp            => config.entries
     case TypeOfOp             => config.typeOf

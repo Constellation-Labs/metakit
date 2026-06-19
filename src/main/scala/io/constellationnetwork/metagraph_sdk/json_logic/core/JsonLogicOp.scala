@@ -43,6 +43,7 @@ object JsonLogicOp extends Enum[JsonLogicOp] with CirceEnum[JsonLogicOp] {
   case object FloorOp extends JsonLogicOp("floor")
   case object CeilOp extends JsonLogicOp("ceil")
   case object PowOp extends JsonLogicOp("pow")
+  case object HexToIntOp extends JsonLogicOp("hex_to_int")
 
   // Array Operations
   case object MapOp extends JsonLogicOp("map")
