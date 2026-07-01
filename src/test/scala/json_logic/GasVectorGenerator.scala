@@ -525,6 +525,44 @@ object GasVectorGenerator extends IOApp {
       )
     ),
     CategorySpec(
+      "hex_conversion",
+      Some(
+        "hex_to_int decodes a 0x-prefixed hex string to an unsigned big-endian integer. Flat base " +
+        "cost 10 (pinned EQUAL to modulo `%`) + depthPenalty; no input-scaled term (fixed-cost " +
+        "decode + fold), so the charge is independent of the hex length."
+      ),
+      List(
+        CaseSpec("{\"hex_to_int\": [\"0xff\"]}", "{}", Abs(1000), Some("single byte")),
+        CaseSpec("{\"hex_to_int\": [\"0xdeadbeef\"]}", "{}", Abs(1000), Some("4 bytes: same flat cost as 1 byte")),
+        CaseSpec("{\"hex_to_int\": [\"0x\"]}", "{}", Abs(1000), Some("empty hex decodes to 0; same flat cost")),
+        CaseSpec(
+          "{\"%\": [{\"hex_to_int\": [\"0xff\"]}, 10]}",
+          "{}",
+          Abs(1000),
+          Some("hex_to_int feeding modulo: the nested op adds its own depth penalty")
+        )
+      )
+    ),
+    CategorySpec(
+      "map_mutation",
+      Some(
+        "Immutable single-key map write (set) and delete (unset). Flat base cost 5 (pinned EQUAL to " +
+        "merge) + depthPenalty; the map, key and value are evaluated args and pay for themselves."
+      ),
+      List(
+        CaseSpec("{\"set\": [{\"a\": 1}, \"b\", 2]}", "{}", Abs(1000), Some("add a new key")),
+        CaseSpec("{\"set\": [{\"a\": 1}, \"a\", 9]}", "{}", Abs(1000), Some("replace an existing key (last-wins)")),
+        CaseSpec(
+          "{\"set\": [{}, {\"var\": \"k\"}, {\"var\": \"v\"}]}",
+          "{\"k\": \"b\", \"v\": 2}",
+          Abs(1000),
+          Some("computed key + value: the two var lookups are charged on top of the set base")
+        ),
+        CaseSpec("{\"unset\": [{\"a\": 1, \"b\": 2}, \"b\"]}", "{}", Abs(1000), Some("delete a present key")),
+        CaseSpec("{\"unset\": [{\"a\": 1}, \"z\"]}", "{}", Abs(1000), Some("delete an absent key: no-op, still charged the base"))
+      )
+    ),
+    CategorySpec(
       "oog",
       Some(
         "Out-of-gas behavior. expected = \"OOG\" asserts the meter fails with the distinct gas-exhaustion error; " +
@@ -670,7 +708,7 @@ object GasVectorGenerator extends IOApp {
               "`sbt \"Test/runMain json_logic.GasVectorGenerator\"` — " +
               "expected values are PRODUCED BY RUNNING the Scala meter, never hand-computed."
             ),
-            "version" := "1.1.0",
+            "version" := "1.2.0",
             "tests" := Json.fromValues(categories)
           )
         )
