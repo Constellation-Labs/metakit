@@ -41,8 +41,8 @@ object OrdinalCatalogVectorGenerator extends IOApp {
 
   private def buildCatalog: IO[(EpochCatalog[IO], InMemorySparseMerkleTree[IO], SparseMerkleRoot)] =
     for {
-      cat0 <- EpochCatalog.empty[IO](config)
-      cat  <- (0L to LastOrdinal).toList.foldLeftM(cat0)((c, o) => c.advance(o, mptRoot(o)).map(_._1))
+      cat0     <- EpochCatalog.empty[IO](config)
+      cat      <- (0L to LastOrdinal).toList.foldLeftM(cat0)((c, o) => c.advance(o, mptRoot(o)).map(_._1))
       composed <- cat.compose(CurrentMpt)
     } yield (cat, composed._1, composed._2)
 
@@ -76,11 +76,12 @@ object OrdinalCatalogVectorGenerator extends IOApp {
       proof <- cat.proveOrdinal(ordinal, top).flatMap(IO.fromEither(_))
       att   <- OrdinalCatalogProofVerifier.verify[IO](catalogRoot, proof, config.epochSize).flatMap(IO.fromEither(_))
       _     <- IO.println(f"[positive] ordinal=$ordinal%6d  -> ${attestationJson(att).noSpaces}")
-    } yield Json.fromJsonObject(
-      JsonObject.fromIterable(
-        List("ordinal" := ordinal, "note" := note, "proof" -> proof.asJson, "expected" -> attestationJson(att))
+    } yield
+      Json.fromJsonObject(
+        JsonObject.fromIterable(
+          List("ordinal" := ordinal, "note" := note, "proof" -> proof.asJson, "expected" -> attestationJson(att))
+        )
       )
-    )
 
   private def flipFirstHexChar(s: String): String = {
     val c = s.head
@@ -103,14 +104,17 @@ object OrdinalCatalogVectorGenerator extends IOApp {
       expected <- result match {
         case Left(err) => IO.pure(errorJson(err))
         case Right(att) =>
-          IO.raiseError(new RuntimeException(s"negative case ordinal=$ordinal expected an error but verified: ${attestationJson(att).noSpaces}"))
+          IO.raiseError(
+            new RuntimeException(s"negative case ordinal=$ordinal expected an error but verified: ${attestationJson(att).noSpaces}")
+          )
       }
       _ <- IO.println(f"[negative] ordinal=$ordinal%6d  -> ${expected.noSpaces}  ($note)")
-    } yield Json.fromJsonObject(
-      JsonObject.fromIterable(
-        List("ordinal" := ordinal, "note" := note, "proof" -> mutatedJson, "expected" -> expected)
+    } yield
+      Json.fromJsonObject(
+        JsonObject.fromIterable(
+          List("ordinal" := ordinal, "note" := note, "proof" -> mutatedJson, "expected" -> expected)
+        )
       )
-    )
 
   private def modField(json: Json, field: String, f: Json => Json): Json =
     json.hcursor.downField(field).withFocus(f).top.getOrElse(json)
@@ -158,10 +162,10 @@ object OrdinalCatalogVectorGenerator extends IOApp {
               "io.constellationnetwork.metagraph_sdk.lifecycle.committed.OrdinalCatalogVectorGenerator\"` — " +
               "expected values are PRODUCED BY RUNNING the Scala verifier, never hand-computed."
             ),
-            "version"     := "1.0.0",
-            "epochSize"   := config.epochSize,
+            "version" := "1.0.0",
+            "epochSize" := config.epochSize,
             "catalogRoot" := catalogRoot.value.value,
-            "cases"       := Json.fromValues(positives ++ negatives)
+            "cases" := Json.fromValues(positives ++ negatives)
           )
         )
       )
