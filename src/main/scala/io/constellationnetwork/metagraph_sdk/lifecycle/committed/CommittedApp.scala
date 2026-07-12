@@ -62,7 +62,7 @@ object CommittedApp {
   ): F[BaseDataApplicationL0Service[F]] = {
     implicit val wrappedEncoder: Encoder[CommittedOnChain[PUB]] = CommittedOnChain.encoder[PUB]
     implicit val wrappedDecoder: Decoder[CommittedOnChain[PUB]] = CommittedOnChain.decoder[PUB]
-    val view = CommittedView[PRV]
+    CommittedView[PRV]
 
     for {
       committedState   <- CommittedState.make[F, PRV](genesisState.calculated, journal, config)
@@ -115,7 +115,7 @@ object CommittedApp {
           )(implicit context: L0NodeContext[F]): F[DataState[CommittedOnChain[PUB], PRV]] =
             for {
               combined <- combiner.foldLeft(DataState(state.onChain.inner, state.calculated, state.sharedArtifacts), updates)
-              next     <- committedState.advanceWork(state.onChain.breadcrumb, view.entries(combined.calculated))
+              next     <- committedState.advanceWork(state.onChain.breadcrumb, combined.calculated)
             } yield DataState(CommittedOnChain(combined.onChain, next), combined.calculated, combined.sharedArtifacts)
 
           override def getCalculatedState(implicit context: L0NodeContext[F]): F[(SnapshotOrdinal, PRV)] =

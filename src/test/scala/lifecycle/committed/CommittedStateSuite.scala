@@ -171,4 +171,92 @@ object CommittedStateSuite extends SimpleIOSuite {
       !CommitKey.unsafe("fiberx/abc").toHex.value.startsWith(ns.prefixHex.value)
     )
   }
+  // ── incrementalTrie mode (CommittedConfig.incrementalTrie = true) ────────────────────────────
+  // Roots must be IDENTICAL to full-rebuild mode in every path -- the flag changes how roots are
+  // computed, never their value. See CommittedConfig.incrementalTrie for the trust model.
+
+  private val incrementalCfg = CommittedConfig(incrementalTrie = true)
+
+  test("incremental mode: a transition sequence yields roots identical to full-rebuild mode") {
+    // exercises upserts, removals, collapse-to-empty (the emptied-trie applyDelta branch), and
+    // regrowth from empty
+    val states = List(
+      s1,
+      ToyState(Map("aaa" -> 5), Map.empty),
+      ToyState.empty,
+      ToyState(Map("zzz" -> 9), Map("gamma" -> "g"))
+    )
+    def run(cfg: CommittedConfig): IO[List[CommittedRoots]] =
+      mkCommitted(s0, cfg).flatMap { st =>
+        states.zipWithIndex.traverse { case (s, i) => st.setCommitted(ord(i.toLong + 1), s).map(_.roots) }
+      }
+    for {
+      full <- run(CommittedConfig.default)
+      inc  <- run(incrementalCfg)
+    } yield expect(full == inc)
+  }
+
+  test("incremental mode: hashFor equals full-rebuild hashFor for multiple speculative states") {
+    val candidateA = s1
+    val candidateB = ToyState(Map("aaa" -> 7), Map("alpha" -> "x"))
+    for {
+      stFull <- mkCommitted(s0)
+      stInc  <- mkCommitted(s0, incrementalCfg)
+      fa     <- stFull.hashFor(candidateA, None)
+      fb     <- stFull.hashFor(candidateB, None)
+      ia     <- stInc.hashFor(candidateA, None)
+      ib     <- stInc.hashFor(candidateB, None)
+    } yield expect.all(fa == ia, fb == ib)
+  }
+
+  test("incremental mode: advanceWork emits the same breadcrumbs, including replay chaining") {
+    val s2 = ToyState(Map("aaa" -> 5), Map.empty)
+    for {
+      stFull <- mkCommitted(s0)
+      stInc  <- mkCommitted(s0, incrementalCfg)
+      gFull  <- stFull.committed.map(_.breadcrumb)
+      gInc   <- stInc.committed.map(_.breadcrumb)
+      bFull  <- stFull.advanceWork(gFull, s1)
+      bInc   <- stInc.advanceWork(gInc, s1)
+      // chain off the work cache: the parent is NOT the cell -- the incremental base is still
+      // the cell's trie, correct because the MPT is canonical in the final entry set
+      b2Full <- stFull.advanceWork(bFull, s2)
+      b2Inc  <- stInc.advanceWork(bInc, s2)
+    } yield expect.all(bFull == bInc, b2Full == b2Inc)
+  }
+
+  test("incremental mode: the stored trie is STRUCTURALLY identical to a from-scratch build") {
+    // not merely digest-equal: proofs are served from the stored trie, so its node structure
+    // must match what any verifier rebuilding from entries would produce
+    for {
+      st      <- mkCommitted(s0, incrementalCfg)
+      c1      <- st.setCommitted(ord(1), s1)
+      rebuilt <- CommittedCommitment.buildTrie[IO](ToyState.view.entries(s1))
+    } yield expect.all(c1.trie == rebuilt, c1.roots.mptRoot == rebuilt.rootNode.digest)
+  }
+
+  test("incremental mode trusts the view: a lying delta commits WITHOUT RootDivergence (the trade)") {
+    // With the from-scratch cross-check skipped, an unfaithful custom delta is NOT caught at
+    // runtime -- the applyDelta == buildTrie property test is the offline guarantee. This test
+    // documents the failure mode the flag accepts; it is the reason the default stays false.
+    val lyingView: CommittedView[ToyState] = new CommittedView[ToyState] {
+      def entries(s: ToyState) = ToyState.view.entries(s)
+      override def delta(prev: ToyState, next: ToyState): CommitDelta = CommitDelta.empty
+    }
+    for {
+      journal <- CatalogJournal.inMemory[IO]
+      st <- CommittedState.make[IO, ToyState](s0, journal, incrementalCfg)(
+        IO.asyncForIO,
+        JsonBinaryHasher.deriveFromCodec[IO],
+        lyingView
+      )
+      genesis <- st.committed
+      result  <- st.setCommitted(ord(1), s1).attempt
+    } yield
+      expect.all(
+        result.isRight,
+        // empty (lying) delta => root unchanged from genesis: committed, silently wrong
+        result.exists(_.roots.mptRoot == genesis.roots.mptRoot)
+      )
+  }
 }
