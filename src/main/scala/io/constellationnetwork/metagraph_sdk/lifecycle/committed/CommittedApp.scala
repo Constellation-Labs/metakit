@@ -62,7 +62,6 @@ object CommittedApp {
   ): F[BaseDataApplicationL0Service[F]] = {
     implicit val wrappedEncoder: Encoder[CommittedOnChain[PUB]] = CommittedOnChain.encoder[PUB]
     implicit val wrappedDecoder: Decoder[CommittedOnChain[PUB]] = CommittedOnChain.decoder[PUB]
-    CommittedView[PRV]
 
     for {
       committedState   <- CommittedState.make[F, PRV](genesisState.calculated, journal, config)
