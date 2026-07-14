@@ -83,7 +83,7 @@ object CommittedBootstrapSuite extends SimpleIOSuite {
       cSrc    <- src.committed
       fresh   <- freshNode
       seeded  <- fresh.setCommitted(ord(5), state(5), Some(cSrc.breadcrumb))
-      attempt <- fresh.advanceWork(seeded.breadcrumb, ToyState.view.entries(state(6))).attempt
+      attempt <- fresh.advanceWork(seeded.breadcrumb, state(6)).attempt
     } yield expect(attempt.left.exists(_.isInstanceOf[CommittedStateError.BreadcrumbUnresolvable]))
   }
 
@@ -186,13 +186,13 @@ object CommittedBootstrapSuite extends SimpleIOSuite {
       src  <- source(3)
       cSrc <- src.committed
 
-      next <- src.advanceWork(cSrc.breadcrumb, ToyState.view.entries(state(4)))
+      next <- src.advanceWork(cSrc.breadcrumb, state(4))
       // the emitted breadcrumb must equal what setCommitted then derives
       c4 <- src.setCommitted(ord(4), state(4))
 
       // forged at the committed ordinal: the follower's transition check fires
       forged = c4.breadcrumb.copy(roots = c4.roots.copy(mptRoot = cSrc.roots.mptRoot))
-      rejected <- src.advanceWork(forged, ToyState.view.entries(state(5))).attempt
+      rejected <- src.advanceWork(forged, state(5)).attempt
 
       // forged roots that correspond to NO committed state (a real mptRoot paired with a catalog
       // root that does not recompose from it): not the cell, not the work cache, unreproducible
@@ -200,7 +200,7 @@ object CommittedBootstrapSuite extends SimpleIOSuite {
       // ordinal: a populated journal legitimately resolves genuine historical roots (the restart /
       // replay path), so the "unresolvable" case must use roots the node never committed.
       unknown = CommittedBreadcrumb(ord(9), c4.roots.copy(catalogRoot = cSrc.roots.catalogRoot))
-      unresolvable <- src.advanceWork(unknown, ToyState.view.entries(state(5))).attempt
+      unresolvable <- src.advanceWork(unknown, state(5)).attempt
     } yield
       expect.all(
         next.ordinal == ord(4),
@@ -215,7 +215,7 @@ object CommittedBootstrapSuite extends SimpleIOSuite {
       src  <- source(3)
       cSrc <- src.committed
       // an honest follower derives the same roots the proposer attested
-      preview <- src.advanceWork(cSrc.breadcrumb, ToyState.view.entries(state(4)))
+      preview <- src.advanceWork(cSrc.breadcrumb, state(4))
       ok      <- src.setCommitted(ord(4), state(4), Some(preview))
 
       // a forged attested breadcrumb for the NEXT ordinal is caught at commit time
@@ -234,9 +234,9 @@ object CommittedBootstrapSuite extends SimpleIOSuite {
       cSrc <- src.committed
 
       // fold combine over three future ordinals (the DataApplicationTraverse pattern)
-      b3 <- src.advanceWork(cSrc.breadcrumb, ToyState.view.entries(state(3)))
-      b4 <- src.advanceWork(b3, ToyState.view.entries(state(4)))
-      b5 <- src.advanceWork(b4, ToyState.view.entries(state(5)))
+      b3 <- src.advanceWork(cSrc.breadcrumb, state(3))
+      b4 <- src.advanceWork(b3, state(4))
+      b5 <- src.advanceWork(b4, state(5))
 
       // the cell is untouched...
       stillAt2 <- src.committed

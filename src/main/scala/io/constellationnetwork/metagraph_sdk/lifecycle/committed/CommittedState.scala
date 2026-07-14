@@ -6,12 +6,11 @@ import cats.syntax.all._
 
 import scala.collection.immutable.SortedMap
 
+import io.constellationnetwork.metagraph_sdk.crypto.mpt.MerklePatriciaTrie
 import io.constellationnetwork.metagraph_sdk.crypto.smt.SparseMerkleRoot
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher
 import io.constellationnetwork.schema.SnapshotOrdinal
 import io.constellationnetwork.security.hash.Hash
-
-import io.circe.Json
 
 /**
  * The single writable holder of the committed view -- a PRIVATE `AtomicCell[F, Committed[F, S]]`
@@ -54,18 +53,38 @@ final class CommittedState[F[_]: Async: JsonBinaryHasher, S] private (
 
   def committed: F[Committed[F, S]] = cell.get
 
+  /**
+   * The state-dict trie for `target`, computed per [[CommittedConfig.incrementalTrie]]:
+   * full rebuild from `view.entries` (default), or derived as
+   * `applyDelta(prev.trie, view.delta(prev.state, target))` -- O(churn) trie work.
+   *
+   * The derivation is TOTAL: it does not assume `target` is contiguous with `prev`. The MPT is
+   * canonical (structure is a function of the final key set alone -- `MerklePatriciaDeterminismSuite`),
+   * so applying the structural diff from ANY base state yields the same trie a full rebuild would;
+   * a non-contiguous `target` (bootstrap/replay) just makes the diff large, never wrong.
+   * Read-only with respect to the cell -- `prev.trie` is persistent and never mutated.
+   */
+  private def trieFor(prev: Committed[F, S], target: S): F[MerklePatriciaTrie] =
+    if (config.incrementalTrie) CommittedCommitment.applyDelta[F](prev.trie, view.delta(prev.state, target))
+    else CommittedCommitment.buildTrie[F](view.entries(target))
+
   // ---------------------------------------------------------------------------------------------
   // combine-side: breadcrumb validation + next-breadcrumb derivation (cell is NOT mutated)
   // ---------------------------------------------------------------------------------------------
 
   /**
    * Validate an incoming on-chain breadcrumb and derive the transition to the next ordinal for
-   * entry set `nextEntries`. The parent breadcrumb must be RESOLVABLE -- the committed cell, a
+   * state `nextState`. The parent breadcrumb must be RESOLVABLE -- the committed cell, a
    * recent [[advanceWork]] result, or (restart) the journal -- and where it overlaps the cell it
    * must MATCH ([[CommittedStateError.BreadcrumbMismatch]]): this is the follower-side rejection
    * of forged breadcrumbs.
+   *
+   * The mptRoot is computed via [[trieFor]] (full rebuild by default, incremental when
+   * [[CommittedConfig.incrementalTrie]]). Note the base for the incremental derivation is always
+   * the CELL's trie, not the (possibly work-cached, non-contiguous) `parent` -- correct in all
+   * cases because the MPT is canonical in the final entry set (see [[trieFor]]).
    */
-  def advanceWork(parent: CommittedBreadcrumb, nextEntries: SortedMap[CommitKey, Json]): F[CommittedBreadcrumb] =
+  def advanceWork(parent: CommittedBreadcrumb, nextState: S): F[CommittedBreadcrumb] =
     for {
       prev <- cell.get
       _ <- CommittedStateError
@@ -76,7 +95,7 @@ final class CommittedState[F[_]: Async: JsonBinaryHasher, S] private (
         case Some(c) => c.pure[F]
         case None    => CommittedStateError.BreadcrumbUnresolvable(parent).raiseError[F, EpochCatalog[F]]
       }
-      nextTrie <- CommittedCommitment.buildTrie[F](nextEntries)
+      nextTrie <- trieFor(prev, nextState)
       mptRoot = nextTrie.rootNode.digest
       advanced <- parentCatalog.advance(parent.ordinal.value.value, parent.roots.mptRoot)
       (nextCatalog, _) = advanced
@@ -176,7 +195,7 @@ final class CommittedState[F[_]: Async: JsonBinaryHasher, S] private (
   def hashFor(state: S, contextBreadcrumb: Option[CommittedBreadcrumb]): F[Hash] =
     for {
       prev <- cell.get
-      trie <- CommittedCommitment.buildTrie[F](view.entries(state))
+      trie <- trieFor(prev, state)
       mptRoot = trie.rootNode.digest
       catalogRoot <- contextBreadcrumb.filter(_.ordinal.value.value > prev.ordinal.value.value) match {
         case Some(b) => b.roots.catalogRoot.pure[F]
@@ -241,11 +260,19 @@ final class CommittedState[F[_]: Async: JsonBinaryHasher, S] private (
     for {
       delta   <- view.delta(prev.state, nextState).pure[F]
       applied <- CommittedCommitment.applyDelta[F](prev.trie, delta)
-      derived <- CommittedCommitment.buildTrie[F](view.entries(nextState))
-      _ <- CommittedStateError
-        .RootDivergence(ordinal, applied.rootNode.digest, derived.rootNode.digest)
-        .raiseError[F, Unit]
-        .whenA(applied.rootNode.digest != derived.rootNode.digest)
+      // The from-scratch cross-check: catches an unfaithful custom `view.delta` at runtime by
+      // paying a full O(state) rebuild every transition. Skipped in incremental mode -- there the
+      // `applyDelta == buildTrie` property test is the (offline) guarantee; see
+      // [[CommittedConfig.incrementalTrie]] for the full trust model.
+      _ <-
+        if (config.incrementalTrie) Async[F].unit
+        else
+          CommittedCommitment.buildTrie[F](view.entries(nextState)).flatMap { derived =>
+            CommittedStateError
+              .RootDivergence(ordinal, applied.rootNode.digest, derived.rootNode.digest)
+              .raiseError[F, Unit]
+              .whenA(applied.rootNode.digest != derived.rootNode.digest)
+          }
       mptRoot = applied.rootNode.digest
       advanced <- epochs.advance(prev.ordinal.value.value, prev.roots.mptRoot)
       (nextEpochs, sealEvent) = advanced
