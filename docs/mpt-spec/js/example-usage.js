@@ -116,8 +116,7 @@ module.exports = {
 if (require.main === module) {
   console.log('Running example verification...\n');
   
-  // Note: This example proof won't actually verify correctly
-  // because the hashes are made up. In a real scenario,
-  // you would get a valid proof from your Scala backend.
+  // The example proof mirrors ../test-proof.json (a real proof exported from
+  // the Scala backend), so it verifies against the root hash above.
   verifyProof(exampleProof);
 }

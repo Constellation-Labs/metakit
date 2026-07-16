@@ -1,0 +1,121 @@
+{
+  "description" : "KAT fixtures for the sealed MerklePatriciaProof wire format {type, path, witness}: every proof is produced by the real Scala prover (MerklePatriciaProver.provePath) over the listed trie entries (key hex -> string value) and byte-pinned by MptSpecFixtureSuite. An Inclusion leaf's dataDigest equals sha256(JCS(record)). Regenerate with `sbt \"Test/runMain crypto.mpt.MptSpecFixtureGenerator\"`; never edit by hand. Legacy inclusion-only consumers keep test-proof.json.",
+  "cases" : [
+    {
+      "name" : "inclusion-tagged",
+      "trie" : {
+        "a1" : "va",
+        "b2" : "vb"
+      },
+      "rootHash" : "636070c166aaa4ec22356178d13957c9f65aab521912f34d4b49b99525d36fb0",
+      "record" : "va",
+      "proof" : {
+        "type" : "Inclusion",
+        "path" : "a1",
+        "witness" : [
+          {
+            "type" : "Leaf",
+            "contents" : {
+              "remaining" : "1",
+              "dataDigest" : "0fa58606fbfacb5cc33ec56db7c113366867a21161761de02e41ca014bb5bd55"
+            }
+          },
+          {
+            "type" : "Branch",
+            "contents" : {
+              "pathsDigest" : {
+                "a" : "86c503bdd9a920e37517bacb40901ae2f62c3f949d9fae6603a22a3e7a7d23f9",
+                "b" : "9e972d00c5b409546e3ee011f0272259ff443efbb2902db7a7b8d02a2f4e814b"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name" : "absence-branch-missing-nibble",
+      "trie" : {
+        "a1" : "va",
+        "b2" : "vb"
+      },
+      "rootHash" : "636070c166aaa4ec22356178d13957c9f65aab521912f34d4b49b99525d36fb0",
+      "proof" : {
+        "type" : "Absence",
+        "path" : "c3",
+        "witness" : [
+          {
+            "type" : "Branch",
+            "contents" : {
+              "pathsDigest" : {
+                "a" : "86c503bdd9a920e37517bacb40901ae2f62c3f949d9fae6603a22a3e7a7d23f9",
+                "b" : "9e972d00c5b409546e3ee011f0272259ff443efbb2902db7a7b8d02a2f4e814b"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name" : "absence-other-leaf",
+      "trie" : {
+        "abcd" : "solo"
+      },
+      "rootHash" : "91ec99403d8f6c131edcc2e334cbf47c134d03fe06343bf6b4e9c53ca741c5c4",
+      "proof" : {
+        "type" : "Absence",
+        "path" : "abce",
+        "witness" : [
+          {
+            "type" : "Leaf",
+            "contents" : {
+              "remaining" : "abcd",
+              "dataDigest" : "c9408ee2f89ccab4e6bb7ee02878184614f0bd2fc54e44dcfa75e6bb2694f293"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name" : "absence-extension-divergence",
+      "trie" : {
+        "abcd" : "v1",
+        "abce" : "v2"
+      },
+      "rootHash" : "c695f1bc08cd2ab0d8c4be38f6c24ab2c03a07b9bca00b58c27fafb982eae62b",
+      "proof" : {
+        "type" : "Absence",
+        "path" : "ab12",
+        "witness" : [
+          {
+            "type" : "Extension",
+            "contents" : {
+              "shared" : "abc",
+              "childDigest" : "07ebe7248ce248c3540a3408e176d504fa2ab164325484718d3f0b1227b314c2"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name" : "absence-empty-trie",
+      "trie" : {
+        
+      },
+      "rootHash" : "e90c3c9dea263116037317c96a1305c55a563824d3449e499e0484df6667fbf9",
+      "proof" : {
+        "type" : "Absence",
+        "path" : "deadbeef",
+        "witness" : [
+          {
+            "type" : "Branch",
+            "contents" : {
+              "pathsDigest" : {
+                
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

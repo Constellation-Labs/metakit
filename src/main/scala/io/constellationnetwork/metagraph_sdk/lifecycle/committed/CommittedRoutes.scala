@@ -19,7 +19,17 @@ import org.http4s.{HttpRoutes, Response, Uri}
  * internally consistent.
  *
  *   - `GET  /committed/root`                  -> { ordinal, mptRoot, catalogRoot, calculatedStateHash, hydrated }
- *   - `GET  /committed/proof/<key...>`        -> single-key inclusion proof (key segments in the path)
+ *   - `GET  /committed/proof/<key...>`        -> single-key STATUS proof (key segments in the path): the
+ *                                                type-tagged [[crypto.mpt.MerklePatriciaProof]] -- `Inclusion`
+ *                                                when present, first-class `Absence` when not (404 never;
+ *                                                absence is provable against the same mptRoot).
+ *                                                MIGRATION (`docs/mpt-spec/README.md`): missing keys used to
+ *                                                404 -- consumers detecting absence by status MUST dispatch on
+ *                                                the proof-level `type` tag instead; `Inclusion` responses
+ *                                                gained that `type` field, so strict deny-unknown-field
+ *                                                decoders must add it. Absence verification is implemented by
+ *                                                the `docs/mpt-spec/js` reference; the other bundled
+ *                                                references are inclusion-only pending ports.
  *   - `POST /committed/proofs`                -> batch proof; body `{ "keys": ["ns/a", ...] }`
  *   - `GET  /committed/proof-prefix/<ns...>`  -> complete prefix attestation for a namespace
  *   - `GET  /committed/proof-ordinal/:ordinal`-> [[OrdinalCatalogProof]] (404 never; absence is provable;

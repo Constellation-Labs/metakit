@@ -160,19 +160,21 @@ object CommittedAppSuite extends SimpleIOSuite {
       )
   }
 
-  test("GET /committed/proof/<key> proves a key; invalid keys are 400, absent keys 404") {
+  test("GET /committed/proof/<key> proves a key's status; invalid keys are 400, absent keys get an Absence proof") {
     for {
-      service <- makeService
-      found   <- get(service, "/committed/proof/fiber/aaa")
-      json    <- found.as[Json]
-      missing <- get(service, "/committed/proof/fiber/zzz")
-      invalid <- get(service, "/committed/proof/FIBER/aaa")
+      service     <- makeService
+      found       <- get(service, "/committed/proof/fiber/aaa")
+      json        <- found.as[Json]
+      missing     <- get(service, "/committed/proof/fiber/zzz")
+      missingJson <- missing.as[Json]
+      invalid     <- get(service, "/committed/proof/FIBER/aaa")
     } yield
       expect.all(
         found.status == Status.Ok,
         json.hcursor.downField("key").as[String] == Right("fiber/aaa"),
-        json.hcursor.downField("proof").succeeded,
-        missing.status == Status.NotFound,
+        json.hcursor.downField("proof").downField("type").as[String] == Right("Inclusion"),
+        missing.status == Status.Ok,
+        missingJson.hcursor.downField("proof").downField("type").as[String] == Right("Absence"),
         invalid.status == Status.BadRequest
       )
   }

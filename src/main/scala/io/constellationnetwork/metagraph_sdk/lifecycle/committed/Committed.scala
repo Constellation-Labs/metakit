@@ -5,11 +5,7 @@ import cats.effect.Sync
 import cats.syntax.all._
 
 import io.constellationnetwork.metagraph_sdk.crypto.mpt.api._
-import io.constellationnetwork.metagraph_sdk.crypto.mpt.{
-  MerklePatriciaBatchInclusionProof,
-  MerklePatriciaInclusionProof,
-  MerklePatriciaTrie
-}
+import io.constellationnetwork.metagraph_sdk.crypto.mpt.{MerklePatriciaBatchInclusionProof, MerklePatriciaProof, MerklePatriciaTrie}
 import io.constellationnetwork.metagraph_sdk.crypto.smt.impl.InMemorySparseMerkleTree
 import io.constellationnetwork.metagraph_sdk.crypto.smt.{SparseMerkleProof, SparseMerkleRoot}
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher
@@ -63,21 +59,21 @@ final case class Committed[F[_], S] private[committed] (
   def isHydrated: Boolean = catalog.live.isDefined
 
   /**
-   * Inclusion proof for one key against [[CommittedRoots.mptRoot]]. An absent key is a uniform
-   * `PathNotFound`: the underlying prover reports a path that diverges mid-edge as
-   * `InvalidNodeType`, but on this trie (built and asserted by the committed layer itself) that can
-   * only mean the key is not present.
+   * Proof of one key's STATUS against [[CommittedRoots.mptRoot]]: inclusion when present, a
+   * first-class [[MerklePatriciaProof.Absence]] when not (nullifier-style non-membership,
+   * verifiable against the consensus-signed committed root -- by [[crypto.mpt.api.MerklePatriciaVerifier]]
+   * or the `docs/mpt-spec/js` reference; the other bundled references are inclusion-only pending
+   * ports, see `docs/mpt-spec/README.md`). On this trie
+   * (built and asserted by the committed layer itself) every divergence IS a genuinely-missing
+   * key, so nothing is left to report as `PathNotFound`; the error channel only carries
+   * `ProofGenerationError` (hashing failure).
    */
   def proveKey(
     key: CommitKey
-  )(implicit F: MonadThrow[F], H: JsonBinaryHasher[F]): F[Either[MerklePatriciaProofError, MerklePatriciaInclusionProof]] =
+  )(implicit F: MonadThrow[F], H: JsonBinaryHasher[F]): F[Either[MerklePatriciaProofError, MerklePatriciaProof]] =
     MerklePatriciaProver
       .make[F](trie)
-      .attestPath(key.toHex)
-      .map(_.leftMap {
-        case InvalidNodeType(_) => PathNotFound(key.value)
-        case other              => other
-      })
+      .provePath(key.toHex)
 
   /** One batch proof covering all `keys` against [[CommittedRoots.mptRoot]]. */
   def proveKeys(

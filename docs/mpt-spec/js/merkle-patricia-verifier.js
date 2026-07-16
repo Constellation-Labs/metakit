@@ -95,7 +95,13 @@ class InvalidNodeCommitment extends MerklePatriciaVerificationError {
 }
 
 /**
- * Merkle Patricia Verifier - verifies inclusion proofs
+ * Merkle Patricia Verifier - verifies sealed inclusion-or-absence proofs
+ *
+ * This is THE reference implementation for the sealed
+ * `{type: "Inclusion"|"Absence", path, witness}` wire format produced by the
+ * Scala `MerklePatriciaProver.provePath` / served by `GET /committed/proof/<key>`.
+ * Legacy un-tagged `{path, witness}` proofs are accepted and treated as
+ * inclusion (the tagged Inclusion encoding is byte-identical plus the tag).
  */
 class MerklePatriciaVerifier {
   constructor(rootHash) {
@@ -103,11 +109,30 @@ class MerklePatriciaVerifier {
   }
 
   /**
+   * Verify a sealed Merkle Patricia proof, dispatching on the proof-level
+   * 'type' tag:
+   *   - "Inclusion" (or no tag, the legacy shape) -> inclusion verification
+   *   - "Absence" -> absence verification (same fold, different terminal assertion)
+   * @param {Object} proof - { type?, path, witness }
+   * @returns {Object} - { success: boolean, error?: Error }
+   */
+  verify(proof) {
+    const tag = proof ? proof.type : undefined;
+    if (tag === 'Absence') {
+      return this.verifyAbsence(proof);
+    }
+    if (tag === undefined || tag === 'Inclusion') {
+      return this.verifyInclusion(proof);
+    }
+    return { success: false, error: new InvalidWitness(`Unknown proof type: ${tag}`) };
+  }
+
+  /**
    * Verify a Merkle Patricia inclusion proof
    * @param {Object} proof - The inclusion proof with 'path' and 'witness' fields
    * @returns {Object} - { success: boolean, error?: Error }
    */
-  verify(proof) {
+  verifyInclusion(proof) {
     try {
       // Parse the path as nibbles
       const pathNibbles = Nibble.fromHash(proof.path);
@@ -153,13 +178,158 @@ class MerklePatriciaVerifier {
       }
 
       throw new InvalidWitness('Proof verification incomplete');
-      
+
     } catch (error) {
       if (error instanceof MerklePatriciaVerificationError) {
         return { success: false, error };
       }
       return { success: false, error: new InvalidWitness(`Verification failed: ${error.message}`) };
     }
+  }
+
+  /**
+   * Verify a Merkle Patricia ABSENCE proof: NO value is committed at proof.path
+   * under the root. Mirrors the Scala verifier's confirmAbsence: the witness
+   * replays the SAME root-first fold as inclusion (digest recomputation per
+   * commitment with the node-type prefix, child-digest threading, nibble
+   * consumption); the terminal (deepest) commitment must hash to the digest the
+   * fold reached AND structurally refuse the next step:
+   *
+   *   - Branch:    the remaining path is EMPTY (this MPT's branches carry no
+   *                value slot, so a path ending at a branch is necessarily
+   *                absent) OR pathsDigest lacks the next nibble;
+   *   - Extension: 'shared' is NOT a prefix of the remaining path (divergence
+   *                mid-edge, including a remaining path shorter than the edge);
+   *   - Leaf:      'remaining' differs from the remaining path (a different key
+   *                occupies the position).
+   *
+   * A terminal that could continue (or a Leaf that MATCHES) proves nothing.
+   * @param {Object} proof - The absence proof with 'path' and 'witness' fields
+   * @returns {Object} - { success: boolean, error?: Error }
+   */
+  verifyAbsence(proof) {
+    try {
+      const pathNibbles = Nibble.fromHash(proof.path);
+      const witness = [...proof.witness].reverse();
+
+      if (witness.length === 0) {
+        return { success: false, error: new InvalidWitness('Empty witness') };
+      }
+
+      let currentDigest = this.rootHash;
+      let remainingPath = pathNibbles;
+
+      for (let index = 0; index < witness.length; index++) {
+        const commitment = witness[index];
+
+        if (!commitment.type || !commitment.contents) {
+          throw new InvalidWitness('Invalid commitment structure');
+        }
+
+        // The deepest commitment is the divergence terminal.
+        if (index === witness.length - 1) {
+          return this.verifyAbsenceTerminal(commitment, currentDigest, remainingPath);
+        }
+
+        switch (commitment.type) {
+          case 'Extension': {
+            const extResult = this.verifyExtension(commitment.contents, currentDigest, remainingPath);
+            if (!extResult.success) return extResult;
+            currentDigest = commitment.contents.childDigest;
+            remainingPath = extResult.remainingPath;
+            break;
+          }
+
+          case 'Branch': {
+            const branchResult = this.verifyBranch(commitment.contents, currentDigest, remainingPath);
+            if (!branchResult.success) return branchResult;
+            currentDigest = branchResult.childDigest;
+            remainingPath = branchResult.remainingPath;
+            break;
+          }
+
+          case 'Leaf':
+            // A leaf has no child to continue into - it can only be terminal.
+            return { success: false, error: new InvalidWitness('Leaf before end of witness') };
+
+          default:
+            throw new InvalidWitness(`Unknown commitment type: ${commitment.type}`);
+        }
+      }
+
+      throw new InvalidWitness('Proof verification incomplete');
+
+    } catch (error) {
+      if (error instanceof MerklePatriciaVerificationError) {
+        return { success: false, error };
+      }
+      return { success: false, error: new InvalidWitness(`Verification failed: ${error.message}`) };
+    }
+  }
+
+  /**
+   * The absence terminal assertion: bind the terminal commitment to the digest
+   * the fold reached (same prefixed hashing as every other step), then require
+   * it to structurally refuse the next step of the remaining path.
+   */
+  verifyAbsenceTerminal(commitment, currentDigest, remainingPath) {
+    let commitmentJson;
+    let prefix;
+
+    switch (commitment.type) {
+      case 'Leaf':
+        commitmentJson = {
+          remaining: commitment.contents.remaining,
+          dataDigest: commitment.contents.dataDigest
+        };
+        prefix = NodePrefix.LEAF;
+        break;
+
+      case 'Branch':
+        commitmentJson = {
+          pathsDigest: commitment.contents.pathsDigest
+        };
+        prefix = NodePrefix.BRANCH;
+        break;
+
+      case 'Extension':
+        commitmentJson = {
+          shared: commitment.contents.shared,
+          childDigest: commitment.contents.childDigest
+        };
+        prefix = NodePrefix.EXTENSION;
+        break;
+
+      default:
+        return { success: false, error: new InvalidWitness(`Unknown commitment type: ${commitment.type}`) };
+    }
+
+    const computedDigest = JsonBinaryHasher.computeDigest(commitmentJson, prefix);
+    if (computedDigest !== currentDigest) {
+      return { success: false, error: new InvalidNodeCommitment('Invalid terminal commitment digest') };
+    }
+
+    let witnessesAbsence;
+    if (commitment.type === 'Branch') {
+      const pathsDigest = commitment.contents.pathsDigest || {};
+      witnessesAbsence = remainingPath.length === 0 || !pathsDigest[remainingPath[0].toString(16)];
+    } else if (commitment.type === 'Extension') {
+      const sharedNibbles = Nibble.fromHexString(commitment.contents.shared);
+      let sharedIsPrefix = sharedNibbles.length <= remainingPath.length;
+      for (let i = 0; sharedIsPrefix && i < sharedNibbles.length; i++) {
+        if (remainingPath[i] !== sharedNibbles[i]) sharedIsPrefix = false;
+      }
+      witnessesAbsence = !sharedIsPrefix;
+    } else {
+      const commitmentRemaining = Nibble.fromHexString(commitment.contents.remaining);
+      witnessesAbsence = !Nibble.sequenceEquals(remainingPath, commitmentRemaining);
+    }
+
+    if (!witnessesAbsence) {
+      return { success: false, error: new InvalidPath('Terminal commitment does not witness absence of the path') };
+    }
+
+    return { success: true };
   }
 
   verifyLeaf(nodeCommit, currentDigest, remainingPath, isFinal) {
