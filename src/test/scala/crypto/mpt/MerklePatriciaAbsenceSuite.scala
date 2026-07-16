@@ -4,12 +4,7 @@ import cats.effect.IO
 import cats.syntax.all._
 
 import io.constellationnetwork.metagraph_sdk.crypto.mpt._
-import io.constellationnetwork.metagraph_sdk.crypto.mpt.api.{
-  InvalidNodeType,
-  MerklePatriciaProver,
-  MerklePatriciaVerifier,
-  PathNotFound
-}
+import io.constellationnetwork.metagraph_sdk.crypto.mpt.api.{InvalidNodeType, MerklePatriciaProver, MerklePatriciaVerifier, PathNotFound}
 import io.constellationnetwork.metagraph_sdk.std.JsonBinaryHasher.HasherOps
 import io.constellationnetwork.security.hash.Hash
 import io.constellationnetwork.security.hex.Hex
@@ -158,7 +153,7 @@ object MerklePatriciaAbsenceSuite extends SimpleIOSuite with Checkers {
 
   test("absence proof with a tampered witness commitment is rejected") {
     for {
-      trie <- branchTrie
+      trie  <- branchTrie
       proof <- proveAbsent(trie, Hex("c3"))
       tampered = proof.copy(witness = proof.witness.map {
         case branch: MerklePatriciaCommitment.Branch =>
@@ -208,9 +203,9 @@ object MerklePatriciaAbsenceSuite extends SimpleIOSuite with Checkers {
 
   test("attestPath still errors on absent keys with the legacy error types") {
     for {
-      trie1 <- branchTrie
-      trie2 <- singleLeafTrie
-      trie3 <- extensionTrie
+      trie1        <- branchTrie
+      trie2        <- singleLeafTrie
+      trie3        <- extensionTrie
       missingChild <- prover(trie1).attestPath(Hex("c3"))
       otherLeaf    <- prover(trie2).attestPath(Hex("abce"))
       divergent    <- prover(trie3).attestPath(Hex("ab12"))
