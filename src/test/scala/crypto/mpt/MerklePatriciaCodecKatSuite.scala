@@ -69,6 +69,35 @@ object MerklePatriciaCodecKatSuite extends SimpleIOSuite {
       .and(expect(decode[MerklePatriciaInclusionProof](j.noSpaces) == Right(proof)))
   }
 
+  // --- MerklePatriciaProof (sealed inclusion-or-absence ADT; the light-client wire contract) ---
+
+  pureTest("MPT sealed proof wire = {type, path, witness}; both tags round-trip") {
+    val witness: List[MerklePatriciaCommitment] =
+      List(MerklePatriciaCommitment.Leaf(Seq(nA), h1), MerklePatriciaCommitment.Branch(Map(nA -> h1, nB -> h2)))
+    val cases: List[(MerklePatriciaProof, String)] = List(
+      MerklePatriciaProof.Inclusion(MerklePatriciaInclusionProof(Hex("abcd"), witness)) -> "Inclusion",
+      MerklePatriciaProof.Absence(Hex("abcd"), witness)                                 -> "Absence"
+    )
+    cases.foldLeft(success) {
+      case (acc, (p, tag)) =>
+        val j = p.asJson
+        acc
+          .and(expect(keys(j) == List("type", "path", "witness")))
+          .and(expect(at(j, "type") == Json.fromString(tag)))
+          .and(expect(decode[MerklePatriciaProof](j.noSpaces) == Right(p)))
+    }
+  }
+
+  pureTest("MPT sealed Inclusion encoding = legacy {path, witness} shape + type tag") {
+    val legacy = MerklePatriciaInclusionProof(
+      Hex("abcd"),
+      List(MerklePatriciaCommitment.Extension(Seq(n1), h2), MerklePatriciaCommitment.Leaf(Seq(nA), h1))
+    )
+    val tagged = (MerklePatriciaProof.Inclusion(legacy): MerklePatriciaProof).asJson
+    expect(at(tagged, "path") == at(legacy.asJson, "path"))
+      .and(expect(at(tagged, "witness") == at(legacy.asJson, "witness")))
+  }
+
   // --- MerklePatriciaNode + Trie (nodes built via the digest-computing smart apply) ---
 
   test("MPT node Leaf/Branch/Extension bare + ADT: key order + discriminator + round-trip") {
