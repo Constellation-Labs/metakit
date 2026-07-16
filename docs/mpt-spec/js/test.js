@@ -1,10 +1,13 @@
-const { 
-  MerklePatriciaVerifier, 
+const fs = require('fs');
+const path = require('path');
+
+const {
+  MerklePatriciaVerifier,
   JsonBinaryHasher,
   Nibble,
   InvalidWitness,
   InvalidPath,
-  InvalidNodeCommitment 
+  InvalidNodeCommitment
 } = require('./merkle-patricia-verifier');
 
 let testsPassed = 0;
@@ -210,6 +213,105 @@ testSection('Branch Verification');
   const verifier = new MerklePatriciaVerifier(correctedBranchDigest);
   const result = verifier.verify(proof);
   assert(result.success === true, 'Valid branch->leaf proof verifies successfully');
+}
+
+// Test sealed-proof dispatch and absence verification (synthetic)
+testSection('Absence Verification (sealed format)');
+{
+  // Branch terminal lacking the queried nibble: absent.
+  const branchCommitment = {
+    pathsDigest: {
+      "a": "86c503bdd9a920e37517bacb40901ae2f62c3f949d9fae6603a22a3e7a7d23f9",
+      "b": "9e972d00c5b409546e3ee011f0272259ff443efbb2902db7a7b8d02a2f4e814b"
+    }
+  };
+  const branchDigest = JsonBinaryHasher.computeDigest(branchCommitment, [1]);
+  const verifier = new MerklePatriciaVerifier(branchDigest);
+
+  const absent = {
+    type: "Absence",
+    path: "c3",
+    witness: [{ type: "Branch", contents: branchCommitment }]
+  };
+  assert(verifier.verify(absent).success === true, 'Branch missing-nibble absence proof verifies');
+
+  // The SAME witness cannot prove absence of a PRESENT nibble.
+  const present = { ...absent, path: "a1" };
+  const presentResult = verifier.verify(present);
+  assert(presentResult.success === false, 'Absence claim for a present nibble is rejected');
+  assert(presentResult.error instanceof InvalidPath, 'Rejection carries InvalidPath');
+
+  // Path exhausted at a branch: this MPT has no branch value slot, so absent.
+  const exhausted = { ...absent, path: "" };
+  assert(verifier.verify(exhausted).success === true, 'Path-exhausted-at-branch absence proof verifies');
+
+  // Tampered terminal: digest binding must fail.
+  const tampered = {
+    type: "Absence",
+    path: "c3",
+    witness: [{ type: "Branch", contents: { pathsDigest: { "f": branchCommitment.pathsDigest.a } } }]
+  };
+  const tamperedResult = verifier.verify(tampered);
+  assert(tamperedResult.success === false, 'Tampered absence terminal is rejected');
+  assert(tamperedResult.error instanceof InvalidNodeCommitment, 'Rejection carries InvalidNodeCommitment');
+
+  // Other-leaf terminal: a different key occupies the position.
+  const leafCommitment = { remaining: "abcd", dataDigest: "11".repeat(32) };
+  const leafDigest = JsonBinaryHasher.computeDigest(leafCommitment, [0]);
+  const leafVerifier = new MerklePatriciaVerifier(leafDigest);
+  const otherLeaf = { type: "Absence", path: "abce", witness: [{ type: "Leaf", contents: leafCommitment }] };
+  assert(leafVerifier.verify(otherLeaf).success === true, 'Other-leaf absence proof verifies');
+  const matchingLeaf = { ...otherLeaf, path: "abcd" };
+  assert(leafVerifier.verify(matchingLeaf).success === false, 'A MATCHING leaf proves nothing (rejected)');
+
+  // Extension terminal whose shared run diverges from the remaining path.
+  const extCommitment = { shared: "abc", childDigest: "22".repeat(32) };
+  const extDigest = JsonBinaryHasher.computeDigest(extCommitment, [2]);
+  const extVerifier = new MerklePatriciaVerifier(extDigest);
+  const diverged = { type: "Absence", path: "ab12", witness: [{ type: "Extension", contents: extCommitment }] };
+  assert(extVerifier.verify(diverged).success === true, 'Extension-divergence absence proof verifies');
+  const followable = { ...diverged, path: "abcd" };
+  assert(extVerifier.verify(followable).success === false, 'A followable extension proves nothing (rejected)');
+
+  // Unknown proof-level tag.
+  const unknownTag = verifier.verify({ type: "Nonsense", path: "c3", witness: absent.witness });
+  assert(unknownTag.success === false, 'Unknown proof type tag is rejected');
+}
+
+// Legacy fixture: un-tagged {path, witness} still verifies as inclusion
+testSection('Fixture: test-proof.json (legacy un-tagged inclusion)');
+{
+  const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'test-proof.json'), 'utf8'));
+  const verifier = new MerklePatriciaVerifier(fixture.rootHash);
+  assert(verifier.verify(fixture.proof).success === true, 'Legacy un-tagged inclusion fixture verifies');
+  const tagged = { type: "Inclusion", ...fixture.proof };
+  assert(verifier.verify(tagged).success === true, 'Same fixture with the Inclusion tag verifies');
+}
+
+// Sealed fixtures: chain-derived, byte-pinned by the Scala MptSpecFixtureSuite
+testSection('Fixture: test-sealed-proofs.json (sealed Inclusion/Absence)');
+{
+  const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'test-sealed-proofs.json'), 'utf8'));
+  for (const testCase of fixture.cases) {
+    const verifier = new MerklePatriciaVerifier(testCase.rootHash);
+    const result = verifier.verify(testCase.proof);
+    assert(result.success === true,
+      `${testCase.name} verifies${result.success ? '' : ` (${result.error.message})`}`);
+  }
+
+  // Record binding: the Inclusion leaf's dataDigest is sha256(JCS(record)).
+  const inclusion = fixture.cases.find(c => c.proof.type === 'Inclusion');
+  const leafContents = inclusion.proof.witness[0].contents;
+  assert(JsonBinaryHasher.computeDigest(inclusion.record) === leafContents.dataDigest,
+    'Inclusion leaf dataDigest equals sha256(JCS(record))');
+
+  // Cross-checks: sealed proofs must not verify against the wrong root or arm.
+  const absence = fixture.cases.find(c => c.name === 'absence-branch-missing-nibble');
+  const wrongRoot = new MerklePatriciaVerifier('ff'.repeat(32));
+  assert(wrongRoot.verify(absence.proof).success === false, 'Absence proof is rejected against a tampered root');
+  const relabeled = { ...inclusion.proof, type: "Absence" };
+  const relabeledResult = new MerklePatriciaVerifier(inclusion.rootHash).verify(relabeled);
+  assert(relabeledResult.success === false, 'Inclusion witness relabeled as Absence is rejected');
 }
 
 // Summary
