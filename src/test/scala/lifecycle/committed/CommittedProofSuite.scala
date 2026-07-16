@@ -2,7 +2,8 @@ package io.constellationnetwork.metagraph_sdk.lifecycle.committed
 
 import cats.effect.IO
 
-import io.constellationnetwork.metagraph_sdk.crypto.mpt.api.{MerklePatriciaBatchInclusionVerifier, MerklePatriciaVerifier, PathNotFound}
+import io.constellationnetwork.metagraph_sdk.crypto.mpt.MerklePatriciaProof
+import io.constellationnetwork.metagraph_sdk.crypto.mpt.api.{MerklePatriciaBatchInclusionVerifier, MerklePatriciaVerifier}
 import io.constellationnetwork.metagraph_sdk.crypto.smt.api.SparseMerkleVerifier
 import io.constellationnetwork.metagraph_sdk.crypto.smt.{SparseMerkleEntry, SparseMerkleProof}
 import io.constellationnetwork.metagraph_sdk.json_logic.core.{BoolValue, JsonLogicValue, MapValue, StrValue}
@@ -27,13 +28,31 @@ object CommittedProofSuite extends SimpleIOSuite {
   private val s1 = ToyState(Map("aaa" -> 5, "bbb" -> 2), Map("alpha" -> "x"))
   private val s2 = ToyState(Map("aaa" -> 5, "bbb" -> 9), Map("alpha" -> "x", "beta" -> "y"))
 
-  test("single-key proof verifies against the committed mptRoot; absent key is PathNotFound") {
+  test("single-key proof verifies against the committed mptRoot; absent key yields a verifiable Absence") {
     for {
-      c       <- mkCommitted(s0).flatMap(_.committed)
-      proof   <- c.proveKey(CommitKey.unsafe("fiber/aaa")).flatMap(IO.fromEither(_))
-      ok      <- MerklePatriciaVerifier.make[IO](c.roots.mptRoot).confirm(proof)
-      missing <- c.proveKey(CommitKey.unsafe("fiber/zzz"))
-    } yield expect.all(ok.isRight, missing.left.exists(_.isInstanceOf[PathNotFound]))
+      c <- mkCommitted(s0).flatMap(_.committed)
+      verifier = MerklePatriciaVerifier.make[IO](c.roots.mptRoot)
+      proof    <- c.proveKey(CommitKey.unsafe("fiber/aaa")).flatMap(IO.fromEither(_))
+      ok       <- verifier.confirm(proof)
+      missing  <- c.proveKey(CommitKey.unsafe("fiber/zzz")).flatMap(IO.fromEither(_))
+      absentOk <- verifier.confirm(missing)
+    } yield
+      expect.all(
+        proof.isInstanceOf[MerklePatriciaProof.Inclusion],
+        ok.isRight,
+        missing.isInstanceOf[MerklePatriciaProof.Absence],
+        absentOk.isRight
+      )
+  }
+
+  test("empty committed state: any key is provably ABSENT against the empty-trie mptRoot") {
+    // The nullifier-set shape: a namespace with no entries yet. `mpt_prefix_verify` cannot
+    // express this; the single-key absence proof can.
+    for {
+      c     <- mkCommitted(ToyState.empty).flatMap(_.committed)
+      proof <- c.proveKey(CommitKey.unsafe("nullifier/transfer/deadbeef")).flatMap(IO.fromEither(_))
+      ok    <- MerklePatriciaVerifier.make[IO](c.roots.mptRoot).confirm(proof)
+    } yield expect.all(proof.isInstanceOf[MerklePatriciaProof.Absence], ok.isRight)
   }
 
   test("batch proof covers all requested keys and verifies") {
