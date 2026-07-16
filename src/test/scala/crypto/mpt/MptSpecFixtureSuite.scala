@@ -54,8 +54,8 @@ object MptSpecFixtures {
           "trie"     -> Json.obj(entries.map { case (k, v) => k -> Json.fromString(v) }: _*),
           "rootHash" -> trie.rootNode.digest.asJson
         ) ++
-          record.map(r => "record" -> Json.fromString(r)).toList :+
-          ("proof" -> proof.asJson)
+        record.map(r => "record" -> Json.fromString(r)).toList :+
+        ("proof" -> proof.asJson)
       BuiltCase(name, trie.rootNode.digest, proof, Json.obj(fields: _*))
     }
 
@@ -72,10 +72,10 @@ object MptSpecFixtures {
     val doc = Json.obj(
       "description" -> Json.fromString(
         "KAT fixtures for the sealed MerklePatriciaProof wire format {type, path, witness}: every proof is " +
-          "produced by the real Scala prover (MerklePatriciaProver.provePath) over the listed trie entries " +
-          "(key hex -> string value) and byte-pinned by MptSpecFixtureSuite. An Inclusion leaf's dataDigest " +
-          "equals sha256(JCS(record)). Regenerate with `sbt \"Test/runMain crypto.mpt.MptSpecFixtureGenerator\"`; " +
-          "never edit by hand. Legacy inclusion-only consumers keep test-proof.json."
+        "produced by the real Scala prover (MerklePatriciaProver.provePath) over the listed trie entries " +
+        "(key hex -> string value) and byte-pinned by MptSpecFixtureSuite. An Inclusion leaf's dataDigest " +
+        "equals sha256(JCS(record)). Regenerate with `sbt \"Test/runMain crypto.mpt.MptSpecFixtureGenerator\"`; " +
+        "never edit by hand. Legacy inclusion-only consumers keep test-proof.json."
       ),
       "cases" -> Json.arr(built.map(_.json): _*)
     )
@@ -109,7 +109,7 @@ object MptSpecFixtureSuite extends SimpleIOSuite {
 
   test("the committed fixture proofs decode to exactly what the prover emits") {
     for {
-      built <- MptSpecFixtures.cases
+      built     <- MptSpecFixtures.cases
       committed <- IO(new String(Files.readAllBytes(Paths.get(MptSpecFixtures.FixturePath)), StandardCharsets.UTF_8))
       decoded <- IO.fromEither(
         parser
