@@ -61,7 +61,9 @@ final case class Committed[F[_], S] private[committed] (
   /**
    * Proof of one key's STATUS against [[CommittedRoots.mptRoot]]: inclusion when present, a
    * first-class [[MerklePatriciaProof.Absence]] when not (nullifier-style non-membership,
-   * verifiable by light clients against the consensus-signed committed root). On this trie
+   * verifiable against the consensus-signed committed root -- by [[crypto.mpt.api.MerklePatriciaVerifier]]
+   * or the `docs/mpt-spec/js` reference; the other bundled references are inclusion-only pending
+   * ports, see `docs/mpt-spec/README.md`). On this trie
    * (built and asserted by the committed layer itself) every divergence IS a genuinely-missing
    * key, so nothing is left to report as `PathNotFound`; the error channel only carries
    * `ProofGenerationError` (hashing failure).

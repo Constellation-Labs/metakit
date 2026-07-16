@@ -9,8 +9,11 @@ import io.circe.{Decoder, DecodingFailure, Encoder, Json}
  * A Merkle Patricia proof against a trusted root digest. Sealed: a proof is EITHER inclusion OR
  * absence -- absence (non-inclusion) is first-class, mirroring [[crypto.smt.SparseMerkleProof]].
  *
- * WIRE FORMAT (a frozen contract for external light-client verifiers, KAT-pinned in
- * MerklePatriciaCodecKatSuite):
+ * WIRE FORMAT (KAT-pinned in MerklePatriciaCodecKatSuite and byte-pinned as chain-derived
+ * fixtures in `docs/mpt-spec/test-sealed-proofs.json` via MptSpecFixtureSuite). The reference
+ * implementation for external light-client verifiers is `docs/mpt-spec/js` (inclusion AND
+ * absence, exercised against the fixtures); the other bundled references (go/python/rust/
+ * solidity) are inclusion-only pending ports -- they report a valid `Absence` proof as invalid:
  *
  * {{{
  *   { "type": "Inclusion", "path": "<nibble hex>", "witness": [ <commitment>* ] }
