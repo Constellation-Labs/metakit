@@ -28,6 +28,10 @@ ThisBuild / evictionErrorLevel := Level.Warn
 lazy val commonSettings = Seq(
   scalacOptions ++= List("-Ymacro-annotations", "-Yrangepos", "-Wconf:cat=unused:info", "-language:reflectiveCalls"),
   resolvers += Resolver.mavenLocal,
+  // refined validates literals through a reflection ToolBox, and Scala 2 runtime
+  // reflection is not thread-safe: scaladoc running concurrently with compile can
+  // crash macro expansion ("assertion failed: List(package shapeless, ...)").
+  Compile / doc := (Compile / doc).dependsOn(Compile / compile).value,
   libraryDependencies ++= Seq(
     CompilerPlugin.kindProjector,
     CompilerPlugin.betterMonadicFor,
