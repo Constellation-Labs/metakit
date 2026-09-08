@@ -1,0 +1,14 @@
+[
+  {"name":"keys-reverse-insertion","op":"keys","input":{"z":1,"a":3,"m":2},"expected":["a","m","z"]},
+  {"name":"values-follow-keys-not-values","op":"values","input":{"z":1,"a":3,"m":2},"expected":[3,2,1]},
+  {"name":"entries-follow-keys","op":"entries","input":{"z":1,"a":3,"m":2},"expected":[["a",3],["m",2],["z",1]]},
+  {"name":"keys-utf16-not-utf8-or-js-enumeration","op":"keys","input":{"\ue000":4,"\ud83d\ude00":3,"2":2,"10":1},"expected":["10","2","\ud83d\ude00","\ue000"]},
+  {"name":"values-utf16-order","op":"values","input":{"\ue000":4,"\ud83d\ude00":3,"2":2,"10":1},"expected":[1,2,3,4]},
+  {"name":"entries-utf16-order","op":"entries","input":{"\ue000":4,"\ud83d\ude00":3,"2":2,"10":1},"expected":[["10",1],["2",2],["\ud83d\ude00",3],["\ue000",4]]},
+  {"name":"keys-no-unicode-normalization","op":"keys","input":{"\u00e9":1,"e\u0301":2,"e":3,"":4},"expected":["","e","e\u0301","\u00e9"]},
+  {"name":"lower-root-not-turkish","op":"lower","input":"I \u0130 \u0131 i","expected":"i i\u0307 \u0131 i"},
+  {"name":"upper-root-not-turkish","op":"upper","input":"I \u0130 \u0131 i","expected":"I \u0130 I I"},
+  {"name":"lower-root-not-lithuanian","op":"lower","input":"I\u0301 J\u0300","expected":"i\u0301 j\u0300"},
+  {"name":"upper-expansion","op":"upper","input":"stra\u00dfe","expected":"STRASSE"},
+  {"name":"lower-contextual-sigma","op":"lower","input":"\u039f\u03a3 \u03a3\u039f","expected":"\u03bf\u03c2 \u03c3\u03bf"}
+]

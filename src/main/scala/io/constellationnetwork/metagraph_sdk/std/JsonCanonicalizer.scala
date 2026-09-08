@@ -44,24 +44,16 @@ object JsonCanonicalizer {
 
   /**
    * RFC 8785 object-key ordering: lexicographic comparison of the keys' UTF-16
-   * code units (compared as UTF-16BE bytes). This is the SINGLE source of truth
+   * code units (without charset encoding or replacement). This is the SINGLE source of truth
    * for canonical key ordering; the canonicalizer ([[TreeOrderedMap]]) sorts object
    * keys with it, and the JSON Logic runtime reuses it to evaluate object-form
    * `let` bindings in the same order (crypto-determinism: byte-identical with the
    * Rust `canonical::utf16_cmp` and the TS canonicalizer's default key sort).
    */
   val keyOrdering: Ordering[String] = new Ordering[String] {
-    def compare(a: String, b: String): Int = {
-      val aBytes = a.getBytes("UTF-16BE")
-      val bBytes = b.getBytes("UTF-16BE")
-      val minLength = aBytes.length.min(bBytes.length)
-
-      LazyList
-        .range(0, minLength)
-        .map(i => (aBytes(i) & 0xff) - (bBytes(i) & 0xff))
-        .find(_ != 0)
-        .getOrElse(aBytes.length - bBytes.length)
-    }
+    // Encoding replaces lone surrogates, making distinct JVM strings compare equal.
+    // Keep a total raw-code-unit order; JCS serialization rejects malformed Unicode.
+    def compare(a: String, b: String): Int = a.compareTo(b)
   }
 
   /**
@@ -82,12 +74,28 @@ object JsonCanonicalizer {
       case c             => c.toString
     }
 
-    private def serializeString(value: String): String = {
-      val escaped = value.foldLeft("") { (acc, c) =>
-        acc + escapeChar(c)
-      }
-      s"\"$escaped\""
+    private def isWellFormed(value: String): Boolean = {
+      @tailrec
+      def loop(i: Int): Boolean =
+        if (i >= value.length) true
+        else if (Character.isHighSurrogate(value.charAt(i))) {
+          if (i + 1 < value.length && Character.isLowSurrogate(value.charAt(i + 1))) loop(i + 2)
+          else false
+        } else if (Character.isLowSurrogate(value.charAt(i))) false
+        else loop(i + 1)
+
+      loop(0)
     }
+
+    private def serializeString(value: String): F[String] =
+      // RFC 8785 section 3.2.2.2 requires errors, not replacement or escaped lone surrogates.
+      if (!isWellFormed(value)) new IOException("Invalid Unicode: unpaired UTF-16 surrogate").raiseError[F, String]
+      else {
+        val escaped = value.foldLeft("") { (acc, c) =>
+          acc + escapeChar(c)
+        }
+        s"\"$escaped\"".pure[F]
+      }
 
     private def encode(json: Json): F[String] = {
       sealed trait EncodeState
@@ -106,7 +114,10 @@ object JsonCanonicalizer {
           s"{${acc.reverse.mkString(",")}}".asRight[EncodeState].pure[F]
 
         case ObjectState((key, value) :: t, acc) =>
-          loop(value).map(v => Left(ObjectState(t, s"${serializeString(key)}:$v" :: acc)))
+          for {
+            k <- serializeString(key)
+            v <- loop(value)
+          } yield Left(ObjectState(t, s"$k:$v" :: acc))
 
         case Done(result) =>
           result.asRight[EncodeState].pure[F]
@@ -116,7 +127,7 @@ object JsonCanonicalizer {
         "null".pure[F],
         b => b.toString.pure[F],
         num => NumberToJson.serializeNumber(num.toDouble),
-        str => serializeString(str).pure[F],
+        str => serializeString(str),
         arr => MonadThrow[F].tailRecM(ArrayState(arr.toList, Nil): EncodeState)(step),
         obj => MonadThrow[F].tailRecM(ObjectState(TreeOrderedMap.from(obj.toMap).toList, Nil): EncodeState)(step)
       )
