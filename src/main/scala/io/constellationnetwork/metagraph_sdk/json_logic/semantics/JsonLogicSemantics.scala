@@ -1,5 +1,7 @@
 package io.constellationnetwork.metagraph_sdk.json_logic.semantics
 
+import java.util.Locale
+
 import cats.syntax.all._
 import cats.{Monad, MonadThrow}
 
@@ -12,6 +14,7 @@ import io.constellationnetwork.metagraph_sdk.json_logic.runtime.ResultContext._
 import io.constellationnetwork.metagraph_sdk.json_logic.runtime.{JsonLogicRuntime, ResultContext}
 import io.constellationnetwork.metagraph_sdk.numerics.Ratio
 import io.constellationnetwork.metagraph_sdk.numerics.RatioOps.implicits._
+import io.constellationnetwork.metagraph_sdk.std.JsonCanonicalizer
 
 trait JsonLogicSemantics[F[_], Result[_]] {
   def getVar(key: String, ctx: Option[JsonLogicValue] = None): F[Either[JsonLogicException, Result[JsonLogicValue]]]
@@ -878,9 +881,12 @@ object JsonLogicSemantics {
       private def handleMapValuesOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>
           values match {
-            case Nil                => (NullValue: JsonLogicValue).pure[Result].asRight[JsonLogicException]
-            case NullValue :: Nil   => (NullValue: JsonLogicValue).pure[Result].asRight[JsonLogicException]
-            case MapValue(v) :: Nil => (ArrayValue(v.values.toList): JsonLogicValue).pure[Result].asRight[JsonLogicException]
+            case Nil              => (NullValue: JsonLogicValue).pure[Result].asRight[JsonLogicException]
+            case NullValue :: Nil => (NullValue: JsonLogicValue).pure[Result].asRight[JsonLogicException]
+            case MapValue(v) :: Nil =>
+              (ArrayValue(v.toList.sortBy(_._1)(JsonCanonicalizer.keyOrdering).map(_._2)): JsonLogicValue)
+                .pure[Result]
+                .asRight[JsonLogicException]
             case _ => JsonLogicException(s"Unexpected input for `${MapValuesOp.tag}' got $values").asLeft[Result[JsonLogicValue]]
           }
         }
@@ -888,9 +894,12 @@ object JsonLogicSemantics {
       private def handleMapKeysOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>
           values match {
-            case Nil                => (NullValue: JsonLogicValue).pure[Result].asRight[JsonLogicException]
-            case NullValue :: Nil   => (NullValue: JsonLogicValue).pure[Result].asRight[JsonLogicException]
-            case MapValue(v) :: Nil => (ArrayValue(v.keys.map(StrValue(_)).toList): JsonLogicValue).pure[Result].asRight[JsonLogicException]
+            case Nil              => (NullValue: JsonLogicValue).pure[Result].asRight[JsonLogicException]
+            case NullValue :: Nil => (NullValue: JsonLogicValue).pure[Result].asRight[JsonLogicException]
+            case MapValue(v) :: Nil =>
+              (ArrayValue(v.keys.toList.sorted(JsonCanonicalizer.keyOrdering).map(StrValue(_))): JsonLogicValue)
+                .pure[Result]
+                .asRight[JsonLogicException]
             case _ => JsonLogicException(s"Unexpected input for `${MapKeysOp.tag}' got $values").asLeft[Result[JsonLogicValue]]
           }
         }
@@ -988,7 +997,7 @@ object JsonLogicSemantics {
       private def handleLowerOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>
           values match {
-            case StrValue(str) :: Nil => (StrValue(str.toLowerCase): JsonLogicValue).pure[Result].asRight[JsonLogicException]
+            case StrValue(str) :: Nil => (StrValue(str.toLowerCase(Locale.ROOT)): JsonLogicValue).pure[Result].asRight[JsonLogicException]
             case _ => JsonLogicException(s"Unexpected input to ${LowerOp.tag}, got $values").asLeft[Result[JsonLogicValue]]
           }
         }
@@ -996,7 +1005,7 @@ object JsonLogicSemantics {
       private def handleUpperOp(args: List[Result[JsonLogicValue]]): F[Either[JsonLogicException, Result[JsonLogicValue]]] =
         args.withMetrics { values =>
           values match {
-            case StrValue(str) :: Nil => (StrValue(str.toUpperCase): JsonLogicValue).pure[Result].asRight[JsonLogicException]
+            case StrValue(str) :: Nil => (StrValue(str.toUpperCase(Locale.ROOT)): JsonLogicValue).pure[Result].asRight[JsonLogicException]
             case _ => JsonLogicException(s"Unexpected input to ${UpperOp.tag}, got $values").asLeft[Result[JsonLogicValue]]
           }
         }
@@ -1301,7 +1310,7 @@ object JsonLogicSemantics {
           values match {
             case Nil => (NullValue: JsonLogicValue).pure[Result].asRight[JsonLogicException]
             case MapValue(m) :: Nil =>
-              val entries = m.toList.map { case (k, v) => ArrayValue(List(StrValue(k), v)) }
+              val entries = m.toList.sortBy(_._1)(JsonCanonicalizer.keyOrdering).map { case (k, v) => ArrayValue(List(StrValue(k), v)) }
               ((ArrayValue(entries): JsonLogicValue).pure[Result]: Result[JsonLogicValue]).asRight[JsonLogicException]
             case _ => JsonLogicException(s"Unexpected input to ${EntriesOp.tag}, got $values").asLeft[Result[JsonLogicValue]]
           }
